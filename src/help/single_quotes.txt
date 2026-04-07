@@ -1,0 +1,3 @@
+The quote character to use when parsing CSV.
+Toggle this option uses the single quote b'\''.
+ [default b'"']

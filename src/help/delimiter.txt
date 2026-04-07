@@ -1,0 +1,2 @@
+The field delimiter to use when writing CSV. 
+ [default: b',']

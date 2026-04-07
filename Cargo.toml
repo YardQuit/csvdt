@@ -1,0 +1,10 @@
+[package]
+name = "csvdt"
+version = "0.1.7"
+edition = "2024"
+authors = ["Michael A Jones <YardQuit@pm.me"]
+
+[dependencies]
+chrono = "0.4.41"
+clap = { version = "4.5.39", features= ["cargo"] }
+csv = "1.3.1"

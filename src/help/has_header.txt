@@ -1,0 +1,1 @@
+Whether to treat the first row as a special header row.

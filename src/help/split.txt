@@ -1,0 +1,1 @@
+Splits a single rfc3339 timestamp into two separate columns: date and time.

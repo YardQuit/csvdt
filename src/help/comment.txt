@@ -1,0 +1,2 @@
+The comment character to use when parsing CSV.
+ [default b'#']

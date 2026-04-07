@@ -1,0 +1,5 @@
+The behavior of handling whitespace characters during CSV parsing.
+none    Preserves fields and headers.
+fields  Trim whitespace from fields, but not headers.
+headers Trim whitespace from headers, but not fields.
+all     Trim whitespace from both headers and fields.

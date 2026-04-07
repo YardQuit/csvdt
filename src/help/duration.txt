@@ -1,0 +1,5 @@
+Calculates the time duration between the current row's rfc3339
+timestamp and the previous row's timestamp (later date, subtracts
+the earlier date).
+Timestamps should be sorted in ascending or descending order first,
+or expect strange results.
