@@ -1,0 +1,2 @@
+# csvdt
+A command-line tool for parsing and working with CSV files. It provides flexible options for handling e.g. whitespace, quote styles, and is mainly focusing on handling timestamps making data analysis easier and more efficient.
