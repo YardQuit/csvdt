@@ -156,7 +156,23 @@ jobs:
             # Highest version, not most recently created: a patch to an
             # older series cut after a newer one shipped is a real tag and
             # is not the newest release.
-            ref=$(git tag -l '[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)
+            #
+            # Anchored, because a glob cannot say "and nothing after
+            # this". The monthly build's archive entries are named
+            # <version>-<month>.<commit>-tzdata<release>, and
+            # `[0-9]*.[0-9]*.[0-9]*` matches one of those as readily as a
+            # version -- the three [0-9] positions land on the version's
+            # own digits and the final * swallows the rest -- and sorts it
+            # above the version it belongs to. The trigger filter at the
+            # top of this file is not affected: GitHub matches a whole ref
+            # name, so its `[0-9]+.[0-9]+.[0-9]+` genuinely does exclude
+            # them, which is why an archive entry never starts a run.
+            #
+            # A non-matching grep leaves ref empty rather than killing the
+            # step: this runs under `bash -e` with no pipefail, so only
+            # tail's status counts. The check below reports the emptiness.
+            ref=$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+                    | sort -V | tail -n1)
             if [ -z "$ref" ]; then
               echo "::error::No version tag exists, so there is no released version to package."
               exit 1

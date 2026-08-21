@@ -92,9 +92,30 @@ jobs:
       # Highest version, not most recently created: a patch to an older
       # series cut after a newer one shipped is a real tag and is not the
       # newest release.
+      #
+      # Matched with an anchored regular expression rather than a glob,
+      # because a glob cannot say "and nothing after this". The archive
+      # entries this workflow creates are named <version>-<month>.<commit>
+      # -tzdata<release>, and `[0-9]*.[0-9]*.[0-9]*` matches one of those
+      # as readily as it matches a version: the three [0-9] positions land
+      # on the version's own digits and the final * swallows the rest. Worse
+      # than merely matching, it sorts above the version it belongs to, so
+      # the newest "version tag" became the archive entry for the newest
+      # version. Pushing 1.0.0 a second time stopped with "1.0.0 was pushed,
+      # but 1.0.0-2026.08.453ba8e-tzdata2025b is the newest version tag" --
+      # an archive entry from the previous attempt, refusing the release it
+      # was made from. Every release would meet this from its second build
+      # onward.
+      #
+      # A non-matching grep leaves ref empty here rather than killing the
+      # step: these steps run under `bash -e` with no pipefail, so only the
+      # exit status of the last command in the pipeline counts, and tail
+      # succeeds over nothing. Measured, not assumed. The emptiness is what
+      # the check below reports.
       - id: id
         run: |
-          ref=$(git tag -l '[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)
+          ref=$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+                  | sort -V | tail -n1)
           if [ -z "$ref" ]; then
             echo "::error::No version tag exists, so there is no released version to build."
             exit 1
