@@ -573,17 +573,29 @@ jobs:
           #    that produces the same build finishes the job it was rerun
           #    for; one that produces a different build is refused, since
           #    only a human can say which of the two should keep the name.
+          #    An entry that exists without a BUILD-INFO on it used to be
+          #    read as a run that died partway, and refused. That inference
+          #    no longer holds: the packaging workflow writes this same
+          #    entry for the RPMs, and on a tag push the two run
+          #    independently rather than in sequence -- rpmbuild in one
+          #    container finishes well before four platforms and the
+          #    differential checks, so the ordinary case is arriving second
+          #    at an entry holding packages and no BUILD-INFO at all.
+          #    Refusing there failed the tag push outright, taking the
+          #    version's own binaries and the rolling release down with it.
+          #
+          #    So absence proves nothing now and the binaries are simply
+          #    added. What still protects a tag somebody has cited is the
+          #    comparison below, which needs a BUILD-INFO to be there to
+          #    disagree with.
           if gh release view "$archive_tag" >/dev/null 2>&1; then
             published_fp=""
             if gh release download "$archive_tag" -p BUILD-INFO -D archived 2>/dev/null; then
               published_fp=$(sha256sum archived/BUILD-INFO | cut -d' ' -f1)
               rm -rf archived
             fi
-            if [ -z "$published_fp" ]; then
-              echo "::error::${archive_tag} exists but carries no BUILD-INFO, so what it holds cannot be established -- an earlier run died partway. Inspect it and delete the tag before rebuilding."
-              exit 1
-            fi
-            if [ "$published_fp" != "${{ steps.fingerprint.outputs.fp }}" ]; then
+            if [ -n "$published_fp" ] \
+               && [ "$published_fp" != "${{ steps.fingerprint.outputs.fp }}" ]; then
               echo "::error::${archive_tag} already exists and describes a different build: same commit and same tzdata, different compiler. Its binaries are what someone citing that tag expects, so they are left untouched. Delete the tag deliberately if it must be replaced."
               exit 1
             fi
