@@ -738,6 +738,23 @@ jobs:
           fi
           (cd archive && ls) | sed 's/^/  ok /'
 
+          # Published, because it may not be. Deleting a tag turns its
+          # release into a draft and re-pushing the tag does not turn it
+          # back -- and a draft is invisible on the releases page, cannot
+          # hold the Latest designation, and is not what
+          # releases/latest/download resolves to. What it can still do is
+          # accept uploads: `gh release view` finds it, every upload above
+          # succeeds, and the verification passes, so the run reports a
+          # published version release where there is none. That happened on
+          # the first release, and both workflows called it a success.
+          #
+          # Last, after the uploads and the check: publishing first would
+          # make the release visible while it was still short of assets.
+          if [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true ]; then
+            gh release edit "$tag" --draft=false >/dev/null
+            echo "  published $tag, which was a draft"
+          fi
+
       # Every build kept, not only the rolling copy and the release-day one.
       # rpm-release is replaced each month and the version's own release is
       # written once at tag time, so between them they answer "what is

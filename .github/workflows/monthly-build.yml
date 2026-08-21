@@ -798,6 +798,23 @@ jobs:
           fi
           (cd archive && ls) | sed 's/^/  ok /'
 
+          # Published, because it may not be. Deleting a tag turns its
+          # release into a draft and re-pushing the tag does not turn it
+          # back -- and a draft is invisible on the releases page, cannot
+          # hold the Latest designation, and is not what
+          # releases/latest/download resolves to. What it can still do is
+          # accept uploads: `gh release view` finds it, every upload above
+          # succeeds, and the verification passes, so the run reports a
+          # published version release where there is none. That happened on
+          # the first release, and both workflows called it a success.
+          #
+          # Last, after the uploads and the check: publishing first would
+          # make the release visible while it was still short of assets.
+          if [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true ]; then
+            gh release edit "$tag" --draft=false >/dev/null
+            echo "  published $tag, which was a draft"
+          fi
+
       # The publish above is several calls, and a partial one is exactly the
       # state nobody would notice: the release is there, so nothing looks
       # broken, but a platform's binary or a checksum file is missing and only
@@ -865,6 +882,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           repo='${{ github.repository }}'
+          # Named for the message below, which is about a specific version.
+          ref='${{ needs.meta.outputs.ref }}'
 
           # Asked of GitHub rather than of git: this job checks out shallow
           # and has no tags to sort. Draft and prerelease entries cannot hold
@@ -874,9 +893,17 @@ jobs:
           newest=$(gh api "repos/$repo/releases" --paginate \
                      --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
                    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          # An error rather than a note. This used to allow for there being
+          # no version yet, which cannot happen any more: the meta job
+          # refuses to run without a version tag, so by the time anything
+          # reaches here one exists and its release should exist with it.
+          # Finding none means the step above did not leave a published
+          # release behind -- which is exactly what a drafted one looks
+          # like from here, and exactly what went unnoticed on the first
+          # release, because this said "that is right" about it.
           if [ -z "$newest" ]; then
-            echo "::warning::No version release exists to carry the Latest designation. That is right only before the first version is tagged."
-            exit 0
+            echo "::error::No published release exists for ${ref}, though the tag does. A release whose tag was deleted and re-pushed comes back as a draft, which accepts uploads and holds no designation; check the releases page for a draft and publish it."
+            exit 1
           fi
 
           gh release edit "$newest" --latest >/dev/null
