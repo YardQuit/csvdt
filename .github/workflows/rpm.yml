@@ -434,16 +434,27 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
-    # This job takes the packages from an artifact and never checks the
-    # repository out, so there is no git remote for gh to resolve the
-    # repository from -- and every `gh release` call died with "fatal: not a
-    # git repository" the first time it ran. Naming it here is what the job
-    # actually needs; a checkout would be a clone to get one line of config.
+    # GH_REPO because this job's packages come from an artifact rather than
+    # from the tree, so gh has no remote to infer the repository from and
+    # every `gh release` call died with "fatal: not a git repository" the
+    # first time it ran. It is still named here rather than left to the
+    # checkout below, which exists for a different reason and should be
+    # removable without taking the release calls down with it.
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
 
     steps:
+      # For one thing only: a remote that can be pushed to. The rolling tag
+      # is written with git because the ref API refuses to write it, and git
+      # needs somewhere to push from. Shallow and at the built commit, since
+      # nothing here reads history -- the packages come from the artifact
+      # below, as they always did.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.build.outputs.source_sha }}
+          fetch-depth: 1
+
       - uses: actions/download-artifact@v7
         with:
           name: rpms
@@ -488,28 +499,33 @@ jobs:
           # The tag follows the commit that was built, so the release points
           # at the source of what it serves.
           #
-          # Read before written, and written only when it has to move. This
-          # packages the same version tag every month, so from the second
-          # rebuild of a release onward the update asks for the sha the ref
-          # already holds -- and GitHub refuses that with "Resource not
-          # accessible by integration (HTTP 403)", a message about
-          # permissions that is nothing of the kind: the same token, in the
-          # same run, moved another tag to a different commit without
-          # complaint. The first monthly rebuild of a release failed on it.
-          # Skipping the write is right on its own terms anyway, since there
-          # is nothing to write.
-          current=$(gh api "repos/$repo/git/refs/tags/$tag" --jq .object.sha 2>/dev/null || true)
-          if [ -z "$current" ]; then
-            gh api -X POST "repos/$repo/git/refs" \
-              -f ref="refs/tags/$tag" -f sha="$sha" >/dev/null
-            echo "  created refs/tags/$tag at $sha"
-          elif [ "$current" != "$sha" ]; then
-            gh api -X PATCH "repos/$repo/git/refs/tags/$tag" \
-              -f sha="$sha" -F force=true >/dev/null
-            echo "  moved refs/tags/$tag from $current to $sha"
-          else
-            echo "  refs/tags/$tag already at $sha"
-          fi
+          # Written with git rather than through the ref API, which does not
+          # work here. Creating refs/tags/rpm-release through
+          # `POST /repos/OWNER/REPO/git/refs` is refused with "Reference does
+          # not exist (HTTP 422)" -- on a create, for a name that collides
+          # with nothing, naming a commit the API itself will return, in a
+          # repository with no rulesets and no tag protection, from a token
+          # holding contents: write. Every input is valid and the permission
+          # is demonstrably there, and no reason for the refusal was ever
+          # established. The first tag push of 1.0.0 failed on it, here and
+          # in the monthly build alike, at the same call.
+          #
+          # One command covers both creating the tag and moving it, which
+          # also retires the read-before-write this used to need: that
+          # existed because PATCHing a ref to the sha it already held was
+          # refused with "Resource not accessible by integration (HTTP 403)",
+          # a message about permissions that was nothing of the kind. This
+          # packages the same version tag every month, so asking for a sha
+          # the ref already holds is the ordinary case from the second
+          # rebuild onward -- and pushing a tag onto the commit it already
+          # names is a no-op git performs in silence.
+          #
+          # --force because this ref is a pointer and moving it is the whole
+          # point. It is never a version tag: those are pushed by hand, and
+          # the name written here is fixed above rather than taken from the
+          # ref that triggered the run.
+          git push origin --force "$sha:refs/tags/$tag"
+          echo "  refs/tags/$tag now at $sha"
 
           produced=$(cd rpms && ls)
 

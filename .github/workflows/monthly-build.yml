@@ -630,31 +630,38 @@ jobs:
           #    with no release.
           #
           #    Both things it bought are kept below, without ever removing the
-          #    release: the tag is moved through the ref API, and assets this
+          #    release: the tag is moved rather than deleted, and assets this
           #    build did not produce are deleted after the new ones are in
           #    place. What remains is one asset at a time being briefly
           #    replaced, rather than the whole release being briefly absent.
           #
-          #    Read before written, and written only when it has to move. What
-          #    this workflow builds is a tag, and a tag does not move between
-          #    monthly runs -- so from the second rebuild of a release onward
-          #    the update asks for the sha the ref already holds, and GitHub
-          #    refuses that with "Resource not accessible by integration (HTTP
-          #    403)", a message about permissions that is nothing of the kind.
-          #    The RPM workflow hit exactly this on the first monthly rebuild
-          #    of a release and says so in its own comments.
-          current=$(gh api "repos/$repo/git/refs/tags/$tag" --jq .object.sha 2>/dev/null || true)
-          if [ -z "$current" ]; then
-            gh api -X POST "repos/$repo/git/refs" \
-              -f ref="refs/tags/$tag" -f sha="$sha" >/dev/null
-            echo "  created refs/tags/$tag at $sha"
-          elif [ "$current" != "$sha" ]; then
-            gh api -X PATCH "repos/$repo/git/refs/tags/$tag" \
-              -f sha="$sha" -F force=true >/dev/null
-            echo "  moved refs/tags/$tag from $current to $sha"
-          else
-            echo "  refs/tags/$tag already at $sha"
-          fi
+          #    Written with git rather than through the ref API, which does
+          #    not work here. Creating refs/tags/release through
+          #    `POST /repos/OWNER/REPO/git/refs` is refused with "Reference
+          #    does not exist (HTTP 422)" -- on a create, for a name that
+          #    collides with nothing, naming a commit the API itself will
+          #    return, in a repository with no rulesets and no tag
+          #    protection, from a token that had just created a tag of its
+          #    own through the releases API. Every input is valid and the
+          #    permission is demonstrably there, and no reason for the
+          #    refusal was ever established. The first tag push of 1.0.0
+          #    failed on it, in both workflows, at the same call.
+          #
+          #    So the tag is written the way git writes one. One command
+          #    covers both creating it and moving it, which also retires the
+          #    read-before-write above it: that existed because PATCHing a
+          #    ref to the sha it already held was refused with "Resource not
+          #    accessible by integration (HTTP 403)", a message about
+          #    permissions that was nothing of the kind. Pushing a tag onto
+          #    the commit it already names is a no-op git performs in
+          #    silence, so there is nothing left to read first and no state
+          #    to get wrong.
+          #
+          #    --force because this ref is a pointer and moving it is the
+          #    whole point. It is never a version tag: those are pushed by
+          #    hand and this job is given no name it could overwrite.
+          git push origin --force "$sha:refs/tags/$tag"
+          echo "  refs/tags/$tag now at $sha"
 
           # BUILD-INFO is uploaded strictly last in both branches, because it
           # is what the next run's changed/unchanged decision reads: a run
