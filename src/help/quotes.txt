@@ -1,0 +1,31 @@
+The quoting style to use when writing CSV.
+
+  always
+      This puts quotes around every field. Always.
+
+  necessary
+      This puts quotes around fields only when needed. They are
+      needed when a field holds a quote, a delimiter or a record
+      terminator -- or the '--comment' character, when one is in
+      use, since bare it would make the row a comment on a
+      second read. They are needed for an empty record too,
+      which is otherwise indistinguishable from a record holding
+      one empty field.
+
+  never
+      This never writes quotes, even where that produces invalid
+      CSV data. One row is the exception, under every style
+      including this one: a row that is a single empty field is
+      written "", since bare it is a blank line, and a blank
+      line is not a record a reader keeps. A row '--remove' left
+      with no fields at all is written the same way.
+
+  nonnumeric
+      This puts quotes around every non-numeric field: one that
+      does not parse as a valid float or integer is quoted even
+      where it need not be. A number is not quoted whatever it
+      holds, so a delimiter a number can hold is written bare
+      inside one and splits that row on a second read: a digit,
+      '.', '-', '+', 'e' or 'E', or a letter of inf, infinity or
+      nan, since those parse as numbers too. Either case. How
+      many rows that touches is reported on stderr.

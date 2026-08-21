@@ -1,0 +1,43 @@
+Converts a rfc3339 timestamp in the given column [0...] to local
+time zone. The zone is taken from the TZ environment variable,
+or from the system's configured zone when TZ isn't set, and is
+looked up in the IANA time zone database built into this binary
+rather than the one installed on the machine. Bundling the data
+keeps the rules out of the host's hands: the same TZ gives the
+same answer wherever it runs, whatever data that host happens to
+carry.
+
+Run --version to see which release is built in. The zone itself
+still comes from the environment, though, so this is the one
+conversion here whose output is not settled by the input
+alone -- and it replaces the offset the record carried rather
+than working from it. Where a result has to be reproducible from
+the file by itself, use -u/--utc or -o/--offset, which involve
+no zone rules and cannot be affected by either.
+
+KNOWN LIMITS, at the end of this help, sets out what -l depends
+on. A TZ naming a zone this binary does not know is refused
+rather than answered. A misspelt name used to fall through to
+UTC, so a result carried +00:00 as though it were the zone asked
+for, with nothing in the output to show it. The message names
+the bundled release, since a zone newer than this build is a
+different problem from a typo.
+
+A TZ naming a zone (e.g. TZ=America/Chicago) is honoured the
+same way on every platform. A TZ holding POSIX rules instead of
+a name (e.g. TZ=EST5EDT,M3.2.0,M11.1.0) is only honoured on
+Unix; on Windows the system's configured zone is used instead.
+Name the zone, or use -o/--offset, if you need the same answer
+everywhere.
+
+A zone whose offset at that moment is not a whole number of
+minutes -- local mean time, which every zone used before it
+adopted standard time, and which Africa/Monrovia kept until
+1972 -- writes parse_err rather than a timestamp. RFC3339 has no
+seconds part in an offset, so the result would round the offset
+alone and name an instant half a minute from the one it was
+given. KNOWN LIMITS, at the end of this help, sets this out with
+an example.
+
+Use -o/--offset instead if you want to convert to a fixed UTC
+offset you name yourself, with no time zone rules involved.

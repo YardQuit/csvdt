@@ -1,0 +1,25 @@
+Writes this program's manual page to standard output, in the
+roff source a man page is made of, and exits. Rendered from the
+same option definitions that parse a command line, so it
+describes the build it came out of and cannot fall behind it.
+That is why it is generated rather than written: a page kept by
+hand is a second copy of every option, and the one that goes
+stale. For packagers, who need a page at the moment they build:
+
+|    csvdt --generate-man > csvdt.1
+
+The RPM installs a page this way. Every other install can have
+one for a command and a redirect, since the option prints roff
+and does nothing else:
+
+|    mkdir -p ~/.local/share/man/man1
+|    csvdt --generate-man > ~/.local/share/man/man1/csvdt.1
+|    man csvdt
+
+That directory is on the default manpath on most systems; where
+it is not, MANPATH covers it. System-wide is the same line into
+/usr/local/share/man/man1/, then mandb where a distribution
+caches. Worth it for the reading rather than the reference: the
+page adapts to the terminal and arrives in a pager, where this
+help never rewraps, so KNOWN LIMITS or EXIT STATUS is a search
+away rather than a scroll.

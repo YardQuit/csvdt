@@ -1,0 +1,11 @@
+{before-help}
+{name}({version}) Comma-Separated Values DateTime
+Copyright (C) 2025-2026 {author}
+Licensed under the GNU General Public License v3.0 (GPL-3.0-or-later);
+see the LICENSE file distributed with this program for the full text.
+
+{about}
+{usage-heading} {usage}
+
+{all-args}{after-help}
+

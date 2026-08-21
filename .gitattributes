@@ -1,0 +1,29 @@
+# Line endings are LF, in the repository and in every working tree.
+#
+# The files under src/help are compiled into the binary with include_str!, so
+# whatever bytes a checkout produces are the bytes --help prints and the
+# manual page is rendered from. On Windows, git checks text out with CRLF
+# unless something says otherwise, and something has to be this file.
+#
+# What that cost, before it was written: a blank line inside an option's long
+# help arrived as ten spaces and a carriage return, the trim that takes
+# trailing padding off stopped at the return and left all ten, and --help came
+# out with 59 lines of whitespace on windows-latest where Linux and macOS had
+# none. The trim was taught about carriage returns, because a checkout is not
+# the only way one arrives. This is the other half of it: the corpus now reads
+# the same everywhere, so --help and the page are the same bytes on every
+# platform rather than the same bytes wherever they happened to be built.
+*                       text=auto eol=lf
+
+# A fixture that is *about* line endings would have to keep the bytes it was
+# written with, and the rule above would take them away.
+#
+# There is none today. Every CRLF case in the tests and the checks is built in
+# code -- tests/cli.rs, src/main.rs, and three of the checks all write \r\n
+# themselves -- which is where a fixture about line endings belongs, because
+# no checkout can reach it there. If one is ever written to disk instead,
+# exempt that path here:
+#
+#   testdata/crlf.csv   -text
+#
+# rather than weakening the rule above for everything else.

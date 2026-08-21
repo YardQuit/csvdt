@@ -1,0 +1,19 @@
+The comment character to use when parsing CSV. A line beginning
+with it is skipped instead of being read as a record. There is
+no default. Without this option nothing is treated as a comment,
+so a leading '#' is ordinary data -- and in a file where those
+lines are narrower than the rest, an error rather than a skipped
+line.
+
+Refused if it is the delimiter or the quote character being
+read: either would make a comment of lines that are data -- one
+whose first field is empty, or one starting with a quoted
+field -- and drop them without saying so. The writer knows this
+character too: a field holding it is quoted on the way out, as a
+field holding the delimiter is, so the output reads back with
+the same '--comment' instead of losing the rows that begin with
+it.
+
+'--quote never' and, for numeric fields, 'nonnumeric' cannot
+quote, and rows a second read would drop under them are counted
+on stderr -- KNOWN LIMITS, at the end of this help, sets it out.

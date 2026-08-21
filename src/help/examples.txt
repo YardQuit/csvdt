@@ -1,0 +1,84 @@
+EXAMPLES
+Every action takes a column number, so the first question is
+which number a column has. Nothing in the file says, and
+counting commas by eye is how the wrong column gets converted:
+
+|    $ csvdt -H -p --peek log.csv
+|    0   1                          2
+|    id  when                       level
+|    7   2023-11-14T22:13:20+01:00  info
+
+Epoch seconds are read by -r/--rfc3339, which is the conversion
+for a timestamp that carries no offset of its own:
+
+|    $ csvdt -H -p -r1 epoch.csv
+|    id,when,<to_rfc3339,level
+|    7,1700000000,2023-11-14T22:13:20+00:00,info
+
+Everything else works from the offset the record already
+carries, and writes a new column beside it. To UTC:
+
+|    $ csvdt -H -p -u1 log.csv
+|    id,when,<to_utc,level
+|    7,2023-11-14T22:13:20+01:00,2023-11-14T21:13:20+00:00,info
+
+To the clock of a zone, which is the one conversion that
+depends on more than the input:
+
+|    $ TZ=Asia/Tokyo csvdt -H -p -l1 log.csv
+|    id,when,<to_local,level
+|    7,2023-11-14T22:13:20+01:00,2023-11-15T06:13:20+09:00,info
+
+Into a date and a time of day, as two columns:
+
+|    $ csvdt -H -p -s1 log.csv
+|    id,when,<split_date,<split_time,level
+|    7,2023-11-14T22:13:20+01:00,2023-11-14,22:13:20 +01:00,info
+
+Elapsed time between two columns of the same row, exact and in
+ISO 8601, never rounded to an average month:
+
+|    $ csvdt -H -p -d1,2 shift.csv
+|    id,start,end,<row_duration
+|    7,2026-01-01T09:00:00Z,2026-01-01T17:30:00Z,PT8H30M
+
+The new column lands beside the one it came from. Put it
+somewhere else, or over the original, with -i/--insert:
+
+|    $ csvdt -H -p -u1 -i1,replace log.csv
+|    id,to_utc,level
+|    7,2023-11-14T21:13:20+00:00,info
+
+A value that will not parse is written as parse_err rather than
+stopping the run, so a file converts as far as it can and the
+markers say where it did not. Column 0 holds an id here, not a
+timestamp, so every row is marked and counting them says how
+many:
+
+|    $ csvdt -H -p -u0 log.csv | grep -c parse_err
+|    1
+
+A filling mode adds fields the source never had, and
+'--fill-log' says which rows they went to. Here the header
+itself is one of them -- widest pads it too, and the name it
+gains is empty rather than invented:
+
+|    $ csvdt -H -p -f=widest --fill-log fill.log ragged.csv
+|    id,when,level,
+|    7,2023-11-14T22:13:20+01:00,info,restarted
+|    8,2023-11-15T09:00:00+01:00,,
+
+|    $ cat fill.log
+|    line,record,fields,width,delta,status
+|    1,0,3,4,-1,padded
+|    3,2,2,4,-2,padded
+
+'missing' is what the row lacked, not what was done about it:
+under plain '--flexible' the same rows are logged as 'needed'
+and nothing is padded at all.
+
+There is no in-place mode, and a redirection onto the input is
+refused rather than obeyed: the shell empties the file before
+csvdt starts. Write another and move it:
+
+|    $ csvdt -H -p -u1 in.csv > out.csv && mv out.csv in.csv

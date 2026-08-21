@@ -1,0 +1,8 @@
+The quote character to use when parsing CSV. Toggle this option
+uses the single quote ('). Only reading uses it: the output is
+written as ordinary double-quoted CSV, so read the output back
+without this option. Reading it back WITH it misreads any field
+the writer quoted, and the run says on stderr how many rows that
+touches.
+
+[default: '"']

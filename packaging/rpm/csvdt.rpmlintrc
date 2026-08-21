@@ -1,0 +1,22 @@
+# rpmlint findings this package accepts, with the reason for each.
+#
+# Everything not listed here stays fatal in CI. The list is deliberately
+# narrow -- each entry names the specific finding rather than switching a
+# whole check off -- because a lint that cannot fail is not a lint.
+#
+# addFilter() rather than a TOML `Filters` list: an rpmlintrc file is read in
+# this older form even by rpmlint 2, which loads a `.toml` file as TOML and
+# anything else as this. Written as TOML it was accepted without complaint,
+# reported as loaded, and had no effect at all.
+
+# rpmlint's dictionary does not carry this plural, and %description uses it
+# because durations are what half the tool computes. Only this word is
+# excused: any other misspelling in %description still fails, which is what
+# the check is worth having for.
+addFilter(r"spelling-error .*'[Dd]urations'")
+
+# Source1 is the vendored crates. A Fedora build root has no network, so the
+# dependencies are built in from a tarball made from Cargo.lock at package
+# time -- there is no URL it could have. rust2rpm's output carries the same
+# finding for the same reason.
+addFilter(r"invalid-url Source1:")

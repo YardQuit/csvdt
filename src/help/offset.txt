@@ -1,0 +1,13 @@
+Converts a rfc3339 timestamp in the given column [0...] to an
+explicit UTC offset that you supply, comma-joined with no space
+(e.g. -o1,-06:00, -o1,+0200, -o1,Z). Unlike -l/--local, this
+doesn't depend on the timezone the machine running csvdt happens
+to be configured for. The offset you supply must be one a real
+place uses: -12:00 through +14:00.
+
+Anything beyond that is refused rather than converted, so a typo
+like +15:00 for +05:00 is reported instead of quietly producing
+a timestamp with an offset that cannot exist. Offsets already
+present in the data are read as they are and not
+range-checked -- those are the input's business, not a mistake
+in the command.

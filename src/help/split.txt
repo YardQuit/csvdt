@@ -1,0 +1,15 @@
+Splits a single rfc3339 timestamp in the given column [0...]
+into two separate columns: date and time. The date is written as
+YYYY-MM-DD, the time as HH:MM:SS followed by the offset -- e.g.
+2024-06-15 and 14:00:00 +02:00. Both read from the timestamp's
+own offset rather than from UTC, so the date is the one it was
+where the record was written, not the date the same instant had
+in UTC.
+
+Sub-second precision is kept when the timestamp carries it, as
+14:00:00.500 +02:00, on the same terms as every other conversion
+here: what the source had is what comes out. The time column is
+a time of day with an offset, not an RFC3339 timestamp, so csvdt
+does not read it back as one. Keep the original column, or use
+-i before/after rather than replace, if the timestamp is still
+needed.

@@ -1,0 +1,13 @@
+A command-line tool for parsing and working with CSV files. It
+provides flexible options for handling e.g. whitespace, quote
+styles, and is mainly focusing on handling timestamps making
+data analysis easier and more efficient.
+
+Duration results (-d/--duration) are deliberately reported only
+in days, hours, minutes, and seconds -- never years, months, or
+weeks. Those units have no fixed length (a month is 28-31 days,
+a year 365-366), so expressing a duration in them would mean
+silently rounding to some average length. This tool never
+approximates a duration: every value is exact and reproducible,
+which matters when it may be relied on as evidence, e.g. in an
+investigation.

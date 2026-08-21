@@ -1,0 +1,7 @@
+Placement of an action's inserted/replaced value: a column
+[0...] and one of before/after/replace, comma-joined with no
+space (e.g. -i1,replace). If omitted, defaults to placing it
+right after the action's own column (or its second column, for a
+two-column --duration). This column is never out of bound: too
+high clamps to the last column, and a negative value (e.g.
+-i-1,replace) clamps to the first column (0).

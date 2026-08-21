@@ -1,0 +1,15 @@
+The field delimiter is the character used to separate fields
+within a CSV. Specify a custom character to use when reading
+(parsing) CSV.
+
+[default: ',']
+One ASCII character, since the reader works in bytes. A tab is
+the usual way to read TSV. Two characters are refused rather
+than accepted and then misread. A newline or carriage return
+ends a record, so it cannot divide one: given as the delimiter
+it made the whole file into a single record. The quote character
+in use is refused too, because quoting is the only way a field
+holding the delimiter can be written, so the two being the same
+leaves no way to tell them apart. Which character that is
+follows --single-quote, and whichever one is not in use is free
+to be the delimiter.

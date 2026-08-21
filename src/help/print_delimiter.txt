@@ -1,0 +1,9 @@
+The field delimiter to use when printing (writing) CSV.
+
+[default: ',']
+One ASCII character, as for --read-delimiter, and refused on the
+same grounds: a newline or carriage return ends a record rather
+than dividing one, and '"' is what the writer quotes with.
+Given '"' the writer produced output that could not be read
+back -- the row x"y,2 came out as "x""y""2, which reads as one
+field rather than two.

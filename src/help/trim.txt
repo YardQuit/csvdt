@@ -1,0 +1,38 @@
+The behavior of handling whitespace characters during CSV
+parsing.
+
+  none
+      Preserves fields and headers.
+
+  fields
+      Trim whitespace from fields, but not headers.
+
+  headers
+      Trim whitespace from headers, but not fields.
+
+  all
+      Trim whitespace from both headers and fields.
+
+The default is 'none', so a field arrives as the file wrote it.
+Note trimming reaches inside quoted fields, which is why it is
+not the default: quoting is how a CSV says its spaces are data,
+and " 1 " would arrive as 1, a field of nothing but spaces as
+empty. Converting does not need it. A timestamp is read past any
+whitespace around it, so a file written with ", " separators
+converts whether or not this option is given -- the trimming
+would only change what is passed through beside it. Leading and
+trailing whitespace only. Space between words in a field is
+never touched by any of these.
+
+Whitespace means every character Unicode calls one, not only the
+space bar: a tab goes, and so do a carriage return and a newline
+sitting inside a quoted field. So does a non-breaking space,
+which is the one worth knowing about, since it is usually there
+on purpose -- a thousands separator in a good many locales, or a
+space something was typeset with. A field of ' 1 000 ' written
+with those arrives as '1 000': the pair around it are trimmed
+and the one between the digits is not.
+
+Which record counts as the header is what -H says, here as
+everywhere. Without it the first record is data, so 'fields'
+trims it and 'headers' trims nothing at all.

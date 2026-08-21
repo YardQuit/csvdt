@@ -1,0 +1,894 @@
+# Builds csvdt for Linux, macOS and Windows from the newest released
+# version, on the first of every month and whenever a version is tagged.
+#
+# It builds a tag rather than master, and master has no package track at
+# all. What an analyst cites in a report should be a release, and a rolling
+# build of unreleased code is the opposite of that -- so the only thing this
+# workflow ever compiles is the newest version tag.
+#
+# The point of rebuilding a tag that does not move is the IANA time zone
+# database: -l resolves zones against the copy compiled into the binary, so
+# a build only knows the rules that existed when it was made. Cargo.lock is
+# not committed, so each run re-resolves dependencies and picks up whatever
+# chrono-tz (and therefore tzdata) release is current -- once, in the meta
+# job, with every leg built --locked against that one resolution. A release
+# cut in April therefore stops carrying April's zone rules the moment IANA
+# publishes new ones, without the released source changing by a byte.
+#
+# Three kinds of release come out of this, and they answer three different
+# questions:
+#
+#   <version>                     what that version shipped as. Written once,
+#                                 when the tag is pushed, and never replaced.
+#   release                       the current build of the newest version.
+#   <version>-<month>.<commit>-   every distinct build, kept permanently, so
+#     tzdata<release>             a result can be traced to the exact binary
+#                                 that produced it and reproduced with it.
+name: Monthly build
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of each month. Note that GitHub disables a
+    # scheduled workflow in a repository with no activity for 60 days, and
+    # says so only in one email. This one is the tzdata refresh, so it going
+    # quiet is exactly the failure nobody would notice: the release keeps
+    # serving a healthy-looking binary whose zone rules are frozen. A
+    # finished tool gets no pushes, so check the Actions tab if a month
+    # passes with no run.
+    - cron: '0 6 1 * *'
+  # A version tag: the newest release just changed, so everything this
+  # workflow publishes is about a different version than it was a minute
+  # ago. That run does the lot -- the version's own release, the rolling
+  # pointer and an archive entry -- rather than waiting for the first of the
+  # month to notice.
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+# Read by default, so the build jobs cannot write to the repository. They
+# resolve and compile the newest third-party crates published that day, and
+# a build script runs with whatever the job holds -- including, since
+# actions/checkout leaves credentials in .git/config, a token that could
+# push. Only publishing needs write, so only the release job is given it.
+permissions:
+  contents: read
+
+# One run at a time: two of them publish to the same rolling release and the
+# same asset names, so overlapping runs interleave into a mixture of two
+# builds. Not cancelled in flight, since a half-finished publish is worse
+# than a queued one.
+concurrency:
+  group: monthly-build
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # What this run builds, decided once and shared. Every leg then checks out
+  # the same commit and stamps the same identity, even if a run straddles a
+  # month boundary.
+  meta:
+    name: What this run builds
+    runs-on: ubuntu-latest
+    # None of the jobs in this file had a timeout, so GitHub's six-hour
+    # default applied to all of them -- across four platforms, for a workflow
+    # nobody is watching on the first of the month. Each of these is several
+    # times what the job takes and still fails the same day.
+    timeout-minutes: 15
+    outputs:
+      ref: ${{ steps.id.outputs.ref }}
+      sha: ${{ steps.id.outputs.sha }}
+      metadata: ${{ steps.id.outputs.metadata }}
+      built: ${{ steps.id.outputs.built }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # Whole history, because what gets built is picked out of the
+          # version tags and a shallow checkout has none of them.
+          fetch-depth: 0
+
+      # Highest version, not most recently created: a patch to an older
+      # series cut after a newer one shipped is a real tag and is not the
+      # newest release.
+      - id: id
+        run: |
+          ref=$(git tag -l '[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)
+          if [ -z "$ref" ]; then
+            echo "::error::No version tag exists, so there is no released version to build."
+            exit 1
+          fi
+          # Everything this workflow publishes is about the newest version:
+          # the rolling pointer, the Latest designation, the lot. A tag push
+          # for an older series would hand all of it to a version that is
+          # not current, so it stops here and says why rather than quietly
+          # publishing something else.
+          if [ '${{ github.ref_type }}' = 'tag' ] \
+             && [ '${{ github.ref_name }}' != "$ref" ]; then
+            echo "::error::${{ github.ref_name }} was pushed, but $ref is the newest version tag. This workflow builds the newest version only."
+            exit 1
+          fi
+          git checkout -q --detach "$ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # The month and the commit the binaries are built from, which is
+          # what --version carries as semver build metadata and what names
+          # the archive entry below.
+          echo "metadata=$(date -u +'%Y.%m').$(git rev-parse --short=7 HEAD)" \
+            >> "$GITHUB_OUTPUT"
+          echo "built=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+          echo "building $ref at $(git rev-parse --short HEAD)"
+
+      # Resolved here and nowhere else. Each leg used to run its own `cargo
+      # update`, which is four resolutions of an index that anyone may
+      # publish to mid-run: when they disagreed the release job refused to
+      # publish -- correctly, since one lockfile would then be the provenance
+      # record for binaries that did not all match it -- and the month's
+      # rebuild was lost to a re-run. Resolving once removes the race rather
+      # than reporting it, and the legs build --locked against this file, so
+      # a leg cannot quietly resolve anything of its own.
+      #
+      # Cargo.lock describes every target's dependencies, not the host's, so
+      # one resolution serves all four.
+      - name: Resolve the dependency set
+        run: cargo update
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dependency-set
+          path: Cargo.lock
+          retention-days: 7
+
+  build:
+    name: ${{ matrix.target }}
+    needs: meta
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # The compiler version is part of what decides the produced binary, so it
+    # belongs in the build fingerprint -- which means a Rust release
+    # publishes a new archive entry even when csvdt and the time zone
+    # database are unchanged. That is deliberate: the archive exists so a
+    # specific binary can be obtained again, which includes one built with a
+    # particular toolchain. Carried per target through the staged artifacts
+    # rather than as a job output, since a matrix job has one output slot and
+    # four compilers to report.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Static, so it runs on any Linux distro regardless of glibc version.
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            binary: csvdt
+            native: true
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: csvdt
+            native: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary: csvdt
+            native: false          # cross-built on an arm64 runner
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: csvdt.exe
+            native: true
+
+    # Set for the whole job rather than on the build step alone, so the
+    # binary the tests exercise is the binary that ships. Cargo tracks this
+    # variable as an input, so introducing it between test and build
+    # recompiled everything -- the artifact was a different compilation from
+    # the tested one, and the release build was done twice.
+    env:
+      CSVDT_BUILD_METADATA: ${{ needs.meta.outputs.metadata }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The commit meta resolved, not the one the run was triggered
+          # from. On a schedule those differ by every commit since the
+          # release; taking the default would build master and stamp it with
+          # the released version's number.
+          ref: ${{ needs.meta.outputs.sha }}
+          # Nothing here pushes, and a token left in .git/config is readable
+          # by every dependency build script this job compiles.
+          persist-credentials: false
+
+      - name: Install target
+        run: rustup target add ${{ matrix.target }}
+
+      # Every target's compiler, not just Linux's: the runner images update
+      # independently, so a new Rust on macOS alone used to leave the
+      # fingerprint unchanged and the rebuilt binaries discarded, while
+      # BUILD-INFO named a compiler that had built only one of the four.
+      - name: Record toolchain
+        shell: bash
+        run: |
+          mkdir -p staged
+          printf 'rustc          %s %s\n' \
+            "${{ matrix.target }}" "$(rustc --version)" \
+            > "staged/rustc-${{ matrix.target }}"
+
+      # Bounded, because it was not. Two runs of this workflow sat in this
+      # step for 45 and 60 minutes with no output and no way to tell what apt
+      # was waiting on -- and a step that hangs to the job timeout leaves no
+      # log at all, so the one thing that would have named the cause is
+      # exactly what an unbounded wait withholds.
+      #
+      # DPkg::Lock::Timeout makes apt give up rather than block forever when
+      # something else holds the dpkg lock, which unattended-upgrades does on
+      # a fresh runner. 'timeout' covers what that does not: a mirror that
+      # accepts the connection and then says nothing.
+      - name: Install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        timeout-minutes: 10
+        run: |
+          # Two attempts. The first failure here is usually a mirror that
+          # stopped answering, and the whole month's rebuild is the price of
+          # not trying twice; a second failure is reported rather than
+          # retried into silence.
+          for attempt in 1 2; do
+            if sudo DEBIAN_FRONTEND=noninteractive timeout 180 \
+                 apt-get -o DPkg::Lock::Timeout=60 update \
+               && sudo DEBIAN_FRONTEND=noninteractive timeout 180 \
+                 apt-get -o DPkg::Lock::Timeout=60 install -y musl-tools; then
+              echo "  ok  musl-tools installed on attempt $attempt"
+              exit 0
+            fi
+            echo "::warning::apt failed or timed out on attempt $attempt"
+            sleep 15
+          done
+          echo "::error::apt could not install musl-tools in two attempts, each command capped at three minutes."
+          exit 1
+
+      # Cargo.lock is untracked, and this is where it comes from: the one
+      # meta resolved, for every leg. --locked below then means the newest
+      # in-range dependencies as of a single moment, above all the newest
+      # tzdata, rather than as of whenever each leg happened to reach this
+      # step.
+      - uses: actions/download-artifact@v7
+        with:
+          name: dependency-set
+
+      # Only meaningful where the built binary can actually execute.
+      - name: Test
+        if: matrix.native
+        run: cargo test --release --locked --target ${{ matrix.target }}
+
+      # CSVDT_BUILD_METADATA comes from the job env above, and becomes semver
+      # build metadata in --version: it identifies this exact build without
+      # touching the version in Cargo.toml.
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          mkdir -p staged
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" \
+             "staged/csvdt-${{ matrix.target }}${{ matrix.binary == 'csvdt.exe' && '.exe' || '' }}"
+          # Keep the resolved dependency set: it is the provenance record for
+          # exactly which tzdata this binary carries.
+          cp Cargo.lock "staged/Cargo.lock-${{ matrix.target }}"
+
+      # Handed to the release job below and not a download route: these expire
+      # after a week, and are meant to. What people download is the release,
+      # whose assets do not expire at all. Worth saying because the two look
+      # alike from the Actions tab, where an expired artifact is the first
+      # thing offered on a run that published a release still serving fine.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: csvdt-${{ matrix.target }}
+          path: staged/
+          retention-days: 7
+
+  # checks/run-checks.sh says in its own header that it is meant to be run
+  # before a release rather than on every commit. Nothing ran it. Eleven
+  # differential harnesses -- a second implementation of the timestamp,
+  # duration and column behaviour, the README's worked examples, and three
+  # Emacs ones -- existed in the tree and were only ever run by hand, which
+  # is the same as not having them on the release nobody ran them for.
+  #
+  # Between build and release, so a draw that finds something stops the
+  # publish rather than being read afterwards. Its own job because it needs
+  # python3 and emacs, which the matrix builds do not.
+  checks:
+    name: Differential checks
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+
+      - name: Install what the checks compare against
+        run: sudo apt-get update && sudo apt-get install -y emacs-nox
+
+      # A second seed as well as the default: every check is seeded so that a
+      # failure repeats, which also means one seed is one draw of generated
+      # input. Two costs a minute and doubles what the release was shown.
+      - name: Run the checks
+        run: |
+          ./checks/run-checks.sh
+          SEED=1 ./checks/run-checks.sh
+
+  release:
+    name: Publish release
+    needs: [meta, build, checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The only job that writes: it is the one that publishes.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: downloaded
+
+      - name: Collect binaries
+        id: collect
+        run: |
+          mkdir -p release
+          find downloaded -type f -name 'csvdt-*' \
+            ! -name 'Cargo.lock-*' ! -name 'rustc-*' -exec cp {} release/ \;
+
+          # The legs are handed one lockfile and build --locked, so these
+          # four copies must be identical: the check is no longer watching
+          # for a crate published mid-run, but asking whether that mechanism
+          # did what it says. A difference here means a leg built against
+          # something other than the resolved set, and one lockfile would be
+          # published as the provenance record for binaries that do not all
+          # match it -- a Windows build carrying tzdata the VERSION asset
+          # does not name being exactly the quiet disagreement this file
+          # exists to prevent.
+          if [ "$(sha256sum downloaded/*/Cargo.lock-* | cut -d' ' -f1 \
+                  | sort -u | wc -l)" -ne 1 ]; then
+            echo "::error::The build legs used different dependency sets, so no single Cargo.lock describes these binaries. They are handed one lockfile and build --locked, so this should not be reachable: check the download-artifact step."
+            sha256sum downloaded/*/Cargo.lock-*
+            exit 1
+          fi
+          find downloaded -type f -name 'Cargo.lock-*' | head -1 \
+            | xargs -I{} cp {} release/Cargo.lock
+
+          # One line per target, sorted so the fingerprint does not move with
+          # the order artifacts happen to download in.
+          cat downloaded/*/rustc-* | sort > release/COMPILERS
+          chmod +x release/csvdt-x86_64-unknown-linux-musl
+          ls -l release
+
+      - name: Read version and bundled tzdata
+        id: version
+        run: |
+          # The Linux build is static, so it runs here directly and is the
+          # authority on what actually got compiled in.
+          out=$(./release/csvdt-x86_64-unknown-linux-musl --version)
+          echo "full=$out" >> "$GITHUB_OUTPUT"
+          echo "tzdata=$(echo "$out" | grep -oE 'tzdata [^)]+' | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+          full_version=$(echo "$out" | awk '{print $2}')
+          echo "csvdt=$full_version" >> "$GITHUB_OUTPUT"
+          # Without the +metadata suffix: that carries the build month, so
+          # including it would make every run look like a change.
+          echo "base=$(echo "$full_version" | cut -d+ -f1)" >> "$GITHUB_OUTPUT"
+          # Published as its own asset so "which build is current?" is one
+          # request with nothing to parse, and compares byte-for-byte against
+          # what `csvdt --version` prints. Not part of the fingerprint, which
+          # hashes BUILD-INFO alone.
+          printf '%s\n' "$out" > release/VERSION
+
+      # A new tzdata normally arrives as a chrono-tz release inside the range
+      # Cargo.toml allows, and `cargo update` takes it automatically. A bump to
+      # a new series (0.10 -> 0.11) falls outside that range and would be
+      # ignored silently, pinning this build to stale rules forever. Say so
+      # loudly rather than let it rot.
+      - name: Check chrono-tz is not stuck behind a new series
+        id: freshness
+        continue-on-error: true
+        run: |
+          used=$(grep -A1 '^name = "chrono-tz"' release/Cargo.lock | grep '^version' | cut -d'"' -f2)
+          # The sparse index is one JSON line per version in publication
+          # order, so the last line is the most recently published and not
+          # the highest: libc's ends at 1.0.0-alpha.4 while its real latest
+          # is 0.2.x. Read that way a prerelease, or a patch backported to an
+          # older series after a new one shipped, is reported as the latest
+          # -- which is silence in exactly the case this step exists for, a
+          # new series published and left behind. So take the highest
+          # released version instead, skipping yanks and prereleases.
+          latest=$(curl -s https://index.crates.io/ch/ro/chrono-tz \
+            | python3 -c "import json, sys; entries = [json.loads(line) for line in sys.stdin if line.strip()]; versions = [e['vers'] for e in entries if not e.get('yanked') and '-' not in e['vers']]; print(max(versions, key=lambda v: tuple(int(p) for p in v.split('+')[0].split('.'))) if versions else '')")
+          echo "used=$used"  >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          # An unreachable index leaves this empty, which compared unequal
+          # and warned that "chrono-tz  is published" -- a sentence with the
+          # version missing out of it, about a lookup that never happened.
+          if [ -z "$latest" ]; then
+            echo "stale=unknown" >> "$GITHUB_OUTPUT"
+            echo "::warning::Could not read the crates.io index, so whether chrono-tz has moved on from the resolved $used is unknown. The build itself is unaffected."
+          elif [ "$used" != "$latest" ]; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::chrono-tz $latest is published but this build resolved $used. If the series changed (e.g. 0.10 -> 0.11), bump the requirement in Cargo.toml or the bundled tzdata will stop updating."
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Most months nothing will have moved: same commit, same dependencies,
+      # same compiler. Rather than compare the binaries themselves -- Rust
+      # output is not guaranteed reproducible byte-for-byte, so equal inputs
+      # can still hash differently -- fingerprint the things that decide what
+      # gets produced. If none of them changed, there is nothing worth
+      # archiving.
+      - name: Fingerprint this build
+        id: fingerprint
+        run: |
+          lock_hash=$(sha256sum release/Cargo.lock | cut -d' ' -f1)
+          {
+            echo "csvdt          ${{ steps.version.outputs.base }}"
+            echo "tzdata         ${{ steps.version.outputs.tzdata }}"
+            echo "commit         ${{ needs.meta.outputs.sha }}"
+            cat release/COMPILERS
+            echo "cargo_lock     sha256:${lock_hash}"
+          } > release/BUILD-INFO
+          rm release/COMPILERS
+          fp=$(sha256sum release/BUILD-INFO | cut -d' ' -f1)
+          echo "fp=$fp" >> "$GITHUB_OUTPUT"
+          echo "current=$fp" >> "$GITHUB_OUTPUT"
+          cat release/BUILD-INFO
+
+      # After BUILD-INFO exists, and covering everything but itself. The
+      # release notes tell people to verify a download against this file, and
+      # it used to hash the four binaries alone -- so VERSION, Cargo.lock and
+      # BUILD-INFO, which the "am I up to date" and provenance flows all
+      # read, were served unauthenticated and `sha256sum -c` had nothing to
+      # say about them.
+      - name: Checksums
+        run: |
+          cd release
+          sha256sum $(ls | grep -vxF SHA256SUMS) > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Compare against the last published build
+        id: changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # BUILD-INFO on the rolling release describes the last build that was
+          # actually published, so it is the thing to compare against.
+          if gh release download release -p BUILD-INFO -O previous-BUILD-INFO 2>/dev/null; then
+            prev=$(sha256sum previous-BUILD-INFO | cut -d' ' -f1)
+          else
+            prev="none"
+          fi
+          echo "previous=$prev" >> "$GITHUB_OUTPUT"
+          if [ "$prev" = "${{ steps.fingerprint.outputs.fp }}" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Inputs identical to the published build; nothing to release."
+            diff previous-BUILD-INFO release/BUILD-INFO || true
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            if [ "$prev" != "none" ]; then
+              echo "Inputs differ from the published build:"
+              diff previous-BUILD-INFO release/BUILD-INFO || true
+            fi
+          fi
+
+      # Publishing is the archive entry plus the rolling pointer, and both
+      # are about the same build, so they go up together or not at all.
+      #
+      # A tag push publishes unconditionally on its way through the
+      # unchanged/changed test below, because the newest version has just
+      # become a different version: the rolling pointer is serving the
+      # previous release's binaries and the fingerprint has moved with the
+      # commit, so "changed" is true anyway. It is stated rather than relied
+      # on.
+      - name: Publish
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          built="${{ needs.meta.outputs.built }}"
+          ref='${{ needs.meta.outputs.ref }}'
+          sha='${{ needs.meta.outputs.sha }}'
+          repo='${{ github.repository }}'
+          # Named, because the staging directory is also called release/ and
+          # `gh release upload release release/BUILD-INFO` reads as neither.
+          tag=release
+
+          # Version, build and time zone database in one token, because that
+          # is what somebody writing up a result has to be able to quote.
+          # The version alone does not identify a binary -- two builds of one
+          # tag can carry different zone rules -- and neither does the commit,
+          # for the same reason. This names all three.
+          archive_tag="${{ steps.version.outputs.base }}-${{ needs.meta.outputs.metadata }}-tzdata${{ steps.version.outputs.tzdata }}"
+          echo "archive entry: $archive_tag"
+
+          # Body shared by both releases; they carry identical assets and
+          # differ only in the paragraph above this.
+          common=$(cat <<EOF
+          **Bundled IANA time zone database: ${{ steps.version.outputs.tzdata }}**
+
+          \`-l/--local\` resolves zones against the database compiled into the binary rather than the one installed on the machine, so the same input converts identically on any host. This build knows the rules as of tzdata ${{ steps.version.outputs.tzdata }}; if a zone changes its rules later, use a newer build for timestamps affected by that change. \`-u\`, \`-o\`, \`-d\`, \`-s\` and \`-r\` involve no zone rules and are unaffected by the database version.
+
+          | file | platform |
+          | --- | --- |
+          | \`csvdt-x86_64-unknown-linux-musl\` | Linux x86-64 (static, any distro) |
+          | \`csvdt-aarch64-apple-darwin\` | macOS Apple Silicon |
+          | \`csvdt-x86_64-apple-darwin\` | macOS Intel |
+          | \`csvdt-x86_64-pc-windows-msvc.exe\` | Windows x86-64 |
+
+          Verify a download against \`SHA256SUMS\` before use, then install it under the name it is invoked by. The assets carry a target triple because this page holds every platform, but the command is \`csvdt\` -- what the documentation and the Emacs front end both call it:
+
+          \`\`\`
+          sha256sum -c SHA256SUMS --ignore-missing
+          mkdir -p ~/.local/bin
+          mv csvdt-x86_64-unknown-linux-musl ~/.local/bin/csvdt
+          chmod +x ~/.local/bin/csvdt
+          \`\`\`
+
+          \`Cargo.lock\` records the exact dependency versions this build resolved, including the chrono-tz release that supplied the time zone database. \`BUILD-INFO\` records the commit, compiler and dependency fingerprint it was produced from, and \`VERSION\` holds the exact string this build's \`--version\` prints. Between them they are enough to stand the build environment up again and compile the same source with the same dependencies. To cite the build behind a particular result, keep the output of \`csvdt --version\` alongside it.
+
+          A build only gets published when the source, the dependencies or the compiler actually changed, so months in which nothing moved have no release of their own; the preceding one still describes the binary in use.
+          EOF
+          )
+
+          archive_notes=$(cat <<EOF
+          Archived build of csvdt ${{ steps.version.outputs.csvdt }}, made ${built} from \`${ref}\` at \`${sha}\`.
+
+          This release is never replaced. It exists so a result can be traced back to, and reproduced with, the exact binary that produced it -- which the version number alone cannot do, because a released version is rebuilt as the time zone database moves. For the current build of the newest release, use the \`release\` release instead.
+
+          The RPM packages from the same build are attached alongside, under \`RPM-BUILD-INFO\` and \`SHA256SUMS-rpms\`, unless they resolved a different time zone database -- they are compiled separately inside Fedora, so when the two disagree each is kept under the entry naming the database it actually carries.
+
+          ${common}
+          EOF
+          )
+
+          rolling_notes=$(cat <<EOF
+          The current build of csvdt's newest released version, \`${ref}\`, made ${built}.
+
+          Replaced in place whenever a rebuild produces something different, so these download URLs always resolve to the current build and are safe to script against:
+
+          \`\`\`
+          curl -LO https://github.com/${repo}/releases/download/release/csvdt-x86_64-unknown-linux-musl
+          \`\`\`
+
+          Note the form: \`releases/download/release\` names this release's tag. The other form, \`releases/latest/download\`, follows GitHub's "Latest" designation, which is the \`${ref}\` release -- the binaries that version was published with, kept as they were. Use that one to reproduce a result from the version's own release day, and this one for the same version built against current zone rules.
+
+          Every build is also kept permanently under a tag naming its version, commit and time zone database; this one is \`${archive_tag}\`. Use those when a specific historical build is needed.
+
+          ${common}
+          EOF
+          )
+
+          # 1. The permanent archive entry for this build. Marked not-latest
+          #    so it never takes the "Latest" designation, which belongs to
+          #    the newest version release.
+          #
+          #    Permanent means permanent: the tag names the commit and the
+          #    time zone database, but not the compiler, so a rerun after a
+          #    Rust release can still land on a tag that exists. A rerun
+          #    that produces the same build finishes the job it was rerun
+          #    for; one that produces a different build is refused, since
+          #    only a human can say which of the two should keep the name.
+          if gh release view "$archive_tag" >/dev/null 2>&1; then
+            published_fp=""
+            if gh release download "$archive_tag" -p BUILD-INFO -D archived 2>/dev/null; then
+              published_fp=$(sha256sum archived/BUILD-INFO | cut -d' ' -f1)
+              rm -rf archived
+            fi
+            if [ -z "$published_fp" ]; then
+              echo "::error::${archive_tag} exists but carries no BUILD-INFO, so what it holds cannot be established -- an earlier run died partway. Inspect it and delete the tag before rebuilding."
+              exit 1
+            fi
+            if [ "$published_fp" != "${{ steps.fingerprint.outputs.fp }}" ]; then
+              echo "::error::${archive_tag} already exists and describes a different build: same commit and same tzdata, different compiler. Its binaries are what someone citing that tag expects, so they are left untouched. Delete the tag deliberately if it must be replaced."
+              exit 1
+            fi
+            # Same build, so this is a rerun finishing what a failed one
+            # left: upload only the names the release lacks. Asking first
+            # rather than uploading and ignoring the error, since that would
+            # hide a genuine upload failure as "already there".
+            have=$(gh release view "$archive_tag" --json assets --jq '.assets[].name')
+            for asset in $(cd release && ls); do
+              if ! printf '%s\n' "$have" | grep -qxF "$asset"; then
+                gh release upload "$archive_tag" "release/$asset"
+              fi
+            done
+          else
+            gh release create "$archive_tag" release/* \
+              --target "$sha" \
+              --title "csvdt ${{ steps.version.outputs.csvdt }} - tzdata ${{ steps.version.outputs.tzdata }} (${built})" \
+              --notes "$archive_notes" \
+              --latest=false
+          fi
+
+          # 2. The rolling pointer for scripted downloads, updated in place.
+          #    It used to be deleted and recreated, which bought two things --
+          #    a tag following the commit actually built, and no asset from an
+          #    earlier run lingering if a target is added or removed -- at a
+          #    price that was not worth them: the two steps are not one
+          #    operation, so anything failing between them (a blip, a rate
+          #    limit, one upload of four) left no rolling release at all. Every
+          #    download URL the README calls safe to script against would then
+          #    answer 404 until the next monthly run, up to a month later, and
+          #    nothing would be watching. Even when it worked there was a window
+          #    with no release.
+          #
+          #    Both things it bought are kept below, without ever removing the
+          #    release: the tag is moved through the ref API, and assets this
+          #    build did not produce are deleted after the new ones are in
+          #    place. What remains is one asset at a time being briefly
+          #    replaced, rather than the whole release being briefly absent.
+          #
+          #    Read before written, and written only when it has to move. What
+          #    this workflow builds is a tag, and a tag does not move between
+          #    monthly runs -- so from the second rebuild of a release onward
+          #    the update asks for the sha the ref already holds, and GitHub
+          #    refuses that with "Resource not accessible by integration (HTTP
+          #    403)", a message about permissions that is nothing of the kind.
+          #    The RPM workflow hit exactly this on the first monthly rebuild
+          #    of a release and says so in its own comments.
+          current=$(gh api "repos/$repo/git/refs/tags/$tag" --jq .object.sha 2>/dev/null || true)
+          if [ -z "$current" ]; then
+            gh api -X POST "repos/$repo/git/refs" \
+              -f ref="refs/tags/$tag" -f sha="$sha" >/dev/null
+            echo "  created refs/tags/$tag at $sha"
+          elif [ "$current" != "$sha" ]; then
+            gh api -X PATCH "repos/$repo/git/refs/tags/$tag" \
+              -f sha="$sha" -F force=true >/dev/null
+            echo "  moved refs/tags/$tag from $current to $sha"
+          else
+            echo "  refs/tags/$tag already at $sha"
+          fi
+
+          # BUILD-INFO is uploaded strictly last in both branches, because it
+          # is what the next run's changed/unchanged decision reads: a run
+          # that dies anywhere before it leaves the old BUILD-INFO (or none)
+          # in place, so the next run sees changed inputs and republishes
+          # everything. Every other mutation -- new assets, dropping assets a
+          # removed target no longer produces, the title and notes -- happens
+          # before it, so there is no window where the fingerprint says
+          # "finished" over a release that is not. A glob once put it first
+          # (B sorts before c), and an upload that died after it served stale
+          # binaries as changed=false, with the verify step gated off.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # New assets first, so the release is never short of one that the
+            # previous build already served -- and in a stated order, not
+            # whatever `ls` gives. Alphabetically SHA256SUMS and VERSION come
+            # before the binaries they describe, so an upload dying partway
+            # left this build's checksums and version number standing over
+            # last month's binaries: `sha256sum -c` failing on a good
+            # download, and "up to date" reported for a binary that was not.
+            # Binaries first, then the files that describe them, then
+            # BUILD-INFO last of all.
+            for asset in $(cd release && ls csvdt-*) Cargo.lock VERSION SHA256SUMS; do
+              gh release upload "$tag" "release/$asset" --clobber
+            done
+            # Drop anything this build did not produce, which is what
+            # deleting the release used to take care of. BUILD-INFO is in the
+            # produced set, so the old copy on the release is never "stale"
+            # to this loop -- it is replaced below, as the commit marker.
+            produced=$(cd release && ls)
+            gh release view "$tag" --json assets --jq '.assets[].name' \
+              | while read -r asset; do
+                  if ! printf '%s\n' "$produced" | grep -qxF -- "$asset"; then
+                    echo "Removing asset no longer produced: $asset"
+                    gh release delete-asset "$tag" "$asset" --yes
+                  fi
+                done
+            gh release edit "$tag" \
+              --title "csvdt ${{ steps.version.outputs.csvdt }} - tzdata ${{ steps.version.outputs.tzdata }} (current build, ${built})" \
+              --notes "$rolling_notes" \
+              --latest=false
+          else
+            # The create path holds to the same order: created without
+            # BUILD-INFO, which follows once every other asset is up. Created
+            # from a glob it went first, so a first-ever publish that died
+            # partway produced the same self-masking state the update path
+            # was rewritten to avoid.
+            gh release create "$tag" $(cd release && ls | grep -vxF BUILD-INFO | sed 's|^|release/|') \
+              --title "csvdt ${{ steps.version.outputs.csvdt }} - tzdata ${{ steps.version.outputs.tzdata }} (current build, ${built})" \
+              --notes "$rolling_notes" \
+              --latest=false
+          fi
+          # One upload, after both branches, so the strictly-last invariant
+          # is structural: no future edit to one branch can reorder it in
+          # that branch alone.
+          gh release upload "$tag" release/BUILD-INFO --clobber
+
+      # What a version shipped as, kept with the version. Neither release
+      # above answers that: the rolling pointer is the current build, and an
+      # archive entry is one build among many. Somebody reproducing an old
+      # result needs the answer, because the binary carries the time zone
+      # database it was compiled with and rebuilding the source tarball today
+      # does not -- Cargo.lock is not committed, so a rebuild resolves
+      # today's chrono-tz and therefore today's zone rules.
+      #
+      # Only on a tag push, which is the one moment the answer is being
+      # decided. The monthly rebuild refreshes the rolling release on
+      # purpose; overwriting the version's own copy every month would lose
+      # the one thing it is for, and there would then be no release anywhere
+      # holding a version as it was published.
+      - name: Attach the binaries to the version's own release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag='${{ github.ref_name }}'
+
+          # Staged into a directory of its own rather than renamed in place.
+          # One file has to be renamed -- the RPM workflow attaches to this
+          # same release and calls its own checksum file SHA256SUMS too --
+          # and doing that to release/ mutates what the steps after this one
+          # compare against: the rolling release serves SHA256SUMS, so the
+          # verification below would report a file missing that is sitting
+          # right there under another name. It cost a green run to find that
+          # out, in a dry run of this step rather than on the first tag.
+          #
+          # The contents are untouched, so the names inside SHA256SUMS-binaries
+          # still match the assets they cover.
+          rm -rf archive && mkdir archive
+          cp release/* archive/
+          mv archive/SHA256SUMS archive/SHA256SUMS-binaries
+
+          # A release created in the web interface makes its own tag, so it
+          # is usually already there by the time this runs. A tag pushed with
+          # git is not, and the assets belong to the version either way --
+          # so it is made here rather than the run failing over it, with
+          # notes a person is expected to replace.
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "csvdt $tag" \
+              --notes "See CHANGELOG.md for what changed in $tag." || true
+          fi
+
+          for asset in $(cd archive && ls); do
+            gh release upload "$tag" "archive/$asset" --clobber
+          done
+
+          published=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
+          missing=$(comm -23 <(cd archive && ls | sort) <(printf '%s\n' "$published"))
+          if [ -n "$missing" ]; then
+            echo "::error::The $tag release is missing binaries this build produced."
+            printf '  %s\n' $missing
+            exit 1
+          fi
+          (cd archive && ls) | sed 's/^/  ok /'
+
+      # The publish above is several calls, and a partial one is exactly the
+      # state nobody would notice: the release is there, so nothing looks
+      # broken, but a platform's binary or a checksum file is missing and only
+      # whoever downloads that one finds out. Checked here rather than trusted,
+      # and the run fails loudly if the release does not carry what was built.
+      #
+      # On every run, not only the ones that published: an unchanged month
+      # produces the same file set, so the comparison is just as meaningful --
+      # and it is the run that would otherwise say "nothing to release" over a
+      # release that an earlier partial upload or a stray manual deletion left
+      # short. Gating this on having published was what let that state hide.
+      - name: Verify the rolling release serves every file
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view release >/dev/null 2>&1; then
+            echo "::error::No 'release' release exists to verify."
+            exit 1
+          fi
+          published=$(gh release view release --json assets --jq '.assets[].name' | sort)
+          produced=$(cd release && ls | sort)
+          # A produced file the release lacks used to be re-uploaded here, on
+          # the argument that the file in release/ is the one that belongs
+          # there. That holds only when this run published the release: on an
+          # unchanged month nothing was published, so release/ holds a fresh
+          # compilation of the same inputs -- and by this workflow's own
+          # premise that Rust output is not reproducible byte-for-byte, its
+          # hash need not match the SHA256SUMS the release is already
+          # serving. Grafting it on would break verification for exactly the
+          # platform whose asset went missing, silently, and report ok.
+          # Missing assets are a job for a full republish.
+          missing=$(comm -23 <(printf '%s\n' "$produced") <(printf '%s\n' "$published"))
+          if [ -n "$missing" ]; then
+            echo "::error::The 'release' release is missing assets this build produced. Re-run this workflow to republish the set as a whole; uploading one binary onto another build's checksums would leave verification failing."
+            printf '  %s\n' $missing
+            exit 1
+          fi
+          if [ "$published" != "$produced" ]; then
+            echo "::error::The 'release' release does not carry the files this build produced."
+            diff <(printf '%s\n' "$produced") <(printf '%s\n' "$published") || true
+            exit 1
+          fi
+          printf '%s\n' "$published" | sed 's/^/  ok /'
+
+      # The designation answers "what is csvdt now", and the answer is a
+      # version: it is what a visitor sees first, what `releases/latest`
+      # resolves to, and what anything asking for "the latest release" gets.
+      # The rolling and archive releases are builds of a version rather than
+      # versions, so neither of them is that answer.
+      #
+      # Set on every run rather than only where something published: an
+      # unchanged month publishes nothing, and a flag corrected only on the
+      # months that publish is a flag that stays wrong. One idempotent call,
+      # then GitHub is asked what it actually thinks -- the flag is what
+      # would have failed.
+      #
+      # Claimed for the version release rather than merely dropped from the
+      # rolling one, which was tried and does not work: with no release
+      # claiming it, GitHub falls back to picking by creation date, and a
+      # release's creation date is its tag's commit date. Measured: a run
+      # that only cleared the flag read the designation a second later and
+      # found it unmoved, and two minutes later still.
+      - name: The Latest designation belongs to the newest version release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo='${{ github.repository }}'
+
+          # Asked of GitHub rather than of git: this job checks out shallow
+          # and has no tags to sort. Draft and prerelease entries cannot hold
+          # the designation, so they are not candidates for it either, and
+          # the shape filter leaves only versions -- the rolling and archive
+          # tags live in the same namespace.
+          newest=$(gh api "repos/$repo/releases" --paginate \
+                     --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+                   | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          if [ -z "$newest" ]; then
+            echo "::warning::No version release exists to carry the Latest designation. That is right only before the first version is tagged."
+            exit 0
+          fi
+
+          gh release edit "$newest" --latest >/dev/null
+          actual=$(gh api "repos/$repo/releases/latest" --jq .tag_name 2>/dev/null || echo none)
+          if [ "$actual" != "$newest" ]; then
+            echo "::error::GitHub calls '$actual' the latest release where $newest was claimed. That designation is what a visitor sees first and what anything asking for 'the latest release' gets, and it belongs to a version release rather than to a build of one."
+            exit 1
+          fi
+          echo "  ok  GitHub's latest release is $actual"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Monthly build"
+            echo ""
+            echo "Built \`${{ needs.meta.outputs.ref }}\` at \`${{ needs.meta.outputs.sha }}\`."
+            echo ""
+            if [ "${{ steps.changed.outputs.changed }}" = "true" ]; then
+              echo "Published: dependencies or toolchain changed since the last build, or the released version did."
+            else
+              echo "Nothing published: same commit, same dependencies and same compiler as the current build, so the binaries would be equivalent. The existing releases were left untouched."
+            fi
+            if [ '${{ github.ref_type }}' = 'tag' ]; then
+              echo ""
+              echo "Also attached to the \`${{ github.ref_name }}\` release: the binaries that version shipped with, kept as they are."
+            fi
+            echo ""
+            echo "- csvdt: \`${{ steps.version.outputs.csvdt }}\`"
+            echo "- bundled tzdata: \`${{ steps.version.outputs.tzdata }}\`"
+            echo "- build fingerprint: \`${{ steps.fingerprint.outputs.fp }}\`"
+            echo "- chrono-tz resolved: \`${{ steps.freshness.outputs.used }}\` (latest published: \`${{ steps.freshness.outputs.latest }}\`)"
+            if [ "${{ steps.freshness.outputs.stale }}" = "true" ]; then
+              echo ""
+              echo "> A newer chrono-tz exists than this build resolved. If the version series changed, update the requirement in \`Cargo.toml\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The same release, packaged. Called rather than triggered: the releases
+  # above are created with GITHUB_TOKEN, and a release created that way
+  # raises no event, so an `on: release` workflow would never fire and the
+  # RPM would quietly stop tracking releases.
+  #
+  # After the release job rather than beside it, so a month that fails to
+  # publish binaries does not hand out an RPM as though it had. It runs on
+  # unchanged months too, since the RPM also carries a Fedora release that
+  # this workflow's fingerprint knows nothing about: the dist tag moves when
+  # Fedora does, and none of the four things fingerprinted here can see it.
+  rpm:
+    name: RPM
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/rpm.yml
+    with:
+      publish: true

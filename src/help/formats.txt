@@ -1,0 +1,100 @@
+
+TIMESTAMP FORMATS
+RFC3339 (read/written by -s/--split, -u/--utc, -l/--local,
+-o/--offset, and -d/--duration when pointed at a timestamp
+column): a specific, common way of writing a date, time, and UTC
+offset together, e.g.
+
+|    2024-06-15T14:00:00+02:00
+|    2024-06-15T14:00:00Z          (Z means UTC, same as +00:00)
+
+An offset missing its colon (+0200 instead of +02:00) is also
+accepted when reading, even though it isn't strictly valid
+RFC3339. A space where the 'T' belongs (2024-06-15 14:00:00Z) is
+accepted when reading too, which RFC3339 allows for readability
+between parties that have agreed on it. Output is always written
+with the 'T', so it is valid either way round.
+
+The 'T' and the 'Z' are read in either case, so
+2024-06-15t14:00:00z names the same instant as the upper-case
+form shown above. RFC3339 permits that outright. Output uses an
+upper-case 'T' and spells the offset out, +00:00 rather than Z,
+so a column of results is one width whatever the zone.
+
+An offset is read anywhere from -23:59 to +23:59, since that is
+what a file may carry; -o/--offset writes only -12:00 to +14:00,
+the range real zones use. So a record whose offset is outside
+that converts, and asking for the same offset as a target does
+not.
+
+A fraction of a second is read to nine digits, and more than
+nine is parse_err rather than a value quietly shortened. It is
+written back at three, six or nine digits, whichever first
+covers what the value holds: .5 is written .500 and .1234 is
+written .123400. A fraction of nothing (.0) is dropped.
+
+A seconds field of 60 is read only where a leap second can be,
+which is the last second of a UTC month, and one instant the
+world over rather than a reading on any particular clock. All
+three of
+
+|    2016-12-31T23:59:60Z
+|    2017-01-01T05:29:60+05:30
+|    2016-12-31T18:59:60-05:00
+
+are that same leap second, seen from three offsets, and all
+three convert.
+
+A :60 anywhere else -- 14:00:60, or 23:59:60 in mid-month, or
+the 23:59:60+02:00 that reads like one on its own clock but
+lands in the middle of the UTC evening -- is written as
+parse_err instead. It is not a leap second there but a damaged
+value, most often from a formatter that rounded 59.5 up without
+carrying into the minute, and reading it would quietly name the
+second after the one it says.
+
+The year is four digits, so 0001 through 9999 and no further. A
+conversion whose result would fall outside that writes parse_err
+rather than ISO 8601's expanded form (+10000-01-01...,
+-0001-12-31...), which is a different format wearing the same
+shape and could not be read back. Note a conversion can cross
+the boundary without moving the instant:
+9999-12-31T23:59:59+00:00 is year 10000 on a +14:00 clock.
+
+The floor is 0001 rather than 0000 because there is no year
+zero: the calendar runs 1 BC straight into AD 1, and ISO 8601
+writes 0000 for 1 BC only where both sides have agreed to read
+it that way. RFC3339 makes no such agreement.
+
+An offset that is not a whole number of minutes cannot be
+written either; only -l/--local can produce one, and KNOWN
+LIMITS covers it.
+
+Unix epoch (read by -r/--rfc3339, which converts FROM this
+format TO RFC3339): the number of whole seconds since
+1970-01-01T00:00:00Z, e.g. 1700000000. Negative values (before
+1970) are accepted, down to -62135596800, which is
+0001-01-01T00:00:00Z, and up to 253402300799, which is
+9999-12-31T23:59:59Z. Both ends are the year range above rather
+than a limit of their own.
+
+Whole seconds, so a value carrying a fraction is parse_err.
+Milliseconds are the usual mistake with log data, and a
+millisecond value is a thousand times too large: any date after
+1978-01-11T21:31:40Z lands past the ceiling and is written
+parse_err rather than a date tens of thousands of years out that
+would read like an answer. Divide by 1000 first.
+
+ISO 8601 duration (written by -d/--duration's result column): a
+standard way of writing a span of time as P[n]DT[n]H[n]M[n]S,
+e.g. PT5S (5 seconds), P1DT6H30M (1 day, 6 hours, 30 minutes),
+or P3653D (3653 days, no time component). Zero-valued components
+are omitted; an all-zero duration is written as PT0S. Only
+days/hours/minutes/seconds are used, deliberately, even for very
+large spans -- a year/month unit would require rounding to some
+average length (a month is anywhere from 28 to 31 days), and
+this tool never approximates a duration.
+
+Sub-second precision is preserved when the source timestamps
+carry it, as a fraction of the seconds component (e.g. PT0.999S,
+P1DT3H4M5.25S). Use --round-seconds to round to whole seconds.

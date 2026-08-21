@@ -1,0 +1,13 @@
+Removes columns from the CSV output. Takes one column [0...], or
+several comma-joined with no space (e.g. --remove 0,3,4). The
+numbers refer to positions in the input, so they don't shift as
+earlier columns are dropped: --remove 0,1 removes the first two
+columns, not the first and then whatever moved into second
+place.
+
+Order doesn't matter. A column named twice is refused rather
+than removed once: the list would not be saying what it looks
+like, and -a/--arrange refuses a repeat for its own reasons, so
+both lists now answer the same mistake the same way. Every
+column must exist, or the row is reported as out of bound rather
+than partly removed.

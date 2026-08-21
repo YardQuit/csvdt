@@ -1,0 +1,4 @@
+This is the summary. --help gives every option in full, and adds
+worked examples, the timestamp formats read and written, the
+known limits, and the exit statuses.
+<https://github.com/YardQuit/csvdt>

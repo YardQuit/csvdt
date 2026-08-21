@@ -1,0 +1,343 @@
+
+KNOWN LIMITS
+Collected here so they can be found in one place rather than
+only in the help for the option each one belongs to.
+
+INPUT MUST BE UTF-8
+A byte-order mark is stripped if present. Anything else is
+refused rather than guessed at, since guessing would mean
+returning a wrong answer quietly:
+  cp1252 / latin-1, which Excel's plain "Save as CSV" writes on
+  a Western locale, fails naming the record and the line it is
+  in, the field, and how far into that field the first bad byte
+  lies. Read the byte the message gives with care: it is where
+  the record starts, not where the bad byte is. Seek to it and
+  count on by the index the message ends with, through however
+  many fields precede the named one -- or simply convert the
+  file, which is the answer either way. UTF-16 is named
+  explicitly, with or without a byte-order mark.
+Convert first if needed:
+
+|    iconv -f CP1252 -t UTF-8 in.csv > out.csv
+|    iconv -f UTF-16 -t UTF-8 in.csv > out.csv
+
+A field whose data genuinely holds NUL bytes is passed through
+untouched. Only UTF-16's alternating NUL pattern is refused, not
+any NUL at all.
+
+THE INPUT FILE CANNOT ALSO BE THE OUTPUT
+There is no in-place mode, and a redirection is not one. A shell
+opens the redirection before csvdt is started, so 'csvdt in.csv
+> in.csv' hands over a file already emptied: the data is gone
+before csvdt has seen a byte of it, and nothing here can get it
+back. Both that and the appending form are refused by identity
+rather than by name -- device and inode on Linux and macOS,
+volume serial and file index on Windows -- so a symbolic link or
+another route to the same file is caught with them. Write
+another file and move it into place:
+
+|    csvdt -u1 in.csv > out.csv && mv out.csv in.csv
+
+COLUMNS ARE ADDRESSED BY POSITION
+Always by number from 0, never by header name, so a repeated
+header name is not ambiguous. A column number refers to the
+input, and does not shift as --remove or -a/--arrange change the
+row.
+
+-l/--local DEPENDS ON MORE THAN THE INPUT
+It is the only conversion here that does. -u, -o, -d, -s and -r
+work from the offset the record already carries, so the same
+input gives the same output on any machine, from any build, for
+ever. -l answers a different question -- what did the clock read
+in some zone -- and that takes two things the record never
+carried:
+  The zone, from TZ or, unset, the host's own configuration. The
+  same input and the same binary therefore give different
+  results on differently configured hosts. The rules, from the
+  IANA data compiled into this binary rather than the machine's.
+  That keeps a result independent of the host's data, but a
+  build only knows the rules that existed when it was
+  made. --version reports the release; a rebuild picks up newer
+  ones.
+Note also that -l replaces the offset the record carried rather
+than deriving from it. Where a result has to be reproducible
+from the file alone, convert with -u or -o, and keep -l for
+reading.
+
+-l OUTPUT IS NOT SORTABLE AS TEXT
+Following the rules means the offset varies from row to row,
+which is the point of it and also its cost: a column holding
+both +01:00 and +02:00 no longer sorts into the order the events
+happened. Where an autumn shift repeats an hour, two different
+instants read the same on the clock and differ only in offset,
+and sorting puts the later one first.
+
+-u and -o give one offset throughout, so their output sorts
+chronologically by construction. Build a timeline with those,
+and use -i/--insert to keep an -l column beside it for reading.
+A TZ naming a zone this binary does not know is refused, rather
+than quietly answered in UTC. The deprecated single-word
+names -- EET, WET, CET, MET, EST5EDT -- are links in the release
+bundled here, each to a geographic zone, and carry the whole of
+that zone's history.
+
+EET answers exactly as Europe/Athens does, WET as Europe/Lisbon,
+CET and MET as Europe/Brussels, EST5EDT as America/New_York, on
+every day from 1850 to now. They did not always. IANA once
+defined them as zones holding a rule and no history at all, and
+then they answered for dates before those rules began as though
+they had always applied -- EET reading +03:00 through a 1950
+summer where Athens read +02:00.
+
+--version says which release is built in; a build older than the
+change behaves the older way, which is reason enough to name the
+geographic zone in work that has to be reproduced. It is also
+the clearer thing to write down. IANA treats its pre-1970 rules
+as best effort, so -l on timestamps that old is approximate by
+design rather than by fault.
+
+-l WRITES parse_err WHERE THE ZONE'S OFFSET IS NOT WHOLE MINUTES
+RFC3339 writes an offset as +HH:MM, with nowhere to put a
+seconds part. Before a place adopted standard time its offset
+was the local mean time of its longitude, which is rarely a
+whole minute: Europe/Amsterdam +00:17:30, America/New_York
+-04:56:02.
+
+Africa/Monrovia kept -00:44:30 until January 1972, so this is
+not only ancient history. Such a result is marked rather than
+written, because writing it would name a different instant from
+the input: the offset rounds to the nearest minute while the
+clock time keeps its seconds, so 1971-06-01T12:00:00Z became
+1971-06-01T11:15:30-00:45, which reads back as 12:00:30Z.
+
+The timestamp is still in its own column beside the marker. -u
+and -o are unaffected -- theirs are whole-minute offsets by
+construction -- and so is -s/--split, which reads the offset the
+record already carried. A TZ naming a zone behaves the same on
+every platform. A TZ holding POSIX rules instead of a name, such
+as EST5EDT,M3.2.0,M11.1.0, is honoured only on Unix; on Windows
+the system's zone is used.
+
+-o/--offset ACCEPTS ONLY REAL OFFSETS
+-12:00 through +14:00. A typo beyond that range is refused
+rather than converted, so it cannot quietly produce a timestamp
+carrying an offset no place has ever used.
+
+AN UNCLOSED QUOTE IS NOT REPORTED AS ONE
+There is no error for a quote that is opened and never closed.
+Everything after it is read as one field -- newlines, delimiters
+and all the rows that follow -- to the end of the file. What
+that shows up as is a record with too few fields, which is also
+what a genuinely ragged file gives, and it is the only sign
+there is:
+
+|    a,b     -> CSV error: found record with 1 fields,
+|    "x,2       but the previous record has 2 fields
+|    3,4
+
+This matters because of what the obvious next step does.
+--flexible is the answer to raggedness, so reaching for it here
+accepts the mangled record instead: those three lines come out
+as one field holding "x,2\n3,4, valid CSV that no longer
+resembles the input, and exit 0. A field genuinely holding
+newlines is a real thing, which is why this cannot simply be
+refused -- the two are indistinguishable once parsed. Check the
+file, rather than the option, when a count is off by a lot. One
+aggravation under --comment: closing a trailing comment takes a
+final newline, which is supplied when the input lacks one, and
+an input that instead ends inside an unclosed quote takes that
+newline into the field as data. The mangled parse can therefore
+differ with and without --comment. Both readings are wrong the
+same way -- the file is the problem, not the flag.
+
+A CR-ONLY FILE LOSES ROWS TO --comment
+Classic Mac line endings -- \r alone, never \n -- end a data
+record, but only \n ends a comment. In a file whose lines all
+end in \r, the first comment line therefore runs on through
+every row that follows, and the run drops them all without a
+word: a file that begins with a comment comes out empty, exit 0.
+The same bytes without --comment parse row by row.
+
+A lone \r-ended comment line inside an ordinary file loses the
+rows up to the next \n the same way. Convert the line endings
+first -- \r\n and \n are both fine.
+
+THE OUTPUT IS CANONICAL CSV, NOT A COPY OF THE INPUT
+Records are parsed and written again rather than passed through,
+so a run that changes nothing about the data still normalises
+how it is written:
+  CRLF line endings are read and written as LF. A Windows file
+  therefore differs from its original on every line. A final
+  newline is added if the input lacked one. Quotes are written
+  only where they are needed, so "a","b" comes back as a,b --
+  and with --single-quote, single-quoted input is rewritten with
+  double quotes, since only reading uses the single one. That
+  output is therefore read back WITHOUT --single-quote; read
+  with it again, a field the writer quoted keeps its double
+  quotes as data and splits on any delimiter inside it. A run
+  whose output holds such a field says so on stderr, with a
+  count.
+A field's own text is not among them: it is passed through as
+the file wrote it, whitespace included, unless --trim is asked
+for. Converting does not need the trimming, since a timestamp is
+read past any whitespace around it. None of this alters a
+value's meaning as CSV, but it does mean the output is not
+byte-comparable with the input, so keep the original where the
+file itself is the evidence.
+
+With --comment in use, the writer is told the comment character,
+and a field holding it is quoted exactly as a field holding the
+delimiter is: quoting is what keeps it data rather than the
+start of a comment, so the output reads back with the same
+--comment, rows and all. This adds quotes the input may not have
+carried -- under --comment '#' the field a#b comes back as
+"a#b" -- which changes nothing about what the value is, only how
+it is written, like every other normalisation here.
+
+Two quoting styles cannot give that protection, and there the
+rows a second read would drop are counted and reported on stderr
+at the end of the run, the same way parse_err is. 'never' quotes
+nothing, by definition. 'nonnumeric' decides by whether the
+field is a number and consults nothing else, so --comment '-'
+over the numeric field -5 writes it bare.
+
+The header counts there too, and is the worst of them: a second
+read drops the header rather than a row, so -H takes the first
+data row for the column names, and that row is then exempt from
+the conversion rather than missing from it. Every column number
+still lines up, which is what makes it quiet. It is counted with
+the rest and said separately.
+
+This is about the output alone. A quoted field in the input is
+data whatever it starts with, and always was: a comment is only
+recognised where one begins a line.
+
+A delimiter can go the same way. 'nonnumeric' will not quote a
+number whatever it holds, so a --print-delimiter a number can
+hold is written bare inside one: under --print-delimiter '.' the
+field 5.5 goes out unquoted, and a second read finds two fields
+where one was written, every column number after it in that row
+shifting with them. Those rows are counted and reported on
+stderr as well.
+
+Which characters those are follows the float syntax rather than
+being a list worth memorising: any digit, '.', '-', '+', 'e' or
+'E', and the letters of inf, infinity and nan -- a, f, i, n, t
+and y -- since those parse as numbers as well. Either case, so
+'Y' splits INFINITY where 'y' splits infinity. Twenty-seven
+characters in all, and every delimiter outside them is safe
+under this style, the default ',' among them.
+
+'never' can do it to any field rather than only a number, but
+that is the style whose whole description is that it writes
+invalid CSV where the data needs quoting, so it is said in
+advance rather than counted afterwards.
+
+A VALUE THAT WILL NOT PARSE IS MARKED, NOT FATAL
+Every conversion writes the literal parse_err in place of a
+result it could not produce and carries on with the next row, so
+one malformed line in a large log does not throw away the run.
+How many did not convert is reported on stderr at the end:
+
+|    csvdt: 3 of 40122 values could not be converted,
+|    and were written as parse_err
+
+That is stderr rather than the output, so it disturbs nothing a
+pipe is reading, and the run still exits 0: a few failures among
+many rows are ordinary. Nothing converting at all is not, and
+does not exit 0 -- the column given is probably not the one
+holding the timestamps, or they are not in a format csvdt reads.
+The output is written either way; only the status distinguishes
+it from a run that worked. Where a policy is stricter than that
+-- any failure at all is a failure -- count the markers:
+
+|    csvdt -H -p -u1 log.csv | grep -c parse_err
+
+This is why the marker is a fixed word rather than an empty
+field: an empty field is invisible, and indistinguishable from a
+value the source really left blank. The value that would not
+parse normally stays beside the marker in its own column, so
+what failed can still be read. The one exception is -i replace,
+which puts the marker where the value was -- keep the original
+file.
+
+-d/--duration WITH ONE COLUMN TRUSTS THE ROW ORDER
+It measures each row against the row before it, in file order.
+Sort the file first, or the result is the gap between
+neighbouring rows rather than between neighbouring instants.
+Against the row before it that parsed, strictly: an unreadable
+line is marked and skipped over, so the next measurement spans
+it. And the first row's PT0S is the absence of anything to
+measure against, not a measured zero.
+
+A LEAP SECOND ADDS NOTHING TO A SPAN
+-d/--duration counts ordinary seconds, so the extra second a
+leap second inserts is not among them. 2016-12-31T23:59:60Z and
+the 2017-01-01T00:00:00Z a moment after it measure PT0S apart,
+and a span reaching across that month end is one second short of
+true UTC for every leap second it covers. This is how nearly
+every system keeps time -- Unix time has no room for the extra
+second either -- so the answer agrees with what other tools
+report for the same two timestamps: it is elapsed civil time
+rather than elapsed SI seconds.
+
+There have been 27 of them and none since 2016, so only a span
+reaching back past then is affected at all, by at most 27
+seconds. A :60 that is not at a month end is refused rather than
+counted; see TIMESTAMP FORMATS.
+
+--flexible's FILLING MODES ARE THE ONLY OPTIONS THAT ADD DATA
+Everything else here converts, moves or drops what was already
+there. See --flexible's own help for what that means for
+evidence.
+
+ROWS ARE PROCESSED ONE AT A TIME
+Memory use grows with the widest single record, not with the
+file: a million ordinary rows stream through flat, but each
+record is held whole while it is worked on, so one enormous
+field costs about twice its own size in memory. It is held
+twice over -- once in the buffer it was read into, and once as
+the field parsed out of it -- and both stay until the record is
+done with. The case that matters is not exotic: it is the
+unclosed quote above, which turns everything after it, possibly
+the rest of the file, into one field.
+
+A crafted or damaged input can cost twice its full size in
+memory that way, where the same bytes as ordinary rows cost
+almost nothing. Measured, a 64 MB field peaks at about 134 MB
+against the 10 MB an empty run takes, and the same figure comes
+back whatever the run was asked to do: the two copies are the
+reader's, not any action's.
+It costs time as well, and in proportion: doubling the field
+costs about twice as long and no worse, whatever the field
+holds. Measured, a 128 MB field is read and written in about
+half a second; the writer's worst case, a field of nothing but
+quote characters where every one doubles again on the way out,
+takes about two seconds for the same size. So it is memory,
+above, that a damaged file spends -- not time.
+
+An ordinary file of a few hundred megabytes is the other way
+about. Memory stays flat, about 10 MB whatever the size, and
+time is the only thing that grows with it: measured, 256 MB of
+rows takes some three seconds to reformat and four to convert a
+column. Both figures are one machine's and yours will differ;
+the proportion is the part that holds anywhere.
+
+The one thing streaming rules out is knowing about the whole
+file before writing, which is why --flexible=fix pads only to
+the first record's width. --flexible=widest gets around it by
+reading the input twice rather than by holding it, copying a
+pipe to a temporary file when it has to.
+
+LINUX IS THE INTENDED PLATFORM
+macOS and Windows are supported on a best-effort basis. All
+three are built and tested on every commit, and a report about
+any of them is worth making, but Linux is what csvdt is
+developed and packaged on, and what the differential checks are
+run against before a release. The other two get less attention
+and less coverage.
+
+Where a behaviour cannot be had on one of them, this help says
+so rather than leaving it to be found out. The refusal of a
+redirection onto the input holds on Linux, macOS and Windows
+alike, by whatever a file's identity is called there.

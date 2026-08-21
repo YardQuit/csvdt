@@ -1,0 +1,49 @@
+[package]
+name = "csvdt"
+version = "1.0.0"
+edition = "2024"
+authors = ["Michael A Jones <yardquit@pm.me>"]
+license = "GPL-3.0-or-later"
+# The differential checks are for working on csvdt, not for using it: they
+# need python3 and an Emacs of their own, and say nothing to somebody who
+# installed the crate. Packaged they would only be weight. 'tests' stays, so
+# 'cargo test' still works from an unpacked crate; it reads no fixture files.
+exclude = ["checks/"]
+
+[dependencies]
+chrono = "0.4.41"
+clap = { version = "4.5.39", features= ["cargo"] }
+# Already in the tree through clap; direct so --help can be written the
+# way clap writes it -- same stream, same colour rules -- with the trailing
+# spaces clap leaves on an indented blank line taken off. See
+# 'say_as_clap_would'.
+anstream = "1.0"
+csv = "1.3.1"
+# Already in the tree through csv; direct so the comment-hazard check can ask
+# csv-core's own is_non_numeric instead of mirroring it.
+csv-core = "0.1.12"
+chrono-tz = "0.10"
+iana-time-zone = "0.1"
+# Renders the man page from the same Command that parses the arguments, so
+# the page cannot describe options the binary does not have. See
+# '--generate-man'.
+clap_mangen = "0.3"
+# Already in the tree through iana-time-zone; direct so a signal can remove
+# the '--flexible=widest' spool, which std gives no way to hear about.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Already in the tree through clap; direct so the refusal below can be asked
+# on Windows as well as on Unix. 'csvdt in.csv > in.csv' destroys the file on
+# every platform, and the guard that refuses it needs a file's identity --
+# which std exposes as device and inode on Unix and not at all on Windows, so
+# GetFileInformationByHandle is the way to ask.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"

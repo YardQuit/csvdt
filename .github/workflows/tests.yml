@@ -1,0 +1,82 @@
+# Runs the test suites on every push and pull request.
+#
+# The monthly build also runs `cargo test`, but only on the first of the month
+# and only for the Rust side -- which is too late to learn that something broke,
+# and says nothing about the Emacs front end. This is the one that gates a
+# change.
+#
+# Rust is tested on all three platforms rather than just Linux: -l/--local
+# reads TZ on Unix and not on Windows, so the two genuinely differ, and a
+# Windows-only failure has slipped through to master before by being noticed
+# only after the merge.
+name: Tests
+
+# A pull request branch would otherwise be checked twice over, once for the
+# push and again for the pull request. Pushes are watched on master only, so a
+# change is checked once as a pull request and once more as what landed.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Nothing here publishes anything; reading the checkout is all it needs.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: cargo test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # A test that never returns otherwise runs to GitHub's six-hour default.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Cargo.lock is untracked, so this is what the build would resolve
+      # anyway; being explicit means a dependency that breaks us shows up
+      # here rather than in the monthly build.
+      - name: Update dependencies
+        run: cargo update
+
+      - name: Test
+        run: cargo test
+
+  emacs:
+    name: emacs front end
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # The Emacs tests drive a real csvdt rather than a mock, since the whole
+      # point of the package is that it asks the binary what it can do.
+      - name: Build csvdt
+        run: cargo build --release
+
+      - name: Install Emacs
+        run: sudo apt-get update && sudo apt-get install -y emacs-nox
+
+      # Byte-compiles with any warning fatal, then runs the batch checks.
+      - name: Batch tests
+        run: emacs/run-tests.sh
+
+      # Keystroke-level tests, which need a pty: `emacs --batch' reads its own
+      # stdin, so a keyboard macro never reaches a minibuffer there. TERM is
+      # set because Emacs is started as a terminal frame inside the pty.
+      #
+      # The suite has its own watchdog for a sequence that leaves the
+      # minibuffer open, so a hang is reported as a failure rather than
+      # running until the job times out; this is a second bound on top.
+      - name: Keystroke tests
+        run: timeout 300 emacs/tty-test.sh
+        env:
+          TERM: xterm

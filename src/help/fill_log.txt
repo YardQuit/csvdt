@@ -1,0 +1,183 @@
+Writes a record-by-record account of what '--flexible' padded,
+or would have padded, to the file named. '-' means standard
+error.
+
+Requires '--flexible'. Without a filling mode there is nothing
+to account for, and the option is refused rather than producing
+an empty log a reader would take for a clean file.
+
+The log is CSV, with a header, so it loads wherever the data
+loads and joins to the output on the row number:
+
+|    line,record,fields,width,delta,status
+|    3,2,5,7,-2,padded
+|    9,8,9,7,2,over
+
+Six narrow columns read badly as raw CSV. 'column' lines them
+up, and the log is safe to split on every comma because nothing
+in it is ever quoted or holds one -- which is not true of the
+data it describes:
+
+|    $ column -t -s, fill.log
+|    line  record  fields  width  delta  status
+|    3     2       2       4      -2     short
+|    4     3       6       4      2      over
+|    5     4       3       4      -1     short
+
+'column' is util-linux and not on Windows. PowerShell reads the
+log itself, which is better than splitting on commas rather than
+worse -- it is a CSV reader, so a quoted field would not fool it
+either:
+
+|    PS> Import-Csv fill.log | Format-Table
+
+'line' is the line an editor jumps to; 'record' counts records,
+which is a different number as soon as a field holds a newline.
+'fields' is what the row arrived with, 'width' what it was
+measured against, and 'delta' the difference between them --
+how far the row is from that shape, whether or not anything was
+done about it. The row's own count leads, so a row falling short
+is negative and one running over is positive, and by how much
+either way. It is never zero: a row already the right width is
+not logged at all.
+
+The status is one of three:
+
+  padded
+      The row was short and has been filled out. Only 'fix' and
+      'widest' produce this.
+
+  short
+      The row is short and was passed through untouched, which
+      is what plain '--flexible' does to every one of them.
+      Nothing in the output marks it, so this is the only
+      account of it.
+
+  over
+      The row is wider than the width, and it is written to the
+      log before the run stops, so the log ends on the row the
+      error names.
+
+      Ordinary under 'fix', whose width is the first record: any
+      row wider than that one ends the run. Under 'widest' it
+      means something else entirely, because that width is the
+      widest record in the file and nothing can exceed it -- a
+      row that does means the file changed between the counting
+      pass and the writing one, which is what the error there
+      says. Under plain '--flexible' nothing stops and the row
+      is passed through like any other.
+
+Plain '--flexible' is the mode the log was most worth adding to.
+It takes the first record's width -- the header under
+-H/--has-header, otherwise the first data row -- and then does
+nothing with it: every row is written out as it arrived, short
+or long or neither, and the run ends 0 whatever it found. That
+is the mode's whole point, and it is also why the output cannot
+be read for damage. A short row and a complete one look alike
+once they are CSV.
+
+So under that mode the log is not an account of what was done to
+the file. Nothing was. It is the only place the file's shape is
+described at all: 'short' and 'over' against that first record,
+and every row not named in it matched.
+
+A row that is absent from the log was one of two things, and
+which depends on where the log stops. If its last row is 'over',
+the run ended there: everything past that line was never read,
+and the log says nothing about it either way. Otherwise a row
+not in the log was already the width it was measured against.
+
+That is 'fix' in practice: it stops at the first row wider than
+the first record, and a file with a short row after that one has
+it padded by nobody and reported by nothing. Under 'widest' the
+same gap needs the file to have changed underneath the run. The
+exit status says the run did not finish; the log says how far it
+got.
+
+What the width is depends on the mode, and the run says which on
+stderr when it finishes. 'widest' measures against the widest
+record in the file, which it has already read. 'fix' and plain
+'--flexible' measure against the first record -- the header
+under -H/--has-header, otherwise the first data row -- because a
+single pass has nothing else to measure against.
+
+That difference matters when comparing two logs of the same
+file: under plain '--flexible' a row wider than the first record
+is reported as 'over', where 'widest' would simply have counted
+it and padded everything else out to it.
+
+What the pattern says, before the rows do: a damaged file and a
+wrong reference read differently, and the difference is whether
+the log is uniform.
+
+A header that lost a name -- two names over three columns of
+data -- shows up under plain '--flexible' as every data row
+'over' by exactly one, with none left out:
+
+|    2,1,3,2,1,over
+|    3,2,3,2,1,over
+|    4,3,3,2,1,over
+
+Every row cannot be wrong. One row can, and it is the one being
+measured against. Under 'widest' the same file says so directly,
+since only the header is padded:
+
+|    1,0,2,3,-1,padded
+
+Genuinely ragged data reads the other way about -- some rows,
+scattered deltas, and the header absent because it was right:
+
+|    3,2,2,3,-1,padded
+|    4,3,1,3,-2,padded
+|    6,5,2,3,-1,padded
+
+So: one delta repeated on every row means the reference is
+short, and -H over a file whose header has lost a name is the
+common cause. Deltas that vary, over some rows and not others,
+mean the file. Under 'fix' the same fault stops the run at the
+first data row, which is the same news arriving sooner.
+
+'widest' has the same tell from the other side. Nearly every row
+padded by the same amount, with one row missing from the log,
+means that missing row is the widest -- and the file has just
+grown a column to accommodate it:
+
+|    1,0,3,4,-1,padded
+|    2,1,3,4,-1,padded
+|    4,3,3,4,-1,padded
+|    5,4,3,4,-1,padded
+
+Four rows padded and line 3 not among them. One stray field on
+one row widened everything else, and every row in the output now
+ends in an empty column that was never in the file. That is
+rarely what was wanted: the row is the thing to look at.
+
+Which is the argument for running plain '--flexible' first, with
+a log and nothing else. It changes no byte and ends 0, so it
+costs a pass and risks nothing, and its log names the anomaly
+rather than the consequence -- the same file above gives it in
+one line:
+
+|    3,2,4,3,1,over
+
+Read that, then choose. A file whose rows are short against a
+sound header wants 'fix'. A file whose first record is the
+unreliable one wants 'widest'. A file with one stray wide row
+wants neither until that row is dealt with.
+
+The file is created, not appended to. A log that grew across
+runs would describe rows from an input that has since changed,
+and it is the run's own account or nothing.
+
+Creating is what truncates, so a destination that is the input,
+or where the output is going, is refused before anything is
+opened. Naming the input emptied it and then read the empty file
+it had made, reporting nothing wrong. The two are compared as
+files rather than as names, so a symbolic link to the input is
+refused with it, and so is '/dev/stdout' -- whose rows would
+arrive in the middle of the conversion.
+
+Keeping it is the point. The WARNING above says the filled copy
+is no longer a faithful reproduction of its source, and this is
+what says exactly where the two differ -- so the copy can still
+be used, with the account of what was added beside it.

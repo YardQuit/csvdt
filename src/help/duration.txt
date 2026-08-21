@@ -1,0 +1,42 @@
+Calculates a time duration. Takes one column [0...], or two
+comma-joined columns [0...,0...] with no space (e.g. -d0,1).
+With one column, calculates the duration between the current
+row's timestamp in that column and the previous row's timestamp
+in the same column. Timestamps should be sorted in ascending or
+descending order first, or expect strange results.
+
+Strictly, the previous row that parsed. A row whose timestamp
+will not parse is marked parse_err and leaves the last good
+timestamp in place, so the next row that does parse measures
+back to that one rather than starting again from zero. That is
+the elapsed time between the two events that could be read,
+which is usually what is wanted -- but it is a gap across more
+than one row, and nothing in the column says which.
+
+The first row has nothing before it, so its PT0S is the absence
+of a measurement rather than a measured zero. The same goes for
+any row before the first one that parses. With two columns,
+calculates the duration between those two columns on the same
+row instead. This is simply the time elapsed between the two
+timestamps -- always a non-negative span, never a signed
+positive/negative difference -- so it comes out identical no
+matter which of the two column numbers you list first.
+
+The two must be different columns. A column measured against
+itself is PT0S on every row, which reads as a measurement rather
+than as the typo it is, so it is refused instead -- as --remove
+and -a/--arrange already refuse a column named twice. The result
+is written as an ISO 8601 duration, e.g. PT5S (5 seconds),
+P1DT6H30M (1 day, 6 hours, 30 minutes), or P3653D (3653 days).
+
+Only days/hours/minutes/seconds are used, deliberately, even for
+very large spans: a year/month unit would require rounding to
+some average length (a month is anywhere from 28 to 31 days),
+and this tool never approximates a duration. Zero-valued
+components are omitted, except an all-zero duration, which is
+written as PT0S.
+
+Sub-second precision is kept when the timestamps carry it,
+written as a fraction of the seconds component (e.g. PT0.999S,
+PT1.5S, P1DT3H4M5.25S). Pass --round-seconds to round to whole
+seconds instead.

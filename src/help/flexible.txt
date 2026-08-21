@@ -1,0 +1,89 @@
+Whether to allow records with a different number of fields from
+the previous record, instead of stopping with an error. Takes an
+optional mode, attached with '=':
+
+  -f, --flexible
+      Passes uneven records through as they are. The output
+      keeps the ragged shape of the input, which is not strictly
+      valid CSV.
+
+  -f=fix, --flexible=fix
+      Pads short records with empty fields, out to the width of
+      the FIRST record. One pass, so it never needs to hold or
+      re-read anything, but it cannot know about a row wider
+      than the first -- such a row is an error.
+
+  -f=widest, --flexible=widest
+      Reads the input twice: once to find the widest record,
+      then again to pad everything out to it, the header
+      included. No row can be too wide, so this is the one to
+      use when the first record may itself be short. Costs
+      roughly one extra read.
+
+Both filling modes produce valid, rectangular CSV. With
+'widest', input arriving on a pipe is copied to a temporary file
+first, since standard input cannot be rewound; the file is
+removed again when the run ends, including if it fails, and
+including when Ctrl-C or a scheduler's SIGTERM ends it partway
+through -- the copy is the long part of a long run, so that is
+when someone is likeliest to stop it.
+
+The run then ends of that signal as it always did, exit 130 for
+Ctrl-C and the rest. What no program can catch is SIGKILL, and
+nothing survives the power going out, so a spool can still be
+left behind by those: it is in the temporary directory under a
+name beginning csvdt-widest-, safe to delete, and the machine's
+own cleaning of that directory will take it eventually.
+
+That copy is readable by its owner alone, and is only ever
+created at a name nothing holds already -- the temporary
+directory is shared, and a symlink left there would otherwise
+have csvdt write the input through it. A name already taken
+costs another attempt rather than the run. Either way the
+counting pass finishes before the first byte of output is
+written, so a run that fails while counting -- one that cannot
+create the copy, say -- writes nothing at all.
+
+That is as far as it goes. Once the second pass starts writing
+it writes as it reads, so a run that fails partway has already
+sent every row it reached, and what a reader has is valid,
+rectangular CSV that simply stops early. Only the exit status
+tells it from a run that finished, which is the same bargain
+parse_err is under KNOWN LIMITS. A filling mode is where that
+matters most: check the status, or keep the original, because a
+truncated fill looks exactly like a complete one.
+
+Where 'widest' pads the header, the added names are empty rather
+than invented. Reading twice assumes the same input both times,
+which a named file still being written to is not. A pipe is
+copied first and so is settled, but a file is opened again, so
+rows appended between the two reads are counted by neither pass
+and padded to a width taken before they existed.
+
+A row wider than that count is reported rather than padded, and
+says the input changed. Copy the file first, or use a
+single-pass mode, where there is nothing to disagree with.
+
+WARNING, for 'fix' and 'widest': Unlike every other option here,
+these add data that was not in the input. The empty fields they
+insert are indistinguishable from empty fields the source really
+contained, so the output is no longer a faithful reproduction of
+the file it came from. Keep the original, and don't treat a
+filled copy as the evidence.
+
+'--fill-log' writes down which rows were padded and by how much,
+so the copy can be reviewed row by row against the file it came
+from. It works with plain '--flexible' too, where it says what
+would have been padded rather than what was.
+
+With 'fix' specifically, the width comes from the first
+record -- the header when -H/--has-header is given, otherwise
+the first data row. If that record is itself truncated, which is
+quite possible in the damaged files these modes exist for, every
+row is padded to the wrong width and rows that were actually
+complete are reported as too long.
+
+Use 'widest' instead when you cannot vouch for the first record.
+Padding happens before any other action, so a column an action
+points at is present, holding an empty value, even in a row that
+was short.

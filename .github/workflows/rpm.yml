@@ -1,0 +1,778 @@
+# Builds the RPM in a real Fedora and keeps exactly one generation of it.
+#
+# The spec is written against Fedora's Rust macros -- %cargo_build,
+# %cargo_install, %cargo_license -- which exist nowhere else, so it cannot be
+# checked by reading it or by parsing it on another distribution. Only a
+# build in Fedora says whether it works. That build also runs the spec's own
+# %check, installs the result, and uses the installed command, so what is
+# tested is the package rather than the tree it came from.
+#
+# One generation is kept, in a rolling release of its own: rpm-release is
+# the newest version tag, refreshed when a version is tagged and by the
+# monthly build. Master has no package track. What an analyst installs to
+# produce a result should be a release, and a package built from unreleased
+# code is the opposite of that.
+#
+# Rebuilding a tag that does not move is not pointless: the package carries
+# the IANA time zone database compiled into the binary and the Fedora it was
+# built on, and both move underneath a fixed version. That is what the
+# monthly rebuild is for, and RPM-BUILD-INFO is what says which of them a
+# given package holds.
+#
+# The monthly build *calls* this workflow rather than this one listening for
+# a release: a release created with GITHUB_TOKEN raises no event, by design,
+# so `on: release` would never fire and the RPM would silently stop tracking
+# releases. A pushed tag does raise an event, which is why the tag and not
+# the release is what this workflow listens for.
+name: RPM
+
+on:
+  # A version tag is a release, and a release is the only thing this
+  # workflow packages. Matched by shape rather than listed, and only the
+  # three-part form: rpm-release and the monthly build's archive tags all
+  # live in this namespace and none of them is a released version.
+  #
+  # Master is deliberately not here. A push to it changes nothing anyone can
+  # install until a version is tagged.
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  # Every path the package is built out of. A change to the README does not
+  # need Fedora's opinion; a change to the spec, the options, the front end
+  # or the dependency requirements does.
+  pull_request:
+    paths:
+      - 'packaging/rpm/**'
+      - '.github/workflows/rpm.yml'
+      - 'Cargo.toml'
+      - 'src/**'
+      - 'emacs/csvdt.el'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Replace the kept generation with what this run builds'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: true
+
+# Read by default. The build compiles third-party crates and runs their build
+# scripts, so it gets no token that could write; only the publish job below
+# asks for more.
+permissions:
+  contents: read
+
+# The publish job writes one rolling release and one tag, so two runs of it
+# interleave into a mixture of two builds. Not cancelled in flight: a
+# half-replaced generation is worse than a queued one.
+#
+# Keyed on the ref, which is what a pull request check and a publishing run
+# actually differ by: the checks run per branch and the publishing runs all
+# arrive on the same ref and queue behind each other.
+concurrency:
+  group: rpm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: rpmbuild
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      source_ref: ${{ steps.source.outputs.ref }}
+      source_sha: ${{ steps.source.outputs.sha }}
+    # Without this a hung %check runs to GitHub's six-hour default. The whole
+    # job is a couple of minutes on a warm runner and under ten on a cold
+    # one, so this is generous and still catches a test that never returns.
+    timeout-minutes: 30
+    # Unpinned on purpose. The dist tag is part of what an RPM is, so a
+    # Fedora that breaks this spec is something to learn about when it
+    # happens rather than when someone finally bumps a pin.
+    container: fedora:latest
+
+    steps:
+      # Before the checkout, which needs git in the container or it falls
+      # back to a REST tarball with no history for `git archive` to read.
+      #
+      # Only what is needed to get as far as a source package: rpm's own
+      # tools, the macros without which the spec cannot even be parsed, and
+      # cargo, which vendors the crates outside the build root. Everything
+      # else the build needs comes from the spec, installed below from the
+      # source package it produced. So this does not prove the BuildRequires
+      # are complete -- the two it bootstraps could be missing from the spec
+      # and nothing here would notice -- but it does prove they are complete
+      # for everything after that.
+      - name: Bootstrap the build environment
+        run: |
+          dnf -y --setopt=install_weak_deps=False install \
+            rpm-build rpmdevtools rpmlint cargo cargo-rpm-macros \
+            'dnf-command(builddep)' git-core findutils glibc-langpack-en
+
+      # The image is unpinned, so the log has to say what it actually was --
+      # and the Emacs subpackage installs into paths that come from a macro
+      # rather than from this spec, which is exactly the kind of thing that
+      # can move underneath it between releases.
+      - name: What this Fedora is, and what it defines
+        run: |
+          cat /etc/fedora-release
+          rpm --version
+          rpm -q emacs-filesystem
+          for m in _emacs_version _emacs_sitelispdir _emacs_sitestartdir \
+                   _rpmmacrodir rust_arches; do
+            printf '%%%-22s %s\n' "$m" "$(rpm --eval "%{?$m}")"
+          done
+          rpm -ql emacs-filesystem
+          # The spec defines the two site-lisp macros itself when they are
+          # missing. If some package does ship them, say which, so that
+          # fallback can be replaced with a BuildRequires on it.
+          dnf -q provides '/usr/lib/rpm/macros.d/macros.emacs' \
+            || echo 'no package ships /usr/lib/rpm/macros.d/macros.emacs'
+
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # Whole history, because what gets packaged is picked out of the
+          # version tags and a shallow checkout has none of them.
+          fetch-depth: 0
+
+      # What this run packages, decided once so that nothing downstream
+      # has to work it out again from the event.
+      #
+      # A pull request is the exception, and the only one: it packages what
+      # the pull request proposes, because the whole point of running here
+      # is to find out whether that change still produces a package. It
+      # publishes nothing. Every other run packages the newest released
+      # version, whatever ref the run was triggered from.
+      - name: What this run packages
+        id: source
+        run: |
+          git config --global --add safe.directory "$PWD"
+          if [ '${{ github.event_name }}' = 'pull_request' ]; then
+            ref='${{ github.ref_name }}'
+            echo "checking the proposed change rather than a release"
+          else
+            # Highest version, not most recently created: a patch to an
+            # older series cut after a newer one shipped is a real tag and
+            # is not the newest release.
+            ref=$(git tag -l '[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)
+            if [ -z "$ref" ]; then
+              echo "::error::No version tag exists, so there is no released version to package."
+              exit 1
+            fi
+            # The kept generation is the newest release, so a tag push for
+            # an older series would replace it with a package that is not
+            # current. Highest wins and anything else stops here.
+            if [ '${{ github.ref_type }}' = 'tag' ] \
+               && [ '${{ github.ref_name }}' != "$ref" ]; then
+              echo "::error::${{ github.ref_name }} was pushed, but $ref is the newest version tag. This workflow packages the newest version only."
+              exit 1
+            fi
+            git checkout -q --detach "$ref"
+          fi
+          echo "ref=$ref"                  >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "packaging $ref at $(git rev-parse --short HEAD)"
+
+          # What the packaged binary will say it is. Until now it said a bare
+          # version, the same string a build made by hand says, so two RPMs
+          # of one release -- a different tzdata, a different Fedora, a
+          # different compiler -- were indistinguishable to anyone holding
+          # the binary rather than the release page. RPM-BUILD-INFO records
+          # all of that and is the authoritative account; this is what the
+          # binary can say about itself when it is all somebody has, and it
+          # is the same shape the monthly build stamps its binaries with.
+          #
+          # Through GITHUB_ENV rather than a step's env, so rpmbuild inherits
+          # it and %build compiles with it. Whether it survives that trip is
+          # asserted after the install below rather than assumed: nothing
+          # here can promise what rpmbuild passes on to a scriptlet.
+          echo "CSVDT_BUILD_METADATA=$(date -u +'%Y.%m').$(git rev-parse --short=7 HEAD)" \
+            >> "$GITHUB_ENV"
+
+      # The spec names a Version, and the tarball it asks for is derived from
+      # it. If the crate moves and the spec does not, rpmbuild happily builds
+      # a tarball named for a version that is not the code inside it.
+      - name: Check the spec and the crate agree on the version
+        id: version
+        run: |
+          crate=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          spec=$(rpmspec -q --srpm --qf '%{version}\n' packaging/rpm/csvdt.spec)
+          if [ "$crate" != "$spec" ]; then
+            echo "::error::Cargo.toml says $crate and packaging/rpm/csvdt.spec says $spec. The spec's Version has to track the crate's, or the package is named for code it does not contain."
+            exit 1
+          fi
+          echo "version=$crate" >> "$GITHUB_OUTPUT"
+
+      # The %changelog is the one part of the spec that cannot be generated
+      # from anything else -- what changed is a sentence, and set-version.sh
+      # says so and leaves it alone. So it is the part a release forgets, and
+      # nothing else notices: a spec whose newest entry names the previous
+      # version builds cleanly, lints cleanly, and installs a package whose
+      # 'rpm -q --changelog csvdt' describes a release the package does not
+      # contain.
+      - name: Check the newest %changelog entry names this build
+        run: |
+          spec=packaging/rpm/csvdt.spec
+          ver=$(rpmspec -q --srpm --qf '%{version}\n' "$spec")
+          rel=$(rpmspec -q --srpm --qf '%{release}\n' "$spec")
+          # rpm stores changelog entries newest first, and an array tag with
+          # no index expands to its first element -- so this is the newest
+          # entry's header line and nothing else. Read through rpm rather
+          # than grepped out of the file, so an entry rpm itself cannot parse
+          # fails here rather than passing a regular expression.
+          newest=$(rpmspec -q --srpm --qf '%{changelogname}\n' "$spec")
+          # The dist tag is part of the release this build produces but is
+          # conventionally left out of a changelog entry, so both forms pass.
+          dist=$(rpm --eval '%{?dist}')
+          want="$ver-${rel%$dist}"
+          case "$newest" in
+            *" $want"|*" $ver-$rel")
+              echo "newest %changelog entry: $newest"
+              ;;
+            *)
+              echo "::error::The newest %changelog entry is '$newest', which does not name $want. Add an entry for this version, or 'rpm -q --changelog csvdt' will report the previous release's changes as this one's."
+              exit 1
+              ;;
+          esac
+
+      - name: Assemble the sources the spec asks for
+        run: |
+          v='${{ steps.version.outputs.version }}'
+          rpmdev-setuptree
+
+          # Source0 is the GitHub tarball of a tag. Here it is this commit,
+          # under the same prefix, so what gets packaged is what was pushed
+          # rather than what was last released.
+          #
+          # Cargo.lock is added to it, which the tag tarball would not carry:
+          # it is not committed. Without it the build root would re-resolve
+          # against the vendor directory and could, in principle, pick a
+          # different set from the one vendored -- so the licence summary and
+          # the crate manifest the package ships would describe a build other
+          # than the one it contains.
+          rm -rf stage && mkdir -p "stage/csvdt-$v"
+          git archive HEAD | tar -x -C "stage/csvdt-$v"
+
+          # A build root has no network, so the dependencies are built in
+          # from a vendored tarball -- which Fedora allows for a leaf
+          # application. Resolved fresh here, since Cargo.lock is not
+          # committed; that is the same mechanism the monthly build relies on
+          # to pick up a new tzdata.
+          cargo vendor > /dev/null
+          cp Cargo.lock "stage/csvdt-$v/Cargo.lock"
+
+          tar czf ~/rpmbuild/SOURCES/csvdt-$v.tar.gz -C stage "csvdt-$v"
+          tar czf ~/rpmbuild/SOURCES/csvdt-$v-vendor.tar.gz vendor/
+          ls -l ~/rpmbuild/SOURCES/
+
+      # Built first so the BuildRequires can be installed from it rather than
+      # listed a second time here. Anything the spec forgets to require then
+      # fails the build below, which is the point of writing them down.
+      - name: Source package
+        run: rpmbuild -bs packaging/rpm/csvdt.spec
+
+      - name: Install what the spec says it needs
+        run: dnf -y builddep ~/rpmbuild/SRPMS/csvdt-*.src.rpm
+
+      # Runs the spec's %check on the way through: cargo test, and the greps
+      # that say the rendered man page is a man page.
+      - name: Binary packages
+        run: rpmbuild -ba packaging/rpm/csvdt.spec
+
+      # Fatal, with the exceptions written down in csvdt.rpmlintrc rather
+      # than waved through here -- two findings, each with its reason. Every
+      # other finding fails the build.
+      #
+      # Run twice, because "rpmlint passed" is not by itself evidence that
+      # the exceptions applied: written as a TOML `Filters` list the file was
+      # accepted, reported as loaded, and did nothing whatever. So the first
+      # run is without it and is required to fail. If it ever passes, the
+      # findings it excuses have stopped happening and the file should be
+      # emptied rather than left to excuse nothing.
+      - name: Lint
+        run: |
+          set +e
+          rpmlint packaging/rpm/csvdt.spec \
+            ~/rpmbuild/SRPMS/*.rpm ~/rpmbuild/RPMS/*/*.rpm > unfiltered.txt 2>&1
+          bare=$?
+          set -e
+          if [ "$bare" -eq 0 ]; then
+            echo "::error::rpmlint passes without packaging/rpm/csvdt.rpmlintrc, so nothing in it is doing any work. Delete the filters it no longer needs."
+            cat unfiltered.txt
+            exit 1
+          fi
+          echo "== unfiltered, which is expected to fail:"
+          tail -n 12 unfiltered.txt
+
+          echo "== with the accepted findings filtered:"
+          rpmlint --rpmlintrc packaging/rpm/csvdt.rpmlintrc \
+            packaging/rpm/csvdt.spec \
+            ~/rpmbuild/SRPMS/*.rpm ~/rpmbuild/RPMS/*/*.rpm
+
+      - name: What the packages contain
+        run: |
+          for pkg in ~/rpmbuild/RPMS/*/*.rpm; do
+            echo "== $(basename "$pkg")"
+            rpm -qlp "$pkg"
+            echo
+          done
+
+      # The point of the request: a command called csvdt, and a man page the
+      # system's man can find. Checked against an installed package rather
+      # than the build tree, since %files is what decides both and a file
+      # built but not packaged looks identical until here.
+      - name: Install the packages and use them
+        run: |
+          # First, in the package -- which is a separate question from
+          # whether an install put it on disk, and the one %files decides.
+          rpm -qlp ~/rpmbuild/RPMS/*/csvdt-[0-9]*.rpm \
+            | grep -E '^/usr/share/man/man1/csvdt\.1' \
+            || { echo "::error::the csvdt package carries no man page, so %files is not shipping the one %build rendered"; exit 1; }
+
+          # tsflags=nodocs cleared: the Fedora image sets it, so a plain
+          # install drops every man page and %doc file on the floor and
+          # 'man csvdt' then fails over a package that carries the page
+          # perfectly well. A real system installs the documentation.
+          dnf -y --setopt=tsflags= install ~/rpmbuild/RPMS/*/*.rpm
+          dnf -y --setopt=tsflags= --setopt=install_weak_deps=False install man-db
+
+          command -v csvdt
+          csvdt --version
+          printf 'when,what\n1700000000,a\n' | csvdt -H -p -r0
+
+          # The stamp reached the compiler, or it did not. version_carries_
+          # build_metadata_only_when_stamped runs inside %check and would
+          # pass either way -- it asks that the binary and the environment
+          # agree, and they agree just as well when neither was stamped.
+          # What that cannot see is the stamp being lost between this job and
+          # %build, which is the whole of what is new here, so the installed
+          # package is asked directly.
+          if ! csvdt --version | grep -qF "+${CSVDT_BUILD_METADATA}"; then
+            echo "::error::the packaged binary reports '$(csvdt --version)', carrying no '+${CSVDT_BUILD_METADATA}'. CSVDT_BUILD_METADATA did not reach %build, so the package cannot say which build it is."
+            exit 1
+          fi
+
+          # -w resolves through man's own search path, so this fails if the
+          # page landed somewhere man does not look.
+          man -w csvdt
+          man csvdt | head -20
+
+          # Autoloaded rather than required, so the front end has to be
+          # reachable without the caller knowing where it was installed.
+          # Deliberately not `emacs -Q`, which is what would make this pass
+          # while proving nothing: -Q implies --no-site-file, so the
+          # site-start snippet that carries the autoloads never loads and
+          # the test would be measuring an Emacs the package never touched.
+          dnf -y --setopt=install_weak_deps=False install emacs-nox
+          emacs --batch --eval '(progn
+            (unless (fboundp (quote csvdt-run-dwim))
+              (error "site-start did not autoload the commands"))
+            (require (quote csvdt))
+            (message "front end resolves csvdt to: %s" (csvdt--program))
+            (message "and gets: %s" (string-trim (csvdt--output-of "--version"))))'
+
+      - name: Collect
+        id: collect
+        run: |
+          mkdir -p rpms
+          cp ~/rpmbuild/RPMS/*/*.rpm ~/rpmbuild/SRPMS/*.rpm rpms/
+
+          # Stable names beside the real ones, so a script can fetch the
+          # current build without knowing its version or which Fedora it was
+          # built on. Both are in the real file names and both move: the
+          # container is fedora:latest, so the day Fedora 45 becomes current
+          # these are .fc45 and the .fc44 files stop existing -- one
+          # generation means one dist tag at a time. Copies rather than
+          # links, since a release asset is a file either way.
+          main=$(cd rpms && ls csvdt-[0-9]*.rpm | grep -v '\.src\.rpm$')
+          cp "rpms/$main" "rpms/csvdt.$(rpm --eval '%{_arch}').rpm"
+          cp rpms/emacs-csvdt-*.noarch.rpm rpms/emacs-csvdt.noarch.rpm
+
+          # What this generation was built from. The dist tag is in the file
+          # names, but the commit and the compiler are not, and neither is
+          # the time zone database -- which is the thing most likely to
+          # differ between two RPMs carrying the same csvdt version.
+          {
+            echo "commit    ${{ steps.source.outputs.sha }}"
+            echo "fedora    $(rpm --eval '%{?dist}' | tr -d '.')"
+            echo "rustc     $(rustc --version)"
+            echo "csvdt     $(csvdt --version)"
+            printf 'packages\n'
+            (cd rpms && ls | sed 's/^/          /')
+          } > rpms/RPM-BUILD-INFO
+          cat rpms/RPM-BUILD-INFO
+
+          # Covers everything but itself, so a download can be checked the
+          # same way the binaries can.
+          (cd rpms && sha256sum $(ls | grep -vxF SHA256SUMS) > SHA256SUMS)
+          cat rpms/SHA256SUMS
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rpms
+          path: rpms/
+          retention-days: 7
+
+  # One generation, replaced in place: whatever this run built becomes the
+  # whole of the rpm-release release, and anything the previous one left that
+  # this one did not produce is removed. That last part is what keeps it to
+  # one -- a Fedora bump changes the dist tag in every file name, so without
+  # it the release would accumulate a copy per Fedora release.
+  publish:
+    name: Replace the kept generation
+    needs: build
+    if: >-
+      github.repository == 'YardQuit/csvdt' &&
+      (inputs.publish || github.event_name == 'push')
+    runs-on: ubuntu-latest
+    # The build job next door has had one since it was written, for the same
+    # reason: this is a dozen API calls against a service that can stop
+    # answering, and without a bound a stalled one runs to GitHub's six-hour
+    # default.
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    # This job takes the packages from an artifact and never checks the
+    # repository out, so there is no git remote for gh to resolve the
+    # repository from -- and every `gh release` call died with "fatal: not a
+    # git repository" the first time it ran. Naming it here is what the job
+    # actually needs; a checkout would be a clone to get one line of config.
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: rpms
+          path: rpms
+
+      - name: Publish
+        run: |
+          tag=rpm-release
+          repo='${{ github.repository }}'
+          sha='${{ needs.build.outputs.source_sha }}'
+          title='csvdt RPM (newest release)'
+
+          intro=$(cat <<EOF
+          The RPM of csvdt's newest released version, \`${{ needs.build.outputs.source_ref }}\`, replaced in place: this release holds one generation and no history. It is rebuilt when a version is tagged and by the monthly build, so what is in it is the current build of the released csvdt.
+
+          A rebuild leaves the package's version-release alone, because the source it was built from did not change -- so \`dnf install\` fetches the current build of the release while \`dnf update\` sees nothing new in it. What does differ between two rebuilds is the time zone database and the Fedora they were built on, and \`RPM-BUILD-INFO\` is what says which.
+          EOF
+          )
+          other='The packages a version was published with are kept on the version'"'"'s own release, and every build is kept permanently on an archive release naming its version, commit and time zone database.'
+
+          notes=$(cat <<EOF
+          ${intro}
+
+          Built in \`fedora:latest\` at the time of the run; the dist tag in each file name says which. \`RPM-BUILD-INFO\` records the commit, the compiler, and the IANA time zone database compiled in -- which \`-l/--local\` resolves against, and which two RPMs of the same csvdt version can differ in.
+
+          Every file name carries the version and the dist tag, both of which move, so each package is also published under a name that does not -- for scripts:
+
+          \`\`\`
+          sudo dnf install https://github.com/${repo}/releases/download/${tag}/csvdt.x86_64.rpm
+          \`\`\`
+
+          The versioned names are the same packages, and say what they are. Either way that installs \`/usr/bin/csvdt\` and its man page; \`emacs-csvdt.noarch.rpm\` is the Emacs front end and is optional. Verify a download against \`SHA256SUMS\` first:
+
+          \`\`\`
+          sha256sum -c SHA256SUMS --ignore-missing
+          \`\`\`
+
+          ${other}
+          EOF
+          )
+
+          # The tag follows the commit that was built, so the release points
+          # at the source of what it serves.
+          #
+          # Read before written, and written only when it has to move. This
+          # packages the same version tag every month, so from the second
+          # rebuild of a release onward the update asks for the sha the ref
+          # already holds -- and GitHub refuses that with "Resource not
+          # accessible by integration (HTTP 403)", a message about
+          # permissions that is nothing of the kind: the same token, in the
+          # same run, moved another tag to a different commit without
+          # complaint. The first monthly rebuild of a release failed on it.
+          # Skipping the write is right on its own terms anyway, since there
+          # is nothing to write.
+          current=$(gh api "repos/$repo/git/refs/tags/$tag" --jq .object.sha 2>/dev/null || true)
+          if [ -z "$current" ]; then
+            gh api -X POST "repos/$repo/git/refs" \
+              -f ref="refs/tags/$tag" -f sha="$sha" >/dev/null
+            echo "  created refs/tags/$tag at $sha"
+          elif [ "$current" != "$sha" ]; then
+            gh api -X PATCH "repos/$repo/git/refs/tags/$tag" \
+              -f sha="$sha" -F force=true >/dev/null
+            echo "  moved refs/tags/$tag from $current to $sha"
+          else
+            echo "  refs/tags/$tag already at $sha"
+          fi
+
+          produced=$(cd rpms && ls)
+
+          # Preflight, because the check below cannot tell "no release yet"
+          # from "gh cannot talk to GitHub at all" -- and the first run of
+          # this job proved that matters: gh was failing outright, the check
+          # read it as "no release yet", and the create path then failed with
+          # a message about git rather than about the release. This asks a
+          # question with a known answer first, so a gh that cannot work
+          # stops here instead of being interpreted.
+          gh api "repos/$repo" --jq .full_name >/dev/null
+
+          if gh api "repos/$repo/releases/tags/$tag" >/dev/null 2>&1; then
+            # Packages first, then the files that describe them: an upload
+            # dying partway then leaves the previous run's checksums over the
+            # previous run's packages, rather than this run's checksums over
+            # packages that are not this run's.
+            for asset in $(cd rpms && ls *.rpm) RPM-BUILD-INFO SHA256SUMS; do
+              gh release upload "$tag" "rpms/$asset" --clobber
+            done
+            # Whatever the previous generation had and this one does not.
+            gh release view "$tag" --json assets --jq '.assets[].name' \
+              | while read -r asset; do
+                  if ! printf '%s\n' "$produced" | grep -qxF -- "$asset"; then
+                    gh release delete-asset "$tag" "$asset" -y
+                  fi
+                done
+            gh release edit "$tag" --title "$title" --notes "$notes" --prerelease
+          else
+            # Prerelease, and never "latest". Every documented download
+            # URL now names its tag rather than following the designation,
+            # so this is no longer load-bearing for them -- but the
+            # designation is what a visitor and every tool that asks for
+            # "the latest release" reads, and neither a rolling development
+            # RPM nor a package of one release is the answer to that
+            # question: the version release is.
+            gh release create "$tag" rpms/* \
+              --target "$sha" \
+              --title "$title" \
+              --notes "$notes" \
+              --prerelease \
+              --latest=false
+          fi
+
+      # The publish above is several API calls, and a partial one is the
+      # state nobody would notice: the release is there, so nothing looks
+      # broken, but a package or the checksums are missing and only whoever
+      # downloads that one finds out. The monthly build learned this the hard
+      # way and says so in its own comments; the same check belongs here.
+      - name: Verify the release serves what was built, and steals nothing
+        run: |
+          tag=rpm-release
+          published=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
+          produced=$(cd rpms && ls | sort)
+          if [ "$published" != "$produced" ]; then
+            echo "::error::The $tag release does not carry what this build produced."
+            diff <(printf '%s\n' "$produced") <(printf '%s\n' "$published") || true
+            exit 1
+          fi
+
+          # Asked of GitHub rather than assumed from the flags that were
+          # passed, since the flags are what would have failed. What this
+          # protects is the designation itself: it is what a visitor sees
+          # first and what anything asking for "the latest release" gets,
+          # and a rolling RPM generation is not that. It belongs to the
+          # newest version release, which is where the monthly build points
+          # it and what the second check below reports.
+          if [ "$(gh release view "$tag" --json isPrerelease --jq .isPrerelease)" != "true" ]; then
+            echo "::error::$tag is not marked prerelease, so it can take the Latest designation away from the release the README points at."
+            exit 1
+          fi
+          actual_latest=$(gh api "repos/${{ github.repository }}/releases/latest" \
+                            --jq .tag_name 2>/dev/null || echo none)
+          if [ "$actual_latest" = "$tag" ]; then
+            echo "::error::GitHub now calls $tag the latest release, so a rolling RPM generation is what the repository offers as current rather than a version."
+            exit 1
+          fi
+          # Where it should be, rather than merely not here. A warning and
+          # not a failure: the monthly build is what sets that flag, so this
+          # leg would otherwise fail over a state it cannot correct.
+          case "$actual_latest" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::warning::GitHub calls '$actual_latest' the latest release, where a version release is expected. The monthly build sets that flag; run it if this persists." ;;
+          esac
+          echo "  ok  $tag serves $(printf '%s\n' "$produced" | wc -l) assets, prerelease, and GitHub's latest is '$actual_latest'"
+
+      # What a version shipped as, kept with the version. The rolling
+      # release holds one generation and is replaced, so it cannot answer
+      # "which packages was this version published with" a year later.
+      # GitHub charges nothing for release assets and imposes no limit on the
+      # total size of one, so keeping them costs a few megabytes of somebody
+      # else's disk and no maintenance: a version release is written once and
+      # never swept.
+      #
+      # Only on a tag push, which is the one moment the answer is being
+      # decided. The monthly rebuild refreshes rpm-release on purpose -- new
+      # tzdata, new dist tag -- and overwriting the version's own copy with
+      # it would lose the one thing that copy is for.
+      # Assembled once and uploaded to two places below, so the two cannot
+      # drift into disagreeing about what "the packages this build produced"
+      # means. Both want the same set and neither wants the version-free
+      # copies.
+      - name: Assemble the set that gets kept
+        id: kept
+        run: |
+          mkdir -p archive
+          for f in $(cd rpms && ls); do
+            case "$f" in
+              # Regenerated below for the set that is actually attached.
+              SHA256SUMS) ;;
+              # Every real package name carries the version; the two that do
+              # not are the copies that give the rolling release a name that
+              # does not move, and on a release named for its version they
+              # would duplicate a file already there under its real name.
+              *-[0-9]*.rpm|RPM-BUILD-INFO) cp "rpms/$f" archive/ ;;
+              *) ;;
+            esac
+          done
+          (cd archive && sha256sum $(ls) > SHA256SUMS-rpms)
+          ls -l archive
+
+          # The archive tag, read out of the package rather than assembled
+          # from the workflow's own variables. RPM-BUILD-INFO records what
+          # the installed binary answered, so every part of the name is a
+          # fact about the thing being archived: if the stamping or the
+          # bundled database were not what this run believes, the tag would
+          # be wrong in exactly the way that matters and nothing else here
+          # would notice.
+          #
+          # Derived here rather than taken from the monthly build, which
+          # computes the same shape for the binaries. The two are separate
+          # compilations -- the packages are built inside Fedora from their
+          # own dependency resolution -- so they can carry different time
+          # zone databases, and adopting a tag named for a database this
+          # package does not hold is the one confusion the name exists to
+          # prevent. When they agree, both sets land on one entry; when they
+          # do not, the two entries say so.
+          #
+          # Both reads are `|| true`, because the runner's shell has -e and
+          # -o pipefail: a grep that matches nothing exits 1 and takes the
+          # step down where it stands, before any of the messages below can
+          # be printed. That is the failure mode this file keeps having to
+          # fix -- the step that dies withholds the one thing that would
+          # name the cause -- so the greps are allowed to come back empty
+          # and the emptiness is what gets reported.
+          line=$(grep -m1 '^csvdt ' rpms/RPM-BUILD-INFO || true)
+          full=$(printf '%s\n' "$line" | awk '{print $3}')
+          tz=$(printf '%s\n' "$line" | grep -oE 'tzdata [^)]+' | cut -d' ' -f2 || true)
+          if [ -z "$line" ]; then
+            echo "::error::RPM-BUILD-INFO carries no csvdt version line, so there is nothing to name an archive entry by. The Collect step writes it; check that it ran."
+            exit 1
+          fi
+          case "$full" in
+            *+*) ;;
+            *)
+              echo "::error::The packaged binary reports '$full', with no build metadata to name an archive entry by. The install step asserts the stamp reached %build, so reaching here means that check was removed or bypassed."
+              exit 1 ;;
+          esac
+          if [ -z "$tz" ]; then
+            echo "::error::RPM-BUILD-INFO does not name a time zone database: '$line'. The archive tag says which database a build carries, and one that cannot be read must not be guessed at."
+            exit 1
+          fi
+          archive_tag="${full%%+*}-${full#*+}-tzdata${tz}"
+          echo "tag=$archive_tag" >> "$GITHUB_OUTPUT"
+          echo "  archive entry: $archive_tag"
+
+      # What a version shipped as, kept with the version.
+      - name: Attach the packages to the version's own release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: |
+          tag='${{ github.ref_name }}'
+
+          # A release created in the web interface makes its own tag, so it
+          # is usually already there by the time this runs. A tag pushed with
+          # git is not, and the packages belong to the version either way --
+          # so it is made here rather than the run failing over it, with
+          # notes a person is expected to replace.
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "csvdt $tag" \
+              --notes "See CHANGELOG.md for what changed in $tag." || true
+          fi
+
+          for asset in $(cd archive && ls); do
+            gh release upload "$tag" "archive/$asset" --clobber
+          done
+
+          published=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
+          missing=$(comm -23 <(cd archive && ls | sort) <(printf '%s\n' "$published"))
+          if [ -n "$missing" ]; then
+            echo "::error::The $tag release is missing packages this build produced."
+            printf '  %s\n' $missing
+            exit 1
+          fi
+          (cd archive && ls) | sed 's/^/  ok /'
+
+      # Every build kept, not only the rolling copy and the release-day one.
+      # rpm-release is replaced each month and the version's own release is
+      # written once at tag time, so between them they answer "what is
+      # current" and "what did this version ship as" -- and neither answers
+      # "give me the package that produced this result", which is the
+      # question an analyst comes back with. A csvdt version does not
+      # identify a package, because the time zone database inside it moves
+      # independently of the source.
+      #
+      # The monthly build writes the same entry for the binaries, usually
+      # first, since its RPM job runs after its release job. Whichever gets
+      # there creates the release and the other adds to it, so one entry
+      # holds both sets. Notes are written only on creation: the other job's
+      # description of the same build is not worth overwriting.
+      - name: Keep this build permanently
+        run: |
+          tag='${{ steps.kept.outputs.tag }}'
+          sha='${{ needs.build.outputs.source_sha }}'
+          ref='${{ needs.build.outputs.source_ref }}'
+
+          # Permanent means permanent. The tag names the version, the commit
+          # and the time zone database, but not the compiler or the Fedora
+          # release, so a second run in the same month can produce different
+          # packages under a name someone has already cited. A rerun that
+          # produces the same packages finishes the job it was rerun for; one
+          # that produces different packages is refused, since only a person
+          # can say which of the two should keep the name.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            if gh release download "$tag" -p RPM-BUILD-INFO -D published 2>/dev/null; then
+              if ! cmp -s published/RPM-BUILD-INFO archive/RPM-BUILD-INFO; then
+                echo "::error::${tag} already holds different packages: same version, commit and time zone database, but a different compiler or Fedora release. They are what someone citing that tag expects, so they are left untouched. Delete the tag deliberately if it must be replaced."
+                diff published/RPM-BUILD-INFO archive/RPM-BUILD-INFO || true
+                exit 1
+              fi
+            fi
+            rm -rf published
+          else
+            notes=$(cat <<EOF
+          Archived build of csvdt \`${ref}\` from \`${sha}\`, carrying IANA time zone database \`$(printf '%s' "$tag" | sed 's/.*-tzdata//')\`.
+
+          This release is never replaced. It exists so a result can be traced back to, and reproduced with, the exact build that produced it -- which the version number alone cannot do, since a released version is rebuilt monthly and the zone rules compiled into it move each time.
+
+          It holds whatever that build produced: the RPM packages, and the binaries for every platform if they were built from the same source and resolved the same database. \`RPM-BUILD-INFO\` and \`BUILD-INFO\` record what each was made from, and \`SHA256SUMS-rpms\` and \`SHA256SUMS\` cover them.
+
+          For the current build of the newest release, use \`rpm-release\` and \`release\` instead.
+          EOF
+          )
+            # Losing a race with the monthly build's binaries job is the
+            # ordinary case, not a failure: it means the entry now exists
+            # and the uploads below belong on it.
+            gh release create "$tag" \
+              --target "$sha" \
+              --title "csvdt ${ref} - $(printf '%s' "$tag" | sed 's/.*-tzdata/tzdata /')" \
+              --notes "$notes" \
+              --prerelease=false \
+              --latest=false || true
+          fi
+
+          for asset in $(cd archive && ls); do
+            gh release upload "$tag" "archive/$asset" --clobber
+          done
+
+          published=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
+          missing=$(comm -23 <(cd archive && ls | sort) <(printf '%s\n' "$published"))
+          if [ -n "$missing" ]; then
+            echo "::error::The $tag archive entry is missing packages this build produced."
+            printf '  %s\n' $missing
+            exit 1
+          fi
+          (cd archive && ls) | sed 's/^/  ok /'

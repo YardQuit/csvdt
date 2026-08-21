@@ -1,0 +1,111 @@
+.\" The sections a manual page carries and an option's help cannot.
+.\"
+.\" csvdt's page is rendered from the same option definitions that parse a
+.\" command line, which is what stops it describing options this build does
+.\" not have. What that leaves out is everything belonging to the program
+.\" rather than to one of its options: the environment it reads, the file it
+.\" writes, what to reach for next. GNU coreutils fills the same gap with a
+.\" per-page man/prog.x that help2man merges in; this is csvdt's one file of
+.\" it, spliced in after the generated sections and before VERSION.
+.\"
+.\" Hand-written roff, so it is held to what the generated part is held to: a
+.\" test renders the whole page under groff with every warning on and fails
+.\" on a word of output, and another refuses a byte above 7-bit ASCII.
+.\"
+.\" What is written here is prose and cannot be generated, so the claims in it
+.\" are asked of the program separately. ENVIRONMENT's is the one worth naming:
+.\" no_conversion_but_local_reads_the_zone runs -u, -o, -d, -s and -r under
+.\" eight settings of TZ and requires one answer from each, and requires -l to
+.\" differ, since a build reading the zone nowhere would satisfy the first half
+.\" and break the promise this section makes.
+.\"
+.\" FILES is enumerated rather than read: an option whose value --list-options
+.\" spells 'file' is a file csvdt opens because it was told to, and
+.\" what_the_manual_page_says_about_files_is_what_csvdt_does requires the
+.\" section to name every one of them. This section called the spool below
+.\" "the only file csvdt creates" for a whole release after --fill-log made
+.\" that false, which is what enumeration is here to stop happening twice.
+.SH ENVIRONMENT
+.TP
+.B TZ
+The zone
+.B \-l/\-\-local
+converts into. Unset, the system's configured zone is used.
+.IP
+A zone name behaves identically on every platform. A value holding POSIX
+rules rather than a name, such as
+.BR EST5EDT,M3.2.0,M11.1.0 ,
+is honoured only on Unix; on Windows the system's zone is used instead. A
+name the database compiled into this build does not know is refused rather
+than answered, since falling through to UTC would report a plausible
+timestamp for a zone nobody asked for.
+.IP
+No other conversion reads it.
+.BR \-u ,
+.BR \-o ,
+.BR \-d ,
+.B \-s
+and
+.B \-r
+work from the offset the record already carries, and so give the same
+answer on any machine.
+.TP
+.B TMPDIR
+Where
+.B \-\-flexible=widest
+puts the copy it makes when the input cannot be read twice. On Windows,
+.B TMP
+and then
+.B TEMP
+are read instead. Named here because the message about a temporary file
+that cannot be created has to name the variable a reader is meant to set,
+and the two families spell it differently.
+.SH FILES
+.TP
+.I $TMPDIR/csvdt\-widest\-<pid>.csv
+The only file csvdt creates unasked.
+.B \-\-flexible=widest
+reads its input twice, once to find the widest record and once to pad every
+row out to it, so an input that cannot be rewound is copied here first: a
+pipe, or standard input. A file argument is read twice directly and no copy
+is made.
+.IP
+Created with mode 0600, since the copy holds the whole of an input that is
+often a log, and removed when the run ends \(em including when the run is
+interrupted. A numbered variant is tried when the name is taken, so a stale
+copy left behind by a killed run cannot lock the mode out.
+.TP
+.B \-\-fill\-log
+The destination this option names is the other file csvdt creates, and the
+only one it creates because it was told to. An existing one is replaced
+rather than added to, so a run's log is that run's and no other's, and a
+destination that is the input, or where the output is going, is refused
+before anything is opened.
+.IP
+It carries a line number, a record number, a field count and what was done,
+for each record that did not match the width \(em and no field of the input,
+which is why it is not given the mode above.
+.SH NOTES
+Output goes to standard output and no file is edited in place. A redirection
+onto the input is refused rather than obeyed: a shell empties the file
+before csvdt is started, so the data is gone before it could be read. Write
+another file and move it into place.
+.PP
+Linux is the intended platform: it is what csvdt is developed and packaged
+on, and what the differential checks are run against before a release.
+macOS and Windows are supported on a best-effort basis \-\- built and tested
+on every commit, and worth a report, but given less attention and less
+coverage. Where something cannot be had on one of them it is said so
+rather than left to be found out.
+.SH SEE ALSO
+.BR iconv (1)
+converts an input csvdt refuses to read; it requires UTF\-8.
+.BR date (1)
+does these conversions for one timestamp rather than a column of them.
+.BR tzselect (1)
+finds the name of a zone to put in
+.BR TZ .
+.PP
+The README carries what this page does not: how to install it, how to wrap
+it, and the reasoning behind the choices. It is at
+https://github.com/YardQuit/csvdt

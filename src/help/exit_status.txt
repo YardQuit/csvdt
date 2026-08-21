@@ -1,0 +1,76 @@
+
+EXIT STATUS
+What a run reports back to whatever called it. Written down
+because several of the limits above turn on it -- a run that
+converted nothing is told apart from one that worked by the
+status alone -- and because until now it was only discoverable
+by trying.
+
+  0
+      The run finished. Where an action was given, at least one
+      value converted; values that did not are counted on stderr
+      and the run is still a success, since a few bad lines
+      among many are quite ordinary. Asking
+      for --help, --version, --list-options or --generate-man
+      reports this too, provided the answer could be written.
+
+  1
+      The run began and could not finish, or finished having
+      converted nothing at all: a file that cannot be read, a
+      standard output that cannot be written, a column past the
+      end of the record, or every value in the column written
+      as parse_err. In that last case the output is written in
+      full regardless -- only the status says it holds no
+      converted value.
+
+      Every one of these is found by doing the work, which is
+      what separates them from 2 and 100 below: those two are
+      settled before the input is touched.
+
+      A write that failed is one of them, and it counts for
+      what csvdt says about itself as much as for a conversion:
+      'csvdt --help > file' on a full disk reports 1, where it
+      used to write nothing and report 0. A closed pipe is not a
+      failed write -- see the note at the end of this section.
+
+  2
+      The command line did not parse: an option that does not
+      exist, a value outside the ones an option accepts, an
+      action given without the column it needs, or two options
+      that cannot be used together, such as an action
+      and --remove.
+
+  100
+      The command line parsed, and then something it was told
+      to work with was refused: an offset no place uses, a
+      delimiter or quote character longer than one character, a
+      column named twice in --remove, -a or -d, or a TZ naming
+      no zone this binary knows.
+
+      TZ is in that list because it is refused the same way the
+      rest are -- before the input is opened, so nothing has
+      been read and nothing written. -l/--local is the only
+      action it reaches.
+
+2 and 100 say the same thing to a caller -- the run was asked
+for wrongly and no input was touched -- and which of the two
+comes back depends only on whether the option parser or csvdt's
+own checking reached it first. Test for non-zero rather than for
+either number.
+
+One thing overrides all of the above: a reader that stops
+reading. 'csvdt big.csv | head -3' closes the pipe as soon as
+head has the three lines it asked for, and csvdt ends there and
+reports 0 -- including where it would otherwise have reported 1
+for having converted nothing, since the counting that says so is
+cut short with everything else.
+
+Nothing has gone wrong; the caller got what it asked for.
+Whether a given run notices at all depends on how much of the
+output the pipe had already taken, so a short run can still
+report what a long one does not.
+
+A run ended by a signal is reported the way a shell reports any
+other: 128 plus the signal's number, so 130 for Ctrl-C.
+See --flexible on what that leaves behind, which is nothing
+except after a SIGKILL.

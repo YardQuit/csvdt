@@ -1,0 +1,13 @@
+Reorders the columns of the CSV output. Takes the columns [0...]
+you want first, comma-joined with no space, in the order you
+want them (e.g. -a3,1,0,2). Columns you don't name are not
+dropped: they follow the ones you did, keeping their original
+relative order. So on a five-column file -a3,1 gives
+3,1,0,2,4 -- which means moving one column to the front is just
+-a3, without having to list the rest.
+
+The row always comes out the same width it went in. Use --remove
+to drop columns, and combine the two by piping if you want both.
+A column may appear at most once, since the list is the new
+order. Every column named must exist, or the row is reported as
+out of bound.

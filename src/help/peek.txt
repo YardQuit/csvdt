@@ -1,0 +1,53 @@
+Numbers the columns and shows the top of the file, then exits
+without converting anything. For finding the column number an
+action wants, which every one of them takes and which nothing
+in the file states.
+
+|    $ csvdt -H -p --peek sales.csv
+|    0                     1     2
+|    when                  who   level
+|    2026-01-01T00:00:00Z  ada   info
+
+'-H' and '-p' mean here what they mean everywhere else, so the
+rows shown are the rows a run would work on. Without '-H' the
+first record of the file is data and is shown as data: two
+rows, the numbering and it. With '-H' the reader takes that
+record as a header rather than data, so what is shown is the
+first data row -- the file's second line. Add '-p', which is
+what asks for a header to be written, and the header is shown
+above it: the three-row form above.
+
+Claiming '-H' over a file that has no header therefore shows
+the second line, for the same reason a run would convert from
+there. The option says a header is present and is believed.
+
+The columns are padded so each number sits above its own field.
+That padding is not CSV and is not meant to be: this writes a
+table to read, not data to pass on, which is why it is a mode
+of its own rather than something added to a run. Nothing else
+is written, so nothing downstream has to know about it.
+
+Padded by character count, so a field of wide or combining
+characters lines up by count rather than by how wide a terminal
+draws it. A tab, carriage return or newline inside a field is
+shown as '\t', '\r' or '\n' rather than breaking the table into
+more rows than it has.
+
+Reads the file the way a run would: '--read-delimiter',
+'--comment', '--single-quote' and '--trim' all apply, so the
+columns are the ones a run would see. Uneven records are shown
+rather than refused, whatever '--flexible' would have done:
+somebody looking for a column number is often looking because
+the file is ragged, and the numbering covers the widest of the
+rows shown.
+
+The options that write are refused with it -- an action,
+'--round-seconds', '--remove', '-a/--arrange', '-i/--insert',
+'--flexible', '--fill-log', '--quote' and '--print-delimiter' --
+since this writes no CSV for them to act on. Everything not in
+that list applies: the four above that decide what a record is,
+and '-H' and '-p'.
+
+An input holding no records has nothing to number: that is said
+on stderr, and the run still ends 0, since an empty file is not
+an error here any more than anywhere else.

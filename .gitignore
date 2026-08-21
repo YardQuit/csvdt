@@ -1,0 +1,14 @@
+target/
+__pycache__/
+*.pyc
+testdata/
+release.sh
+Cargo.lock*
+
+*.elc
+*.csv
+Cargo.lock-x86_64-unknown-linux-musl
+SHA256SUMS
+gen*.sh
+./#*#
+src/#*#

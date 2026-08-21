@@ -1,0 +1,8 @@
+Rounds -d/--duration's result to whole seconds, half-up,
+dropping any sub-second part (e.g. PT1.6S becomes PT2S and
+PT0.4S becomes PT0S). Only affects --duration, and only when you
+ask for it: by default a duration keeps the full sub-second
+precision its timestamps carried, so nothing is approximated
+unless you opt in here. Useful when the source timestamps carry
+more precision than the question does, and an
+exact-to-the-nanosecond span would only be noise.

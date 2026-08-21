@@ -1,0 +1,23 @@
+Print every option in a machine-readable form and exit, so a
+wrapper (an editor front end, a completion script) can learn
+what this build accepts instead of scraping --help. Takes no
+other arguments.
+
+One option per line, in the order --help lists them, with five
+tab-separated fields:
+
+|  short  long  value  separator  value-name
+
+  value
+      none, required or optional
+
+  separator
+      equals when the value must be attached with '=', otherwise
+      either; none when the option takes no value
+
+  value-name
+      the placeholder shown in --help; empty for a flag
+
+Lines beginning with '#' are comments, the first of which names
+the format version. Fields may be empty; a field never contains
+a tab.
