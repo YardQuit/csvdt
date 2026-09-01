@@ -459,6 +459,13 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      # For the tag pushes alone. GITHUB_TOKEN is a GitHub App token, and
+      # GitHub refuses to let an App write any ref whose workflow files
+      # differ from the default branch's; the monthly build's Publish step
+      # carries the full story. On runs the monthly build triggers this
+      # arrives via its `secrets: inherit` -- a called workflow sees no
+      # caller secrets otherwise.
+      TAG_PUSH_TOKEN: ${{ secrets.TAG_PUSH_TOKEN }}
 
     steps:
       # For one thing only: a remote that can be pushed to. The rolling tag
@@ -482,6 +489,15 @@ jobs:
           repo='${{ github.repository }}'
           sha='${{ needs.build.outputs.source_sha }}'
           title='csvdt RPM (newest release)'
+
+          # Checked before anything is published: the steps after this one
+          # write tags too, and a missing secret should stop the job here
+          # rather than partway through a replaced generation.
+          if [ -z "${TAG_PUSH_TOKEN:-}" ]; then
+            echo "::error::The TAG_PUSH_TOKEN secret is empty or not set. Publishing writes tags, which GITHUB_TOKEN is refused once master's workflow files have moved past the built commit. Create a fine-grained personal access token for this repository alone, holding Contents and Workflows read-and-write, and store it as the TAG_PUSH_TOKEN repository secret."
+            exit 1
+          fi
+          push_remote="https://x-access-token:${TAG_PUSH_TOKEN}@github.com/${repo}.git"
 
           intro=$(cat <<EOF
           The RPM of csvdt's newest released version, \`${{ needs.build.outputs.source_ref }}\`, replaced in place: this release holds one generation and no history. It is rebuilt when a version is tagged and by the monthly build, so what is in it is the current build of the released csvdt.
@@ -540,7 +556,11 @@ jobs:
           # point. It is never a version tag: those are pushed by hand, and
           # the name written here is fixed above rather than taken from the
           # ref that triggered the run.
-          git push origin --force "$sha:refs/tags/$tag"
+          #
+          # Through TAG_PUSH_TOKEN like every tag here: a version can be
+          # tagged behind a workflow edit, and the App-token rule the env
+          # block names would then refuse this push too.
+          git push "$push_remote" --force "$sha:refs/tags/$tag"
           echo "  refs/tags/$tag now at $sha"
 
           produced=$(cd rpms && ls)
@@ -805,17 +825,16 @@ jobs:
             # The tag with git first, then the release onto the existing
             # tag. Letting the create write the tag itself worked only by
             # accident of timing: creating a release for a tag that does
-            # not exist writes the ref through the API, which refuses any
-            # commit but the default branch's current head to a token
-            # without the workflow scope -- a scope GITHUB_TOKEN cannot
-            # hold. On a tag push the built commit is that head; on the
-            # monthly schedule master has usually moved on, and the create
-            # died with "Resource not accessible by integration (HTTP
-            # 403)" in the monthly build, whose comments carry the full
+            # not exist writes the ref as part of the call, with the run's
+            # own token, and an App token may not write a ref whose
+            # workflow files differ from the default branch's -- which an
+            # archived commit's do from the first workflow edit after its
+            # tag. The monthly build's Publish step carries the full
             # story. Not --force: this name is permanent and carries the
             # short sha, so a rerun's push is a no-op and anything else
             # deserves the loud failure.
-            git push origin "$sha:refs/tags/$tag"
+            push_remote="https://x-access-token:${TAG_PUSH_TOKEN}@github.com/${GH_REPO}.git"
+            git push "$push_remote" "$sha:refs/tags/$tag"
             # Losing a race with the monthly build's binaries job is the
             # ordinary case, not a failure: it means the entry now exists
             # and the uploads below belong on it.

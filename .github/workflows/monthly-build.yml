@@ -510,11 +510,46 @@ jobs:
         if: steps.changed.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_PUSH_TOKEN: ${{ secrets.TAG_PUSH_TOKEN }}
         run: |
           built="${{ needs.meta.outputs.built }}"
           ref='${{ needs.meta.outputs.ref }}'
           sha='${{ needs.meta.outputs.sha }}'
           repo='${{ github.repository }}'
+
+          # Every tag this step writes goes through TAG_PUSH_TOKEN -- a
+          # fine-grained personal access token for this repository alone,
+          # holding Contents and Workflows read-and-write -- rather than
+          # the run's own token. GITHUB_TOKEN is a GitHub App token, and
+          # GitHub refuses to let an App write any ref whose workflow
+          # files differ from the default branch's: that reads as updating
+          # the workflows themselves, which asks for a workflows
+          # permission the permissions block above has no way to grant,
+          # because GITHUB_TOKEN cannot hold it at all. A rebuilt release
+          # is by nature behind master, so from the first workflow edit
+          # after a tag, every archive tag names exactly such a commit --
+          # and a version tagged behind such an edit puts the rolling tags
+          # in the same position. It only ever worked on tag pushes
+          # because the built commit and master were then the same commit.
+          #
+          # This rule is what the archive entry's "Resource not
+          # accessible by integration (HTTP 403)" had been saying: trading
+          # that API create for a git push got the refusal in plain words
+          # at last -- "refusing to allow a GitHub App to create or update
+          # workflow monthly-build.yml without workflows permission".
+          # Whether it is also the story behind the ref API refusals
+          # recorded further down is not established: those hit commits
+          # whose workflow files matched master's, so they stay on the
+          # books as written.
+          #
+          # Checked before anything is published, so a missing secret
+          # stops the run here rather than between the archive entry and
+          # the rolling release.
+          if [ -z "${TAG_PUSH_TOKEN:-}" ]; then
+            echo "::error::The TAG_PUSH_TOKEN secret is empty or not set. Publishing writes tags, which GITHUB_TOKEN is refused once master's workflow files have moved past the built commit. Create a fine-grained personal access token for this repository alone, holding Contents and Workflows read-and-write, and store it as the TAG_PUSH_TOKEN repository secret."
+            exit 1
+          fi
+          push_remote="https://x-access-token:${TAG_PUSH_TOKEN}@github.com/${repo}.git"
           # Named, because the staging directory is also called release/ and
           # `gh release upload release release/BUILD-INFO` reads as neither.
           tag=release
@@ -632,21 +667,12 @@ jobs:
             done
           else
             # The tag with git first, then the release onto the existing
-            # tag, rather than letting the create write the tag itself.
-            # Creating a release for a tag that does not exist writes the
-            # ref through the API, and the first scheduled run established
-            # when that is refused: a token without the workflow scope may
-            # only create a ref for the current head of the default branch,
-            # and GITHUB_TOKEN cannot be granted that scope at all. On a tag
-            # push the built commit is that head, so `--target "$sha"` in
-            # one call worked and this branch looked fine; on the monthly
-            # schedule master has moved past the release, and the same call
-            # came back "Resource not accessible by integration (HTTP 403)"
-            # -- the ref API's refusal, already met twice in this file,
-            # wearing the release API's clothes. git push carries no such
-            # rule and is how every other tag here is already written.
-            # --target goes with it: for a tag that exists, the API ignores
-            # it.
+            # tag, rather than letting the create write the tag itself:
+            # `gh release create --target` writes the ref as part of the
+            # call, with the run's own token, and died on the App-token
+            # rule this step's header describes. For a tag that exists the
+            # API writes no ref and ignores --target, so the create
+            # carries neither.
             #
             # No --force, deliberately, where the rolling tag below needs
             # it: this name is permanent, and it carries the short sha, so
@@ -654,7 +680,7 @@ jobs:
             # push is a silent no-op, and anything else -- this tag existing
             # somewhere other than the commit it names -- deserves the loud
             # failure a plain push gives it.
-            git push origin "$sha:refs/tags/$archive_tag"
+            git push "$push_remote" "$sha:refs/tags/$archive_tag"
             gh release create "$archive_tag" release/* \
               --title "csvdt ${{ steps.version.outputs.csvdt }} - tzdata ${{ steps.version.outputs.tzdata }} (${built})" \
               --notes "$archive_notes" \
@@ -704,7 +730,11 @@ jobs:
           #    --force because this ref is a pointer and moving it is the
           #    whole point. It is never a version tag: those are pushed by
           #    hand and this job is given no name it could overwrite.
-          git push origin --force "$sha:refs/tags/$tag"
+          #
+          #    Through TAG_PUSH_TOKEN like every tag here: a version can
+          #    be tagged behind a workflow edit, and the App-token rule at
+          #    the top of this step would then refuse this push too.
+          git push "$push_remote" --force "$sha:refs/tags/$tag"
           echo "  refs/tags/$tag now at $sha"
 
           # BUILD-INFO is uploaded strictly last in both branches, because it
@@ -982,3 +1012,8 @@ jobs:
     uses: ./.github/workflows/rpm.yml
     with:
       publish: true
+    # The called workflow writes tags of its own, and a reusable workflow
+    # sees none of the caller's secrets unless handed them: without this,
+    # TAG_PUSH_TOKEN would be empty over there on exactly the runs this
+    # file triggers, while standalone tag-push runs read it fine.
+    secrets: inherit
