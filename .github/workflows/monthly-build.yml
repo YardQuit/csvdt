@@ -631,8 +631,31 @@ jobs:
               fi
             done
           else
+            # The tag with git first, then the release onto the existing
+            # tag, rather than letting the create write the tag itself.
+            # Creating a release for a tag that does not exist writes the
+            # ref through the API, and the first scheduled run established
+            # when that is refused: a token without the workflow scope may
+            # only create a ref for the current head of the default branch,
+            # and GITHUB_TOKEN cannot be granted that scope at all. On a tag
+            # push the built commit is that head, so `--target "$sha"` in
+            # one call worked and this branch looked fine; on the monthly
+            # schedule master has moved past the release, and the same call
+            # came back "Resource not accessible by integration (HTTP 403)"
+            # -- the ref API's refusal, already met twice in this file,
+            # wearing the release API's clothes. git push carries no such
+            # rule and is how every other tag here is already written.
+            # --target goes with it: for a tag that exists, the API ignores
+            # it.
+            #
+            # No --force, deliberately, where the rolling tag below needs
+            # it: this name is permanent, and it carries the short sha, so
+            # the same name can only ever mean the same commit. A rerun's
+            # push is a silent no-op, and anything else -- this tag existing
+            # somewhere other than the commit it names -- deserves the loud
+            # failure a plain push gives it.
+            git push origin "$sha:refs/tags/$archive_tag"
             gh release create "$archive_tag" release/* \
-              --target "$sha" \
               --title "csvdt ${{ steps.version.outputs.csvdt }} - tzdata ${{ steps.version.outputs.tzdata }} (${built})" \
               --notes "$archive_notes" \
               --latest=false

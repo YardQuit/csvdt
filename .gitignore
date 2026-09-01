@@ -12,3 +12,5 @@ SHA256SUMS
 gen*.sh
 ./#*#
 src/#*#
+
+*.patch

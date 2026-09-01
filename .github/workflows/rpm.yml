@@ -802,11 +802,24 @@ jobs:
           For the current build of the newest release, use \`rpm-release\` and \`release\` instead.
           EOF
           )
+            # The tag with git first, then the release onto the existing
+            # tag. Letting the create write the tag itself worked only by
+            # accident of timing: creating a release for a tag that does
+            # not exist writes the ref through the API, which refuses any
+            # commit but the default branch's current head to a token
+            # without the workflow scope -- a scope GITHUB_TOKEN cannot
+            # hold. On a tag push the built commit is that head; on the
+            # monthly schedule master has usually moved on, and the create
+            # died with "Resource not accessible by integration (HTTP
+            # 403)" in the monthly build, whose comments carry the full
+            # story. Not --force: this name is permanent and carries the
+            # short sha, so a rerun's push is a no-op and anything else
+            # deserves the loud failure.
+            git push origin "$sha:refs/tags/$tag"
             # Losing a race with the monthly build's binaries job is the
             # ordinary case, not a failure: it means the entry now exists
             # and the uploads below belong on it.
             gh release create "$tag" \
-              --target "$sha" \
               --title "csvdt ${ref} - $(printf '%s' "$tag" | sed 's/.*-tzdata/tzdata /')" \
               --notes "$notes" \
               --prerelease=false \
