@@ -477,6 +477,13 @@ jobs:
         with:
           ref: ${{ needs.build.outputs.source_sha }}
           fetch-depth: 1
+          # The tags are pushed as TAG_PUSH_TOKEN through an authenticated
+          # URL, and the credential this checkout would otherwise persist
+          # is an extra Authorization header on every github.com request
+          # that outranks the URL's -- the monthly build measured the push
+          # arriving as the App token because of it. gh carries its own
+          # token in the environment, so nothing here misses this one.
+          persist-credentials: false
 
       - uses: actions/download-artifact@v7
         with:
@@ -489,6 +496,12 @@ jobs:
           repo='${{ github.repository }}'
           sha='${{ needs.build.outputs.source_sha }}'
           title='csvdt RPM (newest release)'
+
+          # Stripped of whitespace before use -- a secret pasted with a
+          # trailing newline is fatal inside the URL below, in words that
+          # point anywhere but at the paste. The monthly build's Publish
+          # step measured it; tokens never contain whitespace.
+          TAG_PUSH_TOKEN=$(printf '%s' "${TAG_PUSH_TOKEN:-}" | tr -d '[:space:]')
 
           # Checked before anything is published: the steps after this one
           # write tags too, and a missing secret should stop the job here
@@ -833,7 +846,10 @@ jobs:
             # story. Not --force: this name is permanent and carries the
             # short sha, so a rerun's push is a no-op and anything else
             # deserves the loud failure.
-            push_remote="https://x-access-token:${TAG_PUSH_TOKEN}@github.com/${GH_REPO}.git"
+            # Scrubbed again here: each step is its own shell, so the
+            # Publish step's stripping does not carry into this one.
+            token=$(printf '%s' "$TAG_PUSH_TOKEN" | tr -d '[:space:]')
+            push_remote="https://x-access-token:${token}@github.com/${GH_REPO}.git"
             git push "$push_remote" "$sha:refs/tags/$tag"
             # Losing a race with the monthly build's binaries job is the
             # ordinary case, not a failure: it means the entry now exists
