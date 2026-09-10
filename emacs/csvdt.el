@@ -3,6 +3,7 @@
 ;; Copyright (C) 2025-2026 Michael A Jones
 
 ;; Author: Michael A Jones <yardquit@pm.me>
+;; Maintainer: Michael A Jones <yardquit@pm.me>
 ;; URL: https://github.com/YardQuit/csvdt
 ;; Version: 1.0.0
 ;; Package-Requires: ((emacs "27.1"))
