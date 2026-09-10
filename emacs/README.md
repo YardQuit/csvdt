@@ -80,6 +80,80 @@ own version, and a test fails if the two drift apart, the same bargain the RPM
 spec's `Version` is held to. It works against older binaries anyway; see
 below.
 
+### Byte-compiling, and when it is worth it
+
+Nothing here ships byte-compiled. The RPM installs `csvdt.el` as source
+deliberately: an `.elc` is tied to the Emacs that produced it, which is why an
+Emacs add-on usually pins a version, and the subpackage would stop being
+`noarch` the moment it carried one. From a checkout the same is true, so
+however it is installed, the commands run interpreted unless you compile them
+yourself.
+
+Whether that is worth doing depends on which path a run takes, and the answer
+is not the obvious one. Measured on a 25 MB, 500,001-row CSV with `-H -p -r 1`
+under Emacs 30.2, three runs each:
+
+| | interpreted | byte-compiled |
+| --- | --- | --- |
+| whole buffer | 1.37 s | 1.41 s |
+| 2000 banked ranges | 4.6–4.8 s | 4.1–4.2 s |
+
+A whole-buffer run gains nothing, and a bigger file does not change that. It
+is handed straight to the process with `call-process-region`, which copies
+nothing however large the buffer is, so no Elisp ever touches a row: of that
+1.37 s the csvdt process is 0.32 s, most of the rest is Emacs encoding the
+buffer out as UTF-8 and reading the result back, and some 0.18 s is left for
+everything else — all of this package's Lisp included. Compiling can only
+attack that last slice. As the file grows, the process and the encoding grow
+with it while that slice stays where it is.
+
+The multi-range path is where compiling pays. A region in several pieces, or
+banked lines, cannot be handed over as one range: the text is assembled first,
+record boundaries are worked out per piece, and covered pieces are dropped.
+That is a real loop over Lisp objects, and compiling is worth about a tenth of
+it. So compile if you bank lines, and do not expect a large file to speed up.
+
+Byte-compiling is also a check. `run-tests.sh` compiles as a gate and treats
+any warning as a failure, so a release compiles clean; a warning against your
+own Emacs is worth reporting.
+
+For a package install, `package-install-file` compiles as it installs and
+there is nothing to do. For a checkout — particularly one loaded through a
+symlink, where the file changes under Emacs whenever you pull — this compiles
+it at start-up only when the source has moved on, and keeps the `.elc` out of
+the working tree:
+
+```elisp
+(let* ((csvdt-path (expand-file-name "csvdt/csvdt.el" user-emacs-directory))
+       (csvdt-elc  (expand-file-name "csvdt/csvdt.elc" user-emacs-directory))
+       (recompiled nil))
+  (add-to-list 'load-path (file-name-directory csvdt-path))
+  (when (file-newer-than-file-p csvdt-path csvdt-elc)
+    ;; Required first, so that `byte-compile-dest-file-function' is already a
+    ;; special variable here: under lexical binding a `let' on an unknown name
+    ;; is a lexical binding the compiler never reads.
+    (require 'bytecomp)
+    (let ((byte-compile-dest-file-function (lambda (_) csvdt-elc))
+          (start (current-time)))
+      (setq recompiled (and (ignore-errors (byte-compile-file csvdt-path))
+                            (float-time (time-since start))))))
+  ;; A source too broken to compile still has to load, so which file is loaded
+  ;; is decided here rather than left to `load' finding the stale `.elc' first.
+  (let ((compiled (and (file-exists-p csvdt-elc)
+                       (not (file-newer-than-file-p csvdt-path csvdt-elc)))))
+    (load (if compiled csvdt-elc csvdt-path) nil t)
+    (message "csvdt loaded %s%s"
+             (if compiled "compiled" "from source (interpreted)")
+             (if recompiled (format ", recompiled in %.2fs" recompiled) ""))))
+```
+
+`csvdt-path` is the symlink; `file-newer-than-file-p` follows it, so editing
+the file in the checkout is what triggers the rebuild. Writing the `.elc` next
+to the symlink rather than beside its target is what keeps a build artefact
+out of the repository — `run-tests.sh` removes its own for the same reason.
+Compiling this file takes about a tenth of a second, so the rebuild is not a
+start-up cost worth avoiding.
+
 ## Commands
 
 | command | what it does |
