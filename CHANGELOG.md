@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+A front end for the Tuatara editor, in [`tuatara/`](tuatara/): csvdt run over
+a buffer, a selection or Tuatara's banked lines, with the same rules as the
+Emacs one about whole records and the header, and the same three option names
+and no others. It runs csvdt as a background job, so a long run leaves the
+editor free and `M-x stop-job` ends it.
+
 ## 1.0.0
 
 First release.
