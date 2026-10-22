@@ -687,8 +687,13 @@ needs no change when csvdt gains an option. A test holds each of the three to
 an option csvdt still reports, and another asserts no fourth name has crept
 in.
 
-[`tuatara/`](tuatara/) is the same front end for the Tuatara editor, naming
-the same three options and held to them by the same two tests.
+The front end for the Tuatara editor, naming the same three options and held
+to them by the same two tests, lives with Tuatara's own packages, in
+[Tuatara-Editor/tuatara-packages](https://github.com/Tuatara-Editor/tuatara-packages):
+
+```lisp
+(load-package "csvdt" :source "tuatara-packages")
+```
 
 ## Piping
 
@@ -727,10 +732,8 @@ cargo test
 ```
 
 `cargo test` and the Emacs suites in [`emacs/`](emacs/) run in CI on every pull
-request, and on `master`. The Tuatara package's tests run by hand,
-`tuatara/run-tests.sh`, since they need a Tuatara built from source. The Rust
-tests run on Linux, macOS and Windows, since `-l/--local` reads `TZ` on Unix and
-not on Windows and the two genuinely differ.
+request, and on `master`. The Rust tests run on Linux, macOS and Windows, since
+`-l/--local` reads `TZ` on Unix and not on Windows and the two genuinely differ.
 
 [`checks/`](checks/) holds a separate set, run by hand rather than in CI:
 
