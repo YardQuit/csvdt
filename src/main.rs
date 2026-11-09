@@ -3,6 +3,10 @@ use chrono::{DateTime, Datelike, FixedOffset, Timelike};
 use clap::builder::PossibleValue;
 use clap::crate_version;
 
+mod man;
+mod platform;
+use man::without_marks;
+
 // What --flexible does about records narrower than the rest.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 enum FillMode {
@@ -17,6 +21,15 @@ enum FillMode {
     Widest,
 }
 
+// Where -i puts a converted column relative to the column it is given.
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+enum InsertPosition {
+    Before,
+    Replace,
+    #[default]
+    After,
+}
+
 #[derive(Default, Debug, Clone)]
 struct ArgumentFlags {
     input_file: String,
@@ -28,7 +41,7 @@ struct ArgumentFlags {
     selected_column: usize,               // the action's own (first) column
     second_column: Option<usize>,         // --duration's second column, when given
     insert_column: Option<i64>,           // -i's column; None means "use the action's own"
-    insert_position: String,              // -i's before/after/replace word; default "after"
+    insert_position: InsertPosition,      // -i's before/after/replace word; default after
     action_to_rfc3339: bool,              // -r --rfc3339 <col>
     action_to_utc: bool,                  // -u --utc <col>
     action_to_local: bool,                // -l --local <col>
@@ -41,8 +54,7 @@ struct ArgumentFlags {
     arrange_listed: Vec<usize>,         // the same set, sorted, for membership tests
     action_duration: bool,                // -d --duration <col>[,<col2>]
     round_seconds: bool,                  // --round-seconds
-    action_offset: bool,                  // -o --offset <col> <offset>
-    target_offset: Option<FixedOffset>,   // the offset parsed from -o's second value
+    action_offset: Option<FixedOffset>,   // -o --offset <col> <offset>: the offset parsed from the second value
     whitespace_trim: String,              // --trim
     input_delimiter: Option<char>,        // --read-delimiter
     input_quotes: bool,                   // --single-quotes
@@ -58,499 +70,6 @@ struct ArgumentFlags {
 // either way. eprintln! panics when stderr is closed or full, which turned
 // exactly those runs into exit 101 with the message lost too: reporting
 // became the failure it was reporting.
-// Starts every option's description on its own line.
-//
-// .TP puts the tag in the margin and the description beside it when the tag
-// is narrower than the indent, and below it when it is not. Every option
-// here is named widely enough to go below except one, so --peek alone read
-// differently from the rest of OPTIONS:
-//
-//     --peek Numbers  the  columns  and  shows  the top of the file, then
-//            exits without converting anything.
-//     --comment <char>
-//            The  comment  character  to use when parsing CSV.
-//
-// A break after the tag settles it, and settles it for whatever is named
-// next: no width is measured, so an option added later reads like its
-// neighbours whether its name is short or long. On a tag already too wide to
-// share its line the break falls where roff was going to break anyway, and
-// the page is unchanged, which is why this needs no test of length, and
-// has none to get wrong.
-fn break_after_option_tags(rendered: &[u8]) -> Vec<u8> {
-    let text = String::from_utf8_lossy(rendered);
-    let mut out = String::with_capacity(text.len());
-    let mut after_tp = false;
-    for line in text.split_inclusive('\n') {
-        out.push_str(line);
-        let bare = line.trim_end_matches(['\n', '\r']);
-        if after_tp {
-            // The tag is the one line after the request. Anything else there
-            // is not a tag to break after, a .TP followed straight by
-            // another request is malformed, and left as it was found.
-            if !bare.starts_with('.') {
-                out.push_str(".br\n");
-            }
-            after_tp = false;
-        } else if bare == ".TP" {
-            after_tp = true;
-        }
-    }
-    out.into_bytes()
-}
-
-// Turns the headings inside a section into real man page subsections.
-//
-// The help gives every heading a blank line above and none below, so that it
-// sits against what it introduces. Printed as it is written that reads as
-// intended, since --help writes the text out as it stands. roff fills, and a
-// heading with nothing after it to end the line is simply the first words of
-// the paragraph below:
-//
-//     COLUMNS  ARE  ADDRESSED  BY  POSITION  Always  by number from 0, never by
-//     header name, so a repeated header name is not ambiguous.
-//
-// Twelve of the fifteen headings under KNOWN LIMITS came out that way, which
-// leaves that section one long paragraph with capitals scattered through it.
-//
-// .SS is what the format has for this, and it settles the spacing as well as
-// the break: the blank line above is dropped when there is one, since .SS
-// brings its own and two together read as a gap rather than a heading.
-//
-// A heading is a line at the margin whose words are all capitals once the
-// option names among them are set aside, 'parse_err' too, spelled as the
-// output spells it. That is what separates 'A LEAP SECOND ADDS NOTHING TO A
-// SPAN' from the paragraph beginning 'Unix epoch (read by -r/--rfc3339,'.
-// The names arrive escaped, so a word opening '\-' is one; this runs before
-// the pass that adds '\%', and allows for it anyway so the order of the two
-// is not a thing to remember.
-fn promote_man_subheadings(rendered: &[u8]) -> Vec<u8> {
-    fn is_heading(line: &str) -> bool {
-        if line.is_empty()
-            || line.starts_with('.')
-            || line.starts_with('\'')
-            || line.starts_with(char::is_whitespace)
-        {
-            return false;
-        }
-        if line.ends_with('.') || line.ends_with(':') || line.ends_with(',') {
-            return false;
-        }
-        // An apostrophe reaches the roff as '\*(Aq', whose 'q' would answer
-        // for a lowercase letter and rule out every heading holding one.
-        let text = line.replace("\\*(Aq", "'");
-        let mut words = text.split_whitespace().filter(|word| {
-            let bare = word.strip_prefix("\\%").unwrap_or(word);
-            !bare.starts_with("\\-") && !bare.starts_with('-')
-                && *word != "parse_err"
-        });
-        let mut any = false;
-        let all_capitals = words.all(|word| {
-            any = true;
-            word.chars().any(|c| c.is_ascii_uppercase())
-                && !word.chars().any(|c| c.is_ascii_lowercase())
-        });
-        any && all_capitals
-    }
-
-    let text = String::from_utf8_lossy(rendered);
-    let mut out: Vec<String> = Vec::new();
-    for line in text.split_inclusive('\n') {
-        let bare = line.trim_end_matches(['\n', '\r']);
-        if is_heading(bare) {
-            // .SS supplies the space above, so the blank line the corpus put
-            // there is given up rather than added to.
-            if out.last().is_some_and(|last| last.trim().is_empty()) {
-                out.pop();
-            }
-            out.push(format!(".SS {bare}\n"));
-        } else {
-            out.push(line.to_string());
-        }
-    }
-    out.concat().into_bytes()
-}
-
-// Turns the capitalised lines that open csvdt's trailing help into real man
-// page sections, and drops the heading clap_mangen files them all under.
-//
-// clap_mangen puts everything after the options into one section it calls
-// EXTRA, which is not a heading any man page uses and buries three topics
-// under one name. The text itself already carries their headings, so this
-// only promotes them: a line that is exactly one of HEADINGS becomes .SH,
-// and .SH EXTRA goes, since what it introduced now introduces itself.
-//
-// Works on the rendered roff rather than the source, so every escape
-// clap_mangen applied is left exactly as it made it. Only whole lines match,
-// which is what keeps 'KNOWN LIMITS, at the end of this help', prose, mid
-// sentence, three times over, from becoming a section heading.
-fn promote_man_headings(rendered: &[u8], headings: &[&str]) -> Vec<u8> {
-    let text = String::from_utf8_lossy(rendered);
-    let mut out = String::with_capacity(text.len());
-    for line in text.split_inclusive('\n') {
-        let bare = line.trim_end_matches(['\n', '\r']);
-        if bare == ".SH EXTRA" {
-            continue;
-        }
-        if headings.contains(&bare) {
-            out.push_str(".SH ");
-            out.push_str(bare);
-            out.push('\n');
-        } else {
-            out.push_str(line);
-        }
-    }
-    out.into_bytes()
-}
-
-// Stops roff breaking an option name across two lines.
-//
-// roff hyphenates to fill a line evenly, and it does not know that
-// '--duration' is one word a reader may want to copy rather than English
-// prose. At 80 columns the page came out with
-//
-//     action's  own column (or its second column, for a two-column --du-
-//     ration). This column is never out of bound: too
-//
-// which reads as an option that does not exist and cannot be pasted into a
-// shell. Two names broke that way at 80 columns and five at 60, since the
-// narrower the measure the likelier any given word lands on the boundary.
-//
-// '\%' at the start of a word tells roff not to hyphenate that word. It is
-// only ever a hint about breaking, so it costs nothing anywhere else: the
-// line count, the measure and every other break are exactly as they were,
-// and groff stays silent. The alternative, '.nh' over the whole page,
-// would also stop hyphenating the prose, which has no such problem and
-// justifies better for being allowed to break.
-//
-// Option names reach the rendered roff with each hyphen escaped, as
-// '\-\-duration', so a word beginning '\-' is the thing to protect. Two
-// places hold them. Most are in running text, where the name begins a word.
-// The rest are the whole argument of a one-line font macro, '.B
-// \-\-flexible=widest' in FILES being the one the corpus has, and a macro
-// line is skipped by the text rule, since a request must keep its own first
-// word. That one is handled by name, for the font macros man pages use.
-fn protect_option_names(rendered: &[u8]) -> Vec<u8> {
-    // The font macros that take text as their argument. A name given to one
-    // of these is set in bold or italic and then flows into the surrounding
-    // paragraph, where it can be broken like any other word.
-    const FONT_MACROS: [&str; 8] =
-        [".B", ".I", ".BR", ".IR", ".RB", ".RI", ".BI", ".IB"];
-
-    // Marks every option name in one span of text. A font macro's argument
-    // is set in the surrounding paragraph and breaks exactly as running text
-    // does, so the two are the same problem and get the same answer, which
-    // they did not before: the macro branch marked an argument only when the
-    // whole of it was a name, so '.I the destination given to \-\-fill\-log'
-    // reached the page unprotected and could be broken at the hyphen.
-    fn mark(span: &str, out: &mut String) {
-        // Word-opening is the whole test: a hyphen inside a word is a real
-        // hyphen, 'two-column', 'csvdt-widest-', and breaking there is
-        // what a reader expects, so it is left alone.
-        let mut rest = span;
-        let mut at_start = true;
-        while let Some(index) = rest.find("\\-") {
-            let (before, from) = rest.split_at(index);
-            out.push_str(before);
-            // Only a hyphen that opens a word. '\%' in the middle of one is
-            // not inert: it is an extra place roff may break, so getting
-            // this wrong does the opposite of what the pass is for: it broke
-            // the example rows in EXAMPLES at their dates, '2023\-11\-14'
-            // being a word whose second and third hyphens are internal.
-            let opens_word = before.ends_with(char::is_whitespace)
-                || (at_start && before.is_empty());
-            // And a name, not a dash. NAME is spelled 'csvdt \- parse CSV
-            // files', where the '\-' is the separator man pages put there
-            // and the word ends at it. What follows an option's hyphen is
-            // either its second hyphen or the first letter of its name.
-            let names_option = {
-                let after = &from["\\-".len()..];
-                after.starts_with("\\-")
-                    || after.starts_with(|c: char| c.is_ascii_alphanumeric())
-            };
-            if opens_word && names_option {
-                out.push_str("\\%");
-            }
-            out.push_str("\\-");
-            rest = &from["\\-".len()..];
-            at_start = false;
-        }
-        out.push_str(rest);
-    }
-
-    let text = String::from_utf8_lossy(rendered);
-    let mut out = String::with_capacity(text.len() + text.len() / 32);
-    for line in text.split_inclusive('\n') {
-        let bare = line.trim_end_matches(['\n', '\r']);
-        let ending = &line[bare.len()..];
-
-        if bare.starts_with('.') || bare.starts_with('\'') {
-            // A request keeps its own first word, whatever it holds; the
-            // argument of a font macro is text and is treated as text.
-            match bare.split_once(' ') {
-                Some((macro_name, argument))
-                    if FONT_MACROS.contains(&macro_name) =>
-                {
-                    out.push_str(macro_name);
-                    out.push(' ');
-                    mark(argument, &mut out);
-                }
-                _ => out.push_str(bare),
-            }
-            out.push_str(ending);
-            continue;
-        }
-
-        mark(bare, &mut out);
-        out.push_str(ending);
-    }
-    out.into_bytes()
-}
-
-// The gutter that marks a block in the help files as verbatim.
-//
-// A line opening with it is text laid out on purpose, a command to be
-// copied, a sample of output, a diagram whose columns line up, and is
-// written to the page exactly as it stands. Everything else is prose, and
-// prose is roff's to fill to the width it is read at.
-//
-// It is a mark in the corpus rather than a guess about the corpus. Deciding
-// by shape, for instance holding any block that carries an indent, would
-// freeze nested prose along with the listings. Telling the two apart needs a
-// mark, because nothing in the shape of a line does it: the two lines of
-// csvdt's own stderr quoted under KNOWN LIMITS are eight words each and
-// wrapped like a sentence, and a rule that reads them as one joins a message
-// the reader is meant to copy.
-//
-// The gutter never reaches a reader. It is stripped from every string clap
-// is given, so --help and -h are the same bytes they were, and stripped
-// again here on the way into the page.
-const VERBATIM: char = '|';
-
-// Removes the verbatim gutter, leaving the line exactly as it was written.
-fn strip_marks(text: &str) -> String {
-    text.split('\n')
-        .map(|line| line.strip_prefix(VERBATIM).unwrap_or(line))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-// The same command with every gutter taken out of every string it holds.
-//
-// Used for the copy that parses and prints --help, so a mark meant for the
-// page is never shown to a reader. The page itself is rendered from the
-// marked command, which is where the marks are read.
-fn without_marks(command: clap::Command) -> clap::Command {
-    // Read before the command is moved: each getter borrows it.
-    let taken = |text: Option<&clap::builder::StyledStr>| {
-        text.map(|text| strip_marks(&text.to_string()))
-    };
-    let about = taken(command.get_about());
-    let long_about = taken(command.get_long_about());
-    let after_help = taken(command.get_after_help());
-    let after_long_help = taken(command.get_after_long_help());
-
-    let mut command = command;
-    if let Some(text) = about {
-        command = command.about(text);
-    }
-    if let Some(text) = long_about {
-        command = command.long_about(text);
-    }
-    if let Some(text) = after_help {
-        command = command.after_help(text);
-    }
-    if let Some(text) = after_long_help {
-        command = command.after_long_help(text);
-    }
-    command.mut_args(|arg| {
-        let help = arg.get_help().map(|text| strip_marks(&text.to_string()));
-        let long_help =
-            arg.get_long_help().map(|text| strip_marks(&text.to_string()));
-        let mut arg = arg;
-        if let Some(text) = help {
-            arg = arg.help(text);
-        }
-        if let Some(text) = long_help {
-            arg = arg.long_help(text);
-        }
-        arg
-    })
-}
-
-// Gives each block of the help the treatment its author asked for.
-//
-// roff fills by default: it joins the input lines of a paragraph and rewraps
-// them to the reader's width. That is the right treatment for prose and the
-// wrong one for a value table. '--quote' documents its four values in aligned
-// columns, and filled it came out as
-//
-//     The quoting style to use when writing CSV.  always     This puts
-//     quotes  around every field. Always.  necessary  This puts quotes
-//     around fields only when necessary.
-//                They are necessary when fields contain a  quote,  de-
-//     limiter or record
-//
-// which is not a table, a paragraph, or readable. clap_mangen hands the help
-// text to roff exactly as written and asks for no particular treatment of it,
-// so this supplies the treatment.
-//
-// Three kinds of block, and each run of lines is cut into segments where the
-// kind changes, so a paragraph that introduces a listing is not held by the
-// listing under it:
-//
-//   marked with the VERBATIM gutter, written as it stands, with a break on
-//   every line, and the gutter taken off;
-//
-//   indented and unmarked, a nested paragraph. The indent is handed to
-//   roff as '.RS' and the words fill inside it, which is how a page nests
-//   prose and how these read at any width rather than at the help file's;
-//
-//   at the margin and unmarked, ordinary prose, left alone to fill.
-//
-// The cost of holding a line is that a break is all it gets: filling stays
-// on, so a line too long for the terminal is still wrapped by roff, and
-// having been marked to keep its shape, it is wrapped and then justified,
-// which is worse than either. A '--peek' example widened to 70 columns came
-// out of an 80-column page as
-//
-//     $       csvdt       -H       -p        --peek        sales.csv
-//     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-//
-// a command nobody can copy, from the one treatment meant to protect it.
-//
-// So a marked line is held to the same 64 columns as the rest of the corpus,
-// not to a wider measure of its own. The width that matters is the one man
-// leaves an option's help, 14 columns, and not the 7 a section's body gets:
-// a marked line lives in either, and 64 plus 14 is 78. The test saying so is
-// 'the_help_files_fit_the_column_the_manual_page_leaves_them', which asks it
-// of every line of every file and ties the 64 to the 14 it comes from.
-fn preserve_aligned_blocks(rendered: &[u8]) -> Vec<u8> {
-    let text = String::from_utf8_lossy(rendered);
-    let mut out = String::with_capacity(text.len());
-    let mut run: Vec<&str> = Vec::new();
-
-    // Whether a line carries a column gap: two or more spaces with something
-    // either side of them, which is how a second column is held away from a
-    // first. A single space is not one, so 'headers Trim whitespace', the
-    // widest name in --trim's table, one space from its description, does
-    // not answer for the table it sits in. Its neighbours do.
-    fn has_column_gap(line: &str) -> bool {
-        line.trim_end()
-            .split_once(|character: char| !character.is_whitespace())
-            .is_some_and(|(_, rest)| rest.contains("  "))
-    }
-
-    fn indent_of(line: &str) -> usize {
-        line.len() - line.trim_start_matches(' ').len()
-    }
-
-    fn flush(run: &mut Vec<&str>, out: &mut String) {
-        // A segment is a stretch of lines wanting the same treatment: same
-        // gutter, same indent. The indent matters because a value's tag sits
-        // at one depth and its description at another, and the description
-        // is the part that fills.
-        let kind = |line: &str| (line.starts_with(VERBATIM), indent_of(line));
-        let mut segments: Vec<Vec<&str>> = Vec::new();
-        for line in run.iter() {
-            match segments.last_mut() {
-                Some(open) if kind(open[0]) == kind(line) => open.push(line),
-                _ => segments.push(vec![line]),
-            }
-        }
-
-        let mut first = true;
-        let mut after_held = false;
-        for segment in &segments {
-            let marked = segment[0].starts_with(VERBATIM);
-            // A second signal, kept for a table nobody marked. Two lines that
-            // both carry a column gap are a table in every case the corpus
-            // has, and it only ever holds a block, the direction that
-            // cannot mangle anything. Two rather than one, so a single gap
-            // inside a sentence cannot hold a paragraph.
-            // Asked of the line without its gutter: the gutter sits at the
-            // margin and the block's own indent follows it, which reads as a
-            // column gap on every marked line and would answer for a block
-            // the mark has already answered for.
-            let gapped = segment
-                .iter()
-                .filter(|line| {
-                    has_column_gap(line.strip_prefix(VERBATIM).unwrap_or(line))
-                })
-                .count()
-                >= 2;
-            let indent = indent_of(segment[0]);
-
-            if !marked && !gapped && indent > 0 {
-                // .RS takes the indent and .RE gives it back, and both break,
-                // so nothing need be said about the line either side.
-                out.push_str(&format!(".RS {indent}n\n"));
-                for line in segment {
-                    out.push_str(line.trim_start());
-                    out.push('\n');
-                }
-                out.push_str(".RE\n");
-                first = false;
-                after_held = false;
-                continue;
-            }
-
-            let held = marked || gapped;
-            for line in segment {
-                // .br rather than .nf: a break, with filling left on. .nf
-                // would hold every line exactly as written, but then roff may
-                // not wrap a line that is too long for the terminal, and the
-                // pager breaks it badly. The help is written to sit under
-                // --help's indent and man adds 14 more, so whole blocks would
-                // overflow 80 columns. With .br the author's line breaks are
-                // kept and roff may still wrap a line that does not fit.
-                //
-                // A break is also needed on the first line after a held
-                // segment, whichever kind follows it. Filling resumes there,
-                // and without the break roff would pull that line up onto the
-                // end of the last held one.
-                if !first && (held || after_held) {
-                    out.push_str(".br\n");
-                }
-                out.push_str(line.strip_prefix(VERBATIM).unwrap_or(line));
-                out.push('\n');
-                first = false;
-                after_held = held;
-            }
-        }
-        run.clear();
-    }
-
-    for line in text.lines() {
-        // A blank line or a roff request ends whatever run was open. Both are
-        // kept where they were: a request inside a held block still runs, and
-        // a blank line still breaks a paragraph.
-        if line.is_empty() || line.starts_with('.') || line.starts_with('\'') {
-            flush(&mut run, &mut out);
-            out.push_str(line);
-            out.push('\n');
-        } else {
-            run.push(line);
-        }
-    }
-    flush(&mut run, &mut out);
-    out.into_bytes()
-}
-
-// Takes the trailing spaces off the page.
-//
-// clap_mangen writes the SYNOPSIS by appending each argument and a space
-// after it, so the line ends with one. It was the only line in the page that
-// did. roff neither needs it nor notices it: a space at the end of a text
-// line is collapsed by filling, and nothing here is in no-fill, but this
-// file is read and shipped by people: a packager diffs it, a repository shows
-// it as a red block, and an editor that strips trailing whitespace on save
-// makes the page differ from the one the binary generates.
-//
-// Last in the chain, so no pass after it can put one back.
-fn drop_trailing_space(rendered: &[u8]) -> Vec<u8> {
-    without_trailing_padding(&String::from_utf8_lossy(rendered)).into_bytes()
-}
-
 fn note(message: &str) {
     use std::io::Write;
     let _ = writeln!(std::io::stderr(), "{message}");
@@ -656,153 +175,6 @@ fn answered(written: std::io::Result<()>) {
     }
 }
 
-// Refuses a standard output that cannot take a single byte, before the run
-// that would write to it begins.
-//
-// std answers Ok to a write on a standard stream that failed with EBADF: a
-// process without usable standard output is one whose output goes nowhere,
-// deliberately, and not an error std will surface. So `csvdt in.csv 1<out`,
-// '<' where '>' was meant, converted the whole file, wrote none of it,
-// counted what it had written on stderr, and exited 0. Nothing later in the
-// run can notice, because the flush that should have failed returns Ok too.
-//
-// The check is a dup of the descriptor and a write of nothing to it. A
-// zero-length write puts no byte anywhere and touches no reader, Linux
-// answers a null write on a pipe before it looks for one, while still
-// going through the kernel's check that the descriptor exists and was opened
-// for writing.
-//
-// Only EBADF is refused here. A probe on a full disk answers ENOSPC, and
-// that is the run's own failure to report, with its own message, at the
-// point it actually runs out of room.
-//
-// Unix only: this is a gap std leaves on every platform, but the descriptor
-// is the part of it there is a way to ask about.
-#[cfg(unix)]
-fn require_writable_stdout() -> Result<(), Box<dyn Error>> {
-    use std::io::Write;
-    use std::os::fd::AsFd;
-
-    let probed = std::io::stdout()
-        .as_fd()
-        .try_clone_to_owned()
-        .map(std::fs::File::from)
-        .and_then(|mut duplicate| duplicate.write(&[]));
-    match probed {
-        Err(error) if error.raw_os_error() == Some(libc::EBADF) => {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "standard output cannot be written to. It is usually '<' \
-                 where '>' was meant: the output would have gone nowhere and \
-                 the run would have reported success".to_string())))
-        },
-        _ => Ok(()),
-    }
-}
-
-#[cfg(not(unix))]
-fn require_writable_stdout() -> Result<(), Box<dyn Error>> {
-    Ok(())
-}
-
-// The same gap on the way in. std hides EBADF on a read as well, and hides it
-// as end of input, which is a thing an input is allowed to be: `csvdt -H -r0
-// 0>out.csv`, '>' where '<' was meant, which has the shell empty out.csv on
-// the way past, read nothing, wrote nothing, and exited 0, exactly as a run
-// over an empty file does.
-//
-// A zero-length read consumes no byte and does not wait: a pipe with no
-// writer yet answers it at once, as does a terminal.
-#[cfg(unix)]
-fn require_readable_stdin() -> Result<(), Box<dyn Error>> {
-    use std::io::Read;
-    use std::os::fd::AsFd;
-
-    let probed = std::io::stdin()
-        .as_fd()
-        .try_clone_to_owned()
-        .map(std::fs::File::from)
-        .and_then(|mut duplicate| duplicate.read(&mut []));
-    match probed {
-        Err(error) if error.raw_os_error() == Some(libc::EBADF) => {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "standard input cannot be read from. It is usually '>' where \
-                 '<' was meant, which has the shell empty the file on the way \
-                 past: the run would have read nothing and reported success, \
-                 which is what an empty input does".to_string())))
-        },
-        _ => Ok(()),
-    }
-}
-
-#[cfg(not(unix))]
-fn require_readable_stdin() -> Result<(), Box<dyn Error>> {
-    Ok(())
-}
-
-// The identity of an open file as the platform tells it: device and inode on
-// Unix, volume serial number and file index on Windows. Two handles reporting
-// one identity are one file however it was spelled, through a symbolic
-// link, a hard link, a second spelling of a directory, or '/dev/stdout'.
-//
-// None where the question is meaningless rather than answerable: a pipe, a
-// console, a device. Sharing one of those is not damaging the way sharing a
-// regular file is, and a run cannot be both ends of a pipe.
-#[cfg(unix)]
-fn file_identity(file: &std::fs::File) -> Option<(u64, u64)> {
-    use std::os::unix::fs::{FileTypeExt, MetadataExt};
-    let about = file.metadata().ok()?;
-    // A regular file has data to lose; a fifo has a reader to mislead, which
-    // is the same harm by another route, '--fill-log /dev/stdout' into a
-    // pipe put the log's own rows into the CSV somebody was reading, which is
-    // the corruption the option exists to keep out of the output. A character
-    // device is neither: '/dev/null' twice over is one identity with nothing
-    // to lose and nobody to mislead, and refusing it would be refusing a run
-    // that is fine.
-    if !(about.file_type().is_file() || about.file_type().is_fifo()) {
-        return None;
-    }
-    Some((about.dev(), about.ino()))
-}
-
-#[cfg(windows)]
-fn file_identity(file: &std::fs::File) -> Option<(u64, u64)> {
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
-    };
-    if !file.metadata().ok()?.file_type().is_file() {
-        return None;
-    }
-    let mut about = unsafe { std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>() };
-    // SAFETY: the handle is borrowed from a live File, and the struct is
-    // owned here and correctly sized for the call.
-    let answered = unsafe {
-        GetFileInformationByHandle(file.as_raw_handle() as _, &mut about)
-    };
-    if answered == 0 {
-        return None;
-    }
-    Some((
-        u64::from(about.dwVolumeSerialNumber),
-        (u64::from(about.nFileIndexHigh) << 32) | u64::from(about.nFileIndexLow),
-    ))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn file_identity(_file: &std::fs::File) -> Option<(u64, u64)> {
-    None
-}
-
-// The identity of one of the run's own streams, standard input or standard
-// output, which carry no path to open by.
-#[cfg(unix)]
-fn stream_identity(stream: std::os::fd::BorrowedFd) -> Option<(u64, u64)> {
-    let duplicate = stream.try_clone_to_owned().ok().map(std::fs::File::from)?;
-    file_identity(&duplicate)
-}
-
 // Refuses a '--fill-log' destination that is the input, or where the output
 // is going.
 //
@@ -830,15 +202,14 @@ fn refuse_fill_log_that_is_the_input_or_the_output(
         return Ok(());
     }
     let Ok(existing) = std::fs::File::open(destination) else { return Ok(()) };
-    let Some(log) = file_identity(&existing) else { return Ok(()) };
+    let Some(log) = platform::file_identity(&existing) else { return Ok(()) };
 
     let input = if reading_stdin {
-        #[cfg(unix)]
-        { use std::os::fd::AsFd; stream_identity(std::io::stdin().as_fd()) }
-        #[cfg(not(unix))]
-        { None }
+        platform::stdin_identity()
     } else {
-        std::fs::File::open(input_file).ok().and_then(|file| file_identity(&file))
+        std::fs::File::open(input_file)
+            .ok()
+            .and_then(|file| platform::file_identity(&file))
     };
     if input == Some(log) {
         return Err(Box::new(std::io::Error::new(
@@ -850,12 +221,7 @@ fn refuse_fill_log_that_is_the_input_or_the_output(
                      error"))));
     }
 
-    let output = {
-        #[cfg(unix)]
-        { use std::os::fd::AsFd; stream_identity(std::io::stdout().as_fd()) }
-        #[cfg(not(unix))]
-        { None }
-    };
+    let output = platform::stdout_identity();
     if output == Some(log) {
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -867,135 +233,13 @@ fn refuse_fill_log_that_is_the_input_or_the_output(
     Ok(())
 }
 
-// Refuses an input file that is also where the output is going.
-//
-// The shell opens a redirection before csvdt is started, so `csvdt in.csv >
-// in.csv` hands over a file already truncated to nothing: csvdt read an empty
-// file, wrote nothing and exited 0, and the only sign anything had happened
-// was that the data was gone. `csvdt in.csv >> in.csv` is the other half, and
-// there the file is still whole when this is asked, left to run it came out
-// as the input followed by a conversion of the input, also at 0.
-//
-// Compared by device and inode rather than by path, so a symbolic link, a
-// hard link, or a second spelling of the same directory is caught with it.
-//
-// Regular files only. Sharing a character device is meaningless rather than
-// damaging, `csvdt /dev/null > /dev/null` is one inode twice over and has
-// nothing to lose, and a run cannot be both ends of a pipe.
-#[cfg(unix)]
-fn refuse_input_that_is_also_the_output(
-    path: &str,
-    input: &std::fs::File,
-) -> Result<(), Box<dyn Error>> {
-    use std::os::fd::AsFd;
-    use std::os::unix::fs::MetadataExt;
-
-    let Ok(read_from) = input.metadata() else { return Ok(()) };
-    if !read_from.file_type().is_file() {
-        return Ok(());
-    }
-    let written_to = std::io::stdout()
-        .as_fd()
-        .try_clone_to_owned()
-        .map(std::fs::File::from)
-        .and_then(|duplicate| duplicate.metadata());
-    let Ok(written_to) = written_to else { return Ok(()) };
-    if written_to.dev() != read_from.dev() || written_to.ino() != read_from.ino() {
-        return Ok(());
-    }
-    Err(Box::new(std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        format!("'{path}' is both the input and where the output is going. \
-                 The shell opens a redirection before csvdt runs, so '> \
-                 {path}' has already emptied it and '>> {path}' would leave \
-                 the file followed by a conversion of itself. Write another \
-                 file and move it into place"))))
-}
-
-// The same refusal on Windows, where a redirection destroys the file exactly
-// as it does on Unix: cmd and PowerShell both open '> in.csv' before csvdt
-// starts. Without this arm the guard would be Unix-only while KNOWN LIMITS
-// promises it on every platform, so the tests for it run on Windows too.
-//
-// A file's identity here is its volume serial number and its 64-bit index,
-// which is what dev and ino are on the other side. std has no way to ask:
-// MetadataExt::file_index is still unstable, so the call is made directly.
-// Being an identity rather than a path, it catches a junction, a hard link
-// and a second spelling of the same file, as the Unix side does.
-//
-// The handles are borrowed rather than duplicated. The Unix side clones its
-// descriptor because it needs a File to call metadata() on; nothing is opened
-// or closed here, so there is no handle to lose and no risk of closing the
-// one the run is about to write to.
-#[cfg(windows)]
-fn refuse_input_that_is_also_the_output(
-    path: &str,
-    input: &std::fs::File,
-) -> Result<(), Box<dyn Error>> {
-    use std::os::windows::io::AsRawHandle;
-
-    // None where the question cannot be answered, a pipe, a console, a
-    // device, which is the same "then it is not the case" the Unix side
-    // takes for a handle it cannot stat.
-    fn identity(handle: std::os::windows::io::RawHandle) -> Option<(u32, u64)> {
-        use windows_sys::Win32::Storage::FileSystem::{
-            BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
-        };
-        let mut about = unsafe {
-            std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>()
-        };
-        // SAFETY: the handle is borrowed from a live File or from Stdout, and
-        // the struct is owned here and correctly sized for the call.
-        let answered = unsafe {
-            GetFileInformationByHandle(handle as _, &mut about)
-        };
-        if answered == 0 {
-            return None;
-        }
-        Some((
-            about.dwVolumeSerialNumber,
-            (u64::from(about.nFileIndexHigh) << 32)
-                | u64::from(about.nFileIndexLow),
-        ))
-    }
-
-    let Ok(read_from) = input.metadata() else { return Ok(()) };
-    if !read_from.file_type().is_file() {
-        return Ok(());
-    }
-    let Some(source) = identity(input.as_raw_handle()) else {
-        return Ok(());
-    };
-    let Some(destination) = identity(std::io::stdout().as_raw_handle()) else {
-        return Ok(());
-    };
-    if source != destination {
-        return Ok(());
-    }
-    Err(Box::new(std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        format!("'{path}' is both the input and where the output is going. \
-                 The shell opens a redirection before csvdt runs, so '> \
-                 {path}' has already emptied it and '>> {path}' would leave \
-                 the file followed by a conversion of itself. Write another \
-                 file and move it into place"))))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn refuse_input_that_is_also_the_output(
-    _path: &str,
-    _input: &std::fs::File,
-) -> Result<(), Box<dyn Error>> {
-    Ok(())
-}
-
 fn main() {
     // Asked before anything is parsed, so that every route to standard output
     // is covered by one question rather than each having to remember it.
     // --help and --version are printed by clap on its way out of get_matches,
     // where there is nothing of csvdt's left to ask, and they were the two
     // that went on reporting success over output nobody received.
-    if let Err(error) = require_writable_stdout() {
+    if let Err(error) = platform::require_writable_stdout() {
         fatal(&error.to_string());
         std::process::exit(1);
     }
@@ -1183,7 +427,12 @@ const TRIM_VALUES: [&str; 4] = ["all", "fields", "headers", "none"];
 const QUOTE_VALUES: [&str; 4] = ["always", "necessary", "never", "nonnumeric"];
 // -i/--insert's position word. Not a clap value_parser: -i takes
 // "column,position" as one value, so the word is parsed out of it by hand.
-const POSITION_VALUES: [&str; 3] = ["before", "replace", "after"];
+const POSITIONS: [(&str, InsertPosition); 3] = [
+    ("before", InsertPosition::Before),
+    ("replace", InsertPosition::Replace),
+    ("after", InsertPosition::After),
+];
+const POSITION_VALUES: [&str; 3] = [POSITIONS[0].0, POSITIONS[1].0, POSITIONS[2].0];
 const FLEXIBLE_VALUES: [&str; 3] = ["keep", "fix", "widest"];
 
 // Every abbreviation of these values clap should accept: each prefix that only
@@ -1562,7 +811,7 @@ fn open_input(path: &str) -> Result<std::fs::File, Box<dyn Error>> {
             // Asked here rather than at the one call site that reads a file,
             // so the counting pass of '--flexible=widest' and the copy that
             // feeds its spool are covered by the same question.
-            false => refuse_input_that_is_also_the_output(path, &file).map(|()| file),
+            false => platform::refuse_input_that_is_also_the_output(path, &file).map(|()| file),
         },
         // Windows refuses to open one at all, and says only that access was
         // denied, which does not mention the reason. Asked here rather than
@@ -1645,7 +894,7 @@ fn reader_writer(args:ArgumentFlags) -> Result<(), Box<dyn Error>> {
     // parsed. Standard input is asked here, where it is known whether the run
     // is going to read from it at all.
     if args.input_file.is_empty() {
-        require_readable_stdin()?;
+        platform::require_readable_stdin()?;
     }
     let mut writer = writer_builder.from_writer(std::io::stdout());
 
@@ -1835,43 +1084,6 @@ fn peek_stream<R: std::io::Read>(
         return Ok(String::new());
     }
     Ok(peek_table(&rows))
-}
-
-// Splices the hand-written sections into the rendered page.
-//
-// Everything above them is generated from the Command that parses a command
-// line, which is what keeps the page from describing options this build does
-// not have. It is also why there is nowhere in it to say what belongs to the
-// program rather than to one of its options, the environment read, the file
-// written, what to read next. GNU coreutils fills the same gap with a
-// per-page man/prog.x merged by help2man; this is the same idea with one
-// file.
-//
-// Placed before VERSION, which clap_mangen puts at the end with AUTHORS, so
-// the hand-written sections sit where a reader expects them and the two
-// generated closers stay last. Appended if that heading ever stops being
-// emitted, since losing the sections silently is the one outcome worth
-// ruling out.
-//
-// Runs last of the three passes, so the file is spliced in exactly as
-// written: it is roff already, and the pass that keeps the help's tables
-// from being filled would otherwise put breaks through the middle of it.
-fn insert_man_sections(rendered: &[u8], supplement: &str) -> Vec<u8> {
-    let text = String::from_utf8_lossy(rendered);
-    match text.find(".SH VERSION") {
-        Some(at) => {
-            let mut out = String::with_capacity(text.len() + supplement.len());
-            out.push_str(&text[..at]);
-            out.push_str(supplement);
-            out.push_str(&text[at..]);
-            out.into_bytes()
-        },
-        None => {
-            let mut out = text.into_owned();
-            out.push_str(supplement);
-            out.into_bytes()
-        },
-    }
 }
 
 // Shared by both the stdin and file input paths so the header/record loop
@@ -2407,57 +1619,26 @@ fn clamp_insert_column(value: i64, len: usize) -> usize {
     }
 }
 
-// Inserts `before`/`after` `column` (or overwrites it, for "replace") with a
-// single value, based on the user-facing --insert position string. Shared by
-// every action that only ever writes one field, so the before/replace/after
-// dispatch exists exactly once instead of once per action.
-fn insert_single<'a>(
-    vecbuff: &mut Vec<&'a str>,
+// Puts the values for `position` into `fields` around `column`: `before` ahead
+// of it, `replace` over it, or `after` behind it, each in the order given.
+// Shared by every action that writes one or two fields, so the
+// before/replace/after dispatch exists once. The three value lists differ in
+// the header row, where the new names carry a '>' or '<' to show which way
+// they point, and are the same in a data row.
+fn insert_fields<'a>(
+    fields: &mut Vec<&'a str>,
     column: usize,
-    position: &str,
-    before: &'a str,
-    replace: &'a str,
-    after: &'a str,
+    position: InsertPosition,
+    before: &[&'a str],
+    replace: &[&'a str],
+    after: &[&'a str],
 ) {
-    match position {
-        "before" => {
-            vecbuff.insert(column, before);
-        },
-        "replace" => {
-            vecbuff[column] = replace;
-        },
-        "after" => {
-            vecbuff.insert(column+1, after);
-        },
-        _ => unreachable!(),
-    }
-}
-
-// Same as `insert_single`, but for actions (split, and its parse-error path)
-// that write two adjacent fields.
-fn insert_pair<'a>(
-    vecbuff: &mut Vec<&'a str>,
-    column: usize,
-    position: &str,
-    before: (&'a str, &'a str),
-    replace: (&'a str, &'a str),
-    after: (&'a str, &'a str),
-) {
-    match position {
-        "before" => {
-            vecbuff.insert(column, before.1);
-            vecbuff.insert(column, before.0);
-        },
-        "replace" => {
-            vecbuff[column] = replace.1;
-            vecbuff.insert(column, replace.0);
-        },
-        "after" => {
-            vecbuff.insert(column+1, after.1);
-            vecbuff.insert(column+1, after.0);
-        },
-        _ => unreachable!(),
-    }
+    let (range, values) = match position {
+        InsertPosition::Before => (column..column, before),
+        InsertPosition::Replace => (column..column + 1, replace),
+        InsertPosition::After => (column + 1..column + 1, after),
+    };
+    fields.splice(range, values.iter().copied());
 }
 
 // Drops every column in `columns` from `fields`. `columns` must be ordered
@@ -2905,43 +2086,43 @@ fn format_iso8601_duration(delta: chrono::TimeDelta, round_seconds: bool) -> Str
 fn process_headers(headers:csv::StringRecord, args:&ArgumentFlags) -> Result<csv::StringRecord, Box<dyn Error>> {
     let mut vecbuff: Vec<&str> = headers.iter().collect();
     let len = vecbuff.len();
-    let position = args.insert_position.as_str();
+    let position = args.insert_position;
 
     if args.action_split {
         if args.selected_column >= len { return Err(out_of_bound()); }
         let target = insert_target(args, args.selected_column, len);
-        insert_pair(&mut vecbuff, target, position,
-            ("split_date>", "split_time>"),
-            ("split_date", "split_time"),
-            ("<split_date", "<split_time"));
+        insert_fields(&mut vecbuff, target, position,
+            &["split_date>", "split_time>"],
+            &["split_date", "split_time"],
+            &["<split_date", "<split_time"]);
         return Ok(csv::StringRecord::from(vecbuff));
     }
 
     if args.action_to_rfc3339 {
         if args.selected_column >= len { return Err(out_of_bound()); }
         let target = insert_target(args, args.selected_column, len);
-        insert_single(&mut vecbuff, target, position, "to_rfc3339>", "to_rfc3339", "<to_rfc3339");
+        insert_fields(&mut vecbuff, target, position, &["to_rfc3339>"], &["to_rfc3339"], &["<to_rfc3339"]);
         return Ok(csv::StringRecord::from(vecbuff));
     }
 
     if args.action_to_utc {
         if args.selected_column >= len { return Err(out_of_bound()); }
         let target = insert_target(args, args.selected_column, len);
-        insert_single(&mut vecbuff, target, position, "to_utc>", "to_utc", "<to_utc");
+        insert_fields(&mut vecbuff, target, position, &["to_utc>"], &["to_utc"], &["<to_utc"]);
         return Ok(csv::StringRecord::from(vecbuff));
     }
 
     if args.action_to_local {
         if args.selected_column >= len { return Err(out_of_bound()); }
         let target = insert_target(args, args.selected_column, len);
-        insert_single(&mut vecbuff, target, position, "to_local>", "to_local", "<to_local");
+        insert_fields(&mut vecbuff, target, position, &["to_local>"], &["to_local"], &["<to_local"]);
         return Ok(csv::StringRecord::from(vecbuff));
     }
 
-    if args.action_offset {
+    if args.action_offset.is_some() {
         if args.selected_column >= len { return Err(out_of_bound()); }
         let target = insert_target(args, args.selected_column, len);
-        insert_single(&mut vecbuff, target, position, "to_offset>", "to_offset", "<to_offset");
+        insert_fields(&mut vecbuff, target, position, &["to_offset>"], &["to_offset"], &["<to_offset"]);
         return Ok(csv::StringRecord::from(vecbuff));
     }
 
@@ -2956,9 +2137,9 @@ fn process_headers(headers:csv::StringRecord, args:&ArgumentFlags) -> Result<csv
         };
         let target = insert_target(args, fallback, len);
         if args.second_column.is_some() {
-            insert_single(&mut vecbuff, target, position, "row_duration>", "row_duration", "<row_duration");
+            insert_fields(&mut vecbuff, target, position, &["row_duration>"], &["row_duration"], &["<row_duration"]);
         } else {
-            insert_single(&mut vecbuff, target, position, "duration>", "duration", "<duration");
+            insert_fields(&mut vecbuff, target, position, &["duration>"], &["duration"], &["<duration"]);
         }
         return Ok(csv::StringRecord::from(vecbuff));
     }
@@ -3381,12 +2562,11 @@ fn plan_row_edit(
         return Ok((RowEdit::Single { target, value }, dt_cache));
     }
 
-    if args.action_offset {
+    if let Some(offset) = args.action_offset {
         if args.selected_column >= len { return Err(out_of_bound()); }
         let target = insert_target(args, args.selected_column, len);
         let value = match parse_rfc3339_lenient(&record[args.selected_column]) {
-            Ok(datetime) => to_rfc3339_in_range(
-                datetime.with_timezone(&args.target_offset.unwrap())),
+            Ok(datetime) => to_rfc3339_in_range(datetime.with_timezone(&offset)),
             Err(_) => parse_err(),
         };
         return Ok((RowEdit::Single { target, value }, dt_cache));
@@ -3468,7 +2648,7 @@ fn apply_row_edit<'a>(
     edit: &'a RowEdit,
     fields: &mut Vec<&'a str>,
 ) {
-    let position = args.insert_position.as_str();
+    let position = args.insert_position;
     fields.clear();
 
     // Handled before the common fill: the output row is built straight from
@@ -3490,11 +2670,12 @@ fn apply_row_edit<'a>(
     match edit {
         RowEdit::Passthrough => {},
         RowEdit::Single { target, value } => {
-            insert_single(fields, *target, position, value, value, value);
+            let value = [value.as_str()];
+            insert_fields(fields, *target, position, &value, &value, &value);
         },
         RowEdit::Pair { target, first, second } => {
-            insert_pair(fields, *target, position,
-                (first, second), (first, second), (first, second));
+            let pair = [first.as_str(), second.as_str()];
+            insert_fields(fields, *target, position, &pair, &pair, &pair);
         },
         RowEdit::Remove => {
             remove_columns(fields, &args.remove_columns);
@@ -3504,36 +2685,19 @@ fn apply_row_edit<'a>(
     }
 }
 
-// Convenience wrapper used by the unit tests, which assert on a whole
-// StringRecord. The streaming path deliberately skips this and writes the
-// borrowed field list straight out instead.
-#[cfg(test)]
-fn process_record(
-    record: &csv::StringRecord,
-    args: &ArgumentFlags,
-    dt_cache: Option<DateTime<FixedOffset>>,
-) -> Result<(csv::StringRecord, Option<DateTime<FixedOffset>>), Box<dyn Error>> {
-    let (edit, cache) = plan_row_edit(record, args, dt_cache)?;
-    let mut fields: Vec<&str> = Vec::with_capacity(record.len() + 2);
-    apply_row_edit(record, args, &edit, &mut fields);
-    Ok((csv::StringRecord::from(fields), cache))
-}
-
-// Validates and normalizes the position word from -i's second value.
-// insert_single/insert_pair also match on this string, but they're called
-// deep inside the row-processing hot path, validating here means a typo
-// is a clean startup error instead of an `unreachable!()` panic per row.
-fn parse_position_word(word: &str) -> Result<String, Box<dyn Error>> {
-    // Resolved to the full word here, so everything downstream matches on
-    // "before"/"replace"/"after" and nothing else has to know the
-    // abbreviations. They were written out again in each place that dispatched
-    // on the result, the duplication that made '--trim ALL' mean none.
-    match resolve_value(&POSITION_VALUES, word) {
-        Some(position) => Ok(position.to_string()),
-        None => Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "'--insert' expects a position of before, after, or replace"))),
-    }
+// Reads the position word from -i's second value, which may be abbreviated.
+// It becomes an InsertPosition here, once, so a typo is a clean startup error
+// and the row loop works with the enum alone.
+fn parse_position_word(word: &str) -> Result<InsertPosition, Box<dyn Error>> {
+    resolve_value(&POSITION_VALUES, word)
+        .and_then(|full| POSITIONS.iter().find(|(name, _)| *name == full))
+        .map(|&(_, position)| position)
+        .ok_or_else(|| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "'--insert' expects a position of before, after, or replace"))
+                as Box<dyn Error>
+        })
 }
 
 // The format version reported on --list-options' first line. Bump it only if
@@ -4287,19 +3451,15 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
             fatal(&format!("could not render the manual page: {error}"));
             std::process::exit(1);
         }
-        let rendered = promote_man_headings(&rendered, &TRAILING_HEADINGS);
-        // After the sections above it, so a line that is one of those is
-        // already .SH and cannot be taken for a subsection of itself, and
-        // before the pass below, so a heading is never inside a held block.
-        let rendered = promote_man_subheadings(&rendered);
-        let rendered = break_after_option_tags(&rendered);
-        let rendered = preserve_aligned_blocks(&rendered);
-        let rendered = insert_man_sections(&rendered, MAN_SUPPLEMENT);
-        // Last, so the two passes above still match on the lines clap_mangen
-        // wrote, and so the supplement's own option names are protected too.
-        let rendered = protect_option_names(&rendered);
+        let rendered = man::arrange_page(&rendered, &TRAILING_HEADINGS, MAN_SUPPLEMENT);
         // Last, so nothing above can leave a space at the end of a line.
-        let rendered = drop_trailing_space(&rendered);
+        // clap_mangen writes the SYNOPSIS by appending each argument and a
+        // space after it, and roff does not notice one at the end of a line.
+        // The page is read and shipped by people, though: a packager diffs
+        // it, a repository shows the space as a red block, and an editor that
+        // strips trailing whitespace on save would make the page differ from
+        // the one the binary generates.
+        let rendered = without_trailing_padding(&String::from_utf8_lossy(&rendered)).into_bytes();
         answer(&rendered);
         std::process::exit(0);
     }
@@ -4434,14 +3594,13 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
     }
 
     if let Some(value) = matches.get_one::<String>("action_offset") {
-        args.action_offset = true;
         let (column_word, offset_word) = value.split_once(',').ok_or_else(|| {
             Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "'--offset' expects <column>,<offset>, e.g. -o1,-06:00"))
         })?;
         args.selected_column = parse_column("--offset", column_word)?;
-        args.target_offset = Some(parse_offset(offset_word)?);
+        args.action_offset = Some(parse_offset(offset_word)?);
     }
 
     if let Some(value) = matches.get_one::<String>("position") {
@@ -4453,7 +3612,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         args.insert_column = Some(parse_signed_column("--insert", column_word)?);
         args.insert_position = parse_position_word(position_word)?;
     } else {
-        args.insert_position = "after".to_string();
+        args.insert_position = InsertPosition::After;
     }
 
     if let Some(value) = matches.get_one::<String>("print_delimiter") {
@@ -4644,37 +3803,6 @@ mod tests {
         }
     }
 
-    // A run of two lines with a column gap is a table even with nothing
-    // indented, which is what --trim and --list-options were. Written as a
-    // unit test because the corpus could not ask it: every table there had
-    // three such lines, so raising the threshold to three changed nothing
-    // in the manual page and would go unnoticed until the next two-row
-    // table was written.
-    //
-    // This is the only place that asks at all. Every table in the corpus is
-    // laid out as a tag on its own line with its description indented under
-    // it, so all of them are indented and the indent alone answers for them.
-    // The signal stays live for the next table written flush against the
-    // margin.
-    #[test]
-    fn two_gapped_lines_are_a_table_and_one_is_not() {
-        let table = b"none    Preserves fields and headers.\n\
-                      all     Trim whitespace from both.\n";
-        let held = String::from_utf8(super::preserve_aligned_blocks(table))
-            .unwrap();
-        assert!(held.contains(".br\nall     Trim"),
-                "a two-row table lost its break:\n{held}");
-
-        // And a lone gap inside a sentence is not a table: prose has to go
-        // on filling to the width it is read at.
-        let prose = b"The quoting style to use when writing CSV, which\n\
-                      decides when a field is  quoted at all.\n";
-        let filled = String::from_utf8(super::preserve_aligned_blocks(prose))
-            .unwrap();
-        assert!(!filled.contains(".br"),
-                "prose was held unfilled by a single gap:\n{filled}");
-    }
-
     // Padding comes off the end of a line; the line ending does not.
     //
     // The carriage return is the case that matters, and the one that got
@@ -4698,124 +3826,11 @@ mod tests {
         assert_eq!(super::without_trailing_padding(mixed), mixed);
     }
 
-    // The three treatments in one block: prose at the margin fills, prose
-    // indented under it fills inside an indent of its own, and a marked
-    // block is written out as it stands.
-    //
-    // An indent alone must not hold a block: the middle one would freeze at
-    // the width the help file is wrapped to while the paragraph above it ran
-    // to the terminal's. Read at 100 columns, DESCRIPTION fills to 100 and
-    // 'INPUT MUST BE UTF-8' three lines below it must too.
-    #[test]
-    fn the_gutter_decides_what_is_held_and_what_fills() {
-        let block = b"A byte-order mark is stripped if present. Anything\n\
-                      else is refused rather than guessed at:\n\
-                      \x20 cp1252, which Excel writes on a Western locale,\n\
-                      \x20 fails naming the record and the line it is in.\n\
-                      |    iconv -f CP1252 -t UTF-8 in.csv > out.csv\n\
-                      |    iconv -f UTF-16 -t UTF-8 in.csv > out.csv\n\
-                      A field that genuinely holds NUL bytes is passed\n\
-                      through untouched.\n";
-        let out = String::from_utf8(super::preserve_aligned_blocks(block))
-            .unwrap();
-
-        // Prose at the margin fills, above the block and below it.
-        assert!(!out.contains("Anything\n.br\n"),
-                "prose above a list was held unfilled:\n{out}");
-        assert!(!out.contains("passed\n.br\nthrough untouched"),
-                "prose after a held block was itself held:\n{out}");
-
-        // The nested paragraph is handed its indent and fills inside it,
-        // rather than being broken line by line.
-        assert!(out.contains(".RS 2n\ncp1252, which Excel"),
-                "nested prose was not given an indent of its own:\n{out}");
-        assert!(!out.contains("Western locale,\n.br\n"),
-                "nested prose was held unfilled:\n{out}");
-
-        // The marked block is held exactly as written, and the gutter that
-        // said so never reaches the page.
-        assert!(out.contains("    iconv \\-f CP1252 -t UTF-8 in.csv > out.csv\n.br\n")
-                    || out.contains("    iconv -f CP1252 -t UTF-8 in.csv > out.csv\n.br\n"),
-                "a marked block lost its break:\n{out}");
-        assert!(!out.contains(super::VERBATIM),
-                "the verbatim gutter reached the page:\n{out}");
-
-        // And the line that resumes prose after a held block needs a break
-        // of its own, or roff pulls it up onto the last line held.
-        assert!(out.contains(".br\nA field that genuinely"),
-                "prose after a held block was not broken from it:\n{out}");
-    }
-
-    // The gutter is the only thing a strip takes off, and it comes off every
-    // line that carries one. Everything a reader sees goes through this.
-    #[test]
-    fn stripping_a_gutter_leaves_the_line_as_it_was() {
-        let marked = "Convert first if needed:\n|    iconv -f CP1252 in.csv\n\
-                      |    iconv -f UTF-16 in.csv\nA field that holds NUL\n";
-        assert_eq!(super::strip_marks(marked),
-                   "Convert first if needed:\n    iconv -f CP1252 in.csv\n\
-                    \x20   iconv -f UTF-16 in.csv\nA field that holds NUL\n");
-
-        // A pipe anywhere but the first column is data: '[=<keep|fix|widest>]'
-        // is a value syntax --help prints, and it must come through whole.
-        let value = "Takes an optional mode [=<keep|fix|widest>]\n";
-        assert_eq!(super::strip_marks(value), value);
-    }
-
-    // '\%' asks roff not to hyphenate the word it opens, and asks for a
-    // break where it falls inside one. The two are the same escape, so this
-    // pass is only safe while it can tell a hyphen that opens a word from
-    // one that sits inside it, which is the whole of what is tested here.
-    #[test]
-    fn option_names_are_protected_and_dates_are_left_alone() {
-        let protect = |text: &[u8]| {
-            String::from_utf8(super::protect_option_names(text)).unwrap()
-        };
-
-        // A name in running text, and the same name after an opening
-        // bracket, the second is mid-word by the only test that matters
-        // to roff, which is that no space precedes it.
-        let prose = b"for a two\\-column \\-\\-duration). This column\n";
-        assert_eq!(protect(prose),
-                   "for a two\\-column \\%\\-\\-duration). This column\n");
-
-        // The whole argument of a font macro. The request keeps its own
-        // first word; only what follows may be marked.
-        let macro_line = b".B \\-\\-flexible=widest\n";
-        assert_eq!(protect(macro_line), ".B \\%\\-\\-flexible=widest\n");
-
-        // And the case that must not be touched. Every hyphen in a date is
-        // internal, so marking one would offer roff a break it did not have
-        // before and split an example row down the middle.
-        let row = b"7,2023\\-11\\-14T22:13:20+01:00,info\n";
-        assert_eq!(protect(row), "7,2023\\-11\\-14T22:13:20+01:00,info\n");
-
-        // A hyphen that opens a word at the very start of a line is still
-        // one that opens a word.
-        let opening = b"\\-\\-peek numbers the columns\n";
-        assert_eq!(protect(opening), "\\%\\-\\-peek numbers the columns\n");
-
-        // A request that is not a font macro keeps its argument as it is.
-        assert_eq!(protect(b".TP \\-\\-quote\n"), ".TP \\-\\-quote\n");
-
-        // A name later in a font macro's argument. Marking an argument only
-        // when the whole of it is a name would leave this unprotected.
-        let inside = b".I the destination given to \\-\\-fill\\-log\n";
-        assert_eq!(
-            protect(inside),
-            ".I the destination given to \\%\\-\\-fill\\-log\n",
-        );
-
-        // And the same argument read the same way as running text, so a
-        // date inside one is left alone exactly as a date in a paragraph is.
-        let dated = b".I 2023\\-11\\-14T22:13:20+01:00\n";
-        assert_eq!(protect(dated), ".I 2023\\-11\\-14T22:13:20+01:00\n");
-    }
     use super::*;
 
     fn default_args() -> ArgumentFlags {
         ArgumentFlags {
-            insert_position: "after".to_string(),
+            insert_position: InsertPosition::After,
             ..Default::default()
         }
     }
@@ -4909,8 +3924,8 @@ mod tests {
 
     #[test]
     fn every_value_clap_accepts_also_resolves() {
-        // The drift this replaced: clap accepted a value that then matched
-        // nothing. Every accepted form of all four value lists has to resolve,
+        // Guards against clap accepting a value that then matches nothing.
+        // Every accepted form of all four value lists has to resolve,
         // so no option can gain a value it does not then act on.
         let lists: [&[&'static str]; 4] = [
             &TRIM_VALUES, &QUOTE_VALUES, &POSITION_VALUES, &FLEXIBLE_VALUES,
@@ -4925,301 +3940,511 @@ mod tests {
         }
     }
 
-    // ---- process_headers -------------------------------------------------
+    // ---- process_headers / process_record: one row per case ---------------
 
-    #[test]
-    fn headers_no_action_are_unchanged() {
-        let args = default_args();
-        let result = process_headers(headers(&["id", "ts", "val"]), &args).unwrap();
-        assert_eq!(as_vec(&result), vec!["id", "ts", "val"]);
-    }
-
-    #[test]
-    fn headers_split_default_position_is_after_own_column() {
+    // The options for a case that converts column 1 of the row, writing its
+    // result at `position`.
+    fn converting(set: fn(&mut ArgumentFlags), position: InsertPosition) -> ArgumentFlags {
         let mut args = default_args();
-        args.action_split = true;
+        set(&mut args);
         args.selected_column = 1;
-        let result = process_headers(headers(&["id", "ts", "val"]), &args).unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["id", "ts", "<split_date", "<split_time", "val"]
-        );
+        args.insert_position = position;
+        args
     }
 
+    fn flags(set: impl FnOnce(&mut ArgumentFlags)) -> ArgumentFlags {
+        let mut args = default_args();
+        set(&mut args);
+        args
+    }
+
+    fn to_utc(args: &mut ArgumentFlags) {
+        args.action_to_utc = true;
+    }
+
+    fn to_offset(args: &mut ArgumentFlags) {
+        args.action_offset = Some(FixedOffset::west_opt(6 * 3600).unwrap());
+    }
+
+    // One case: its label, the options, the row read and the row written, or
+    // None where the run must refuse it with an error.
+    type Case<'a> = (&'a str, ArgumentFlags, Vec<&'a str>, Option<Vec<&'a str>>);
+
     #[test]
-    fn headers_split_explicit_insert_position() {
-        for (col, mode, expected) in [
-            (1, "before", vec!["id", "split_date>", "split_time>", "ts", "val"]),
-            (1, "replace", vec!["id", "split_date", "split_time", "val"]),
-            (1, "after", vec!["id", "ts", "<split_date", "<split_time", "val"]),
-        ] {
-            let mut args = default_args();
+    fn process_headers_names_what_each_action_adds() {
+        use InsertPosition::{After, Before, Replace};
+        fn split(args: &mut ArgumentFlags) {
             args.action_split = true;
-            args.selected_column = 1;
-            args.insert_column = Some(col);
-            args.insert_position = mode.to_string();
-            let result = process_headers(headers(&["id", "ts", "val"]), &args).unwrap();
-            assert_eq!(as_vec(&result), expected, "mode={mode}");
         }
-    }
-
-    #[test]
-    fn headers_split_insert_column_independent_of_own_column() {
-        // -i targets an arbitrary column, decoupled from the action's own column.
-        let mut args = default_args();
-        args.action_split = true;
-        args.selected_column = 1;
-        args.insert_column = Some(0);
-        args.insert_position = "before".to_string();
-        let result = process_headers(headers(&["id", "ts", "val"]), &args).unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["split_date>", "split_time>", "id", "ts", "val"]
-        );
-    }
-
-    #[test]
-    fn headers_rfc3339_all_positions() {
-        for (mode, expected) in [
-            ("before", vec!["id", "to_rfc3339>", "ts", "val"]),
-            ("replace", vec!["id", "to_rfc3339", "val"]),
-            ("after", vec!["id", "ts", "<to_rfc3339", "val"]),
-        ] {
-            let mut args = default_args();
+        fn rfc3339(args: &mut ArgumentFlags) {
             args.action_to_rfc3339 = true;
-            args.selected_column = 1;
-            args.insert_position = mode.to_string();
-            let result = process_headers(headers(&["id", "ts", "val"]), &args).unwrap();
-            assert_eq!(as_vec(&result), expected, "mode={mode}");
         }
-    }
-
-    #[test]
-    fn headers_utc_all_positions() {
-        for (mode, expected) in [
-            ("before", vec!["id", "to_utc>", "ts", "val"]),
-            ("replace", vec!["id", "to_utc", "val"]),
-            ("after", vec!["id", "ts", "<to_utc", "val"]),
-        ] {
-            let mut args = default_args();
-            args.action_to_utc = true;
-            args.selected_column = 1;
-            args.insert_position = mode.to_string();
-            let result = process_headers(headers(&["id", "ts", "val"]), &args).unwrap();
-            assert_eq!(as_vec(&result), expected, "mode={mode}");
-        }
-    }
-
-    #[test]
-    fn headers_local_all_positions() {
-        for (mode, expected) in [
-            ("before", vec!["id", "to_local>", "ts", "val"]),
-            ("replace", vec!["id", "to_local", "val"]),
-            ("after", vec!["id", "ts", "<to_local", "val"]),
-        ] {
-            let mut args = default_args();
+        fn local(args: &mut ArgumentFlags) {
             args.action_to_local = true;
-            args.selected_column = 1;
-            args.insert_position = mode.to_string();
-            let result = process_headers(headers(&["id", "ts", "val"]), &args).unwrap();
-            assert_eq!(as_vec(&result), expected, "mode={mode}");
         }
-    }
-
-    #[test]
-    fn headers_offset_all_positions() {
-        for (mode, expected) in [
-            ("before", vec!["id", "to_offset>", "ts", "val"]),
-            ("replace", vec!["id", "to_offset", "val"]),
-            ("after", vec!["id", "ts", "<to_offset", "val"]),
-        ] {
-            let mut args = default_args();
-            args.action_offset = true;
-            args.selected_column = 1;
-            args.target_offset = Some(FixedOffset::west_opt(6 * 3600).unwrap());
-            args.insert_position = mode.to_string();
-            let result = process_headers(headers(&["id", "ts", "val"]), &args).unwrap();
-            assert_eq!(as_vec(&result), expected, "mode={mode}");
-        }
-    }
-
-    #[test]
-    fn headers_offset_out_of_bounds_is_a_clean_error() {
-        let mut args = default_args();
-        args.action_offset = true;
-        args.selected_column = 9;
-        args.target_offset = Some(FixedOffset::west_opt(6 * 3600).unwrap());
-        let result = process_headers(headers(&["id", "ts", "val"]), &args);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn headers_duration_single_column_all_positions() {
-        for (mode, expected) in [
-            ("before", vec!["id", "duration>", "ts", "val"]),
-            ("replace", vec!["id", "duration", "val"]),
-            ("after", vec!["id", "ts", "<duration", "val"]),
-        ] {
-            let mut args = default_args();
+        fn duration(args: &mut ArgumentFlags) {
             args.action_duration = true;
-            args.selected_column = 1;
-            args.insert_position = mode.to_string();
-            let result = process_headers(headers(&["id", "ts", "val"]), &args).unwrap();
-            assert_eq!(as_vec(&result), expected, "mode={mode}");
+        }
+        // Two-column --duration: the row-over-row column pair, written at -i.
+        let paired = |position, insert_column| {
+            flags(|args| {
+                args.action_duration = true;
+                args.selected_column = 1;
+                args.second_column = Some(2);
+                args.insert_column = insert_column;
+                args.insert_position = position;
+            })
+        };
+        let id_ts_val = vec!["id", "ts", "val"];
+        let id_start_end = vec!["id", "start", "end"];
+        let cases: Vec<Case> = vec![
+            ("no action", default_args(), id_ts_val.clone(), Some(id_ts_val.clone())),
+            (
+                "split, default position is after its own column",
+                flags(|args| {
+                    args.action_split = true;
+                    args.selected_column = 1;
+                }),
+                id_ts_val.clone(),
+                Some(vec!["id", "ts", "<split_date", "<split_time", "val"]),
+            ),
+            (
+                "split, -i before its own column",
+                flags(|args| {
+                    split(args);
+                    args.selected_column = 1;
+                    args.insert_column = Some(1);
+                    args.insert_position = Before;
+                }),
+                id_ts_val.clone(),
+                Some(vec!["id", "split_date>", "split_time>", "ts", "val"]),
+            ),
+            (
+                "split, -i replace its own column",
+                flags(|args| {
+                    split(args);
+                    args.selected_column = 1;
+                    args.insert_column = Some(1);
+                    args.insert_position = Replace;
+                }),
+                id_ts_val.clone(),
+                Some(vec!["id", "split_date", "split_time", "val"]),
+            ),
+            (
+                "split, -i after its own column",
+                flags(|args| {
+                    split(args);
+                    args.selected_column = 1;
+                    args.insert_column = Some(1);
+                    args.insert_position = After;
+                }),
+                id_ts_val.clone(),
+                Some(vec!["id", "ts", "<split_date", "<split_time", "val"]),
+            ),
+            (
+                // -i targets an arbitrary column, decoupled from the action's
+                // own column.
+                "split, -i independent of its own column",
+                flags(|args| {
+                    split(args);
+                    args.selected_column = 1;
+                    args.insert_column = Some(0);
+                    args.insert_position = Before;
+                }),
+                id_ts_val.clone(),
+                Some(vec!["split_date>", "split_time>", "id", "ts", "val"]),
+            ),
+            ("rfc3339 before", converting(rfc3339, Before), id_ts_val.clone(),
+                Some(vec!["id", "to_rfc3339>", "ts", "val"])),
+            ("rfc3339 replace", converting(rfc3339, Replace), id_ts_val.clone(),
+                Some(vec!["id", "to_rfc3339", "val"])),
+            ("rfc3339 after", converting(rfc3339, After), id_ts_val.clone(),
+                Some(vec!["id", "ts", "<to_rfc3339", "val"])),
+            ("utc before", converting(to_utc, Before), id_ts_val.clone(),
+                Some(vec!["id", "to_utc>", "ts", "val"])),
+            ("utc replace", converting(to_utc, Replace), id_ts_val.clone(),
+                Some(vec!["id", "to_utc", "val"])),
+            ("utc after", converting(to_utc, After), id_ts_val.clone(),
+                Some(vec!["id", "ts", "<to_utc", "val"])),
+            ("local before", converting(local, Before), id_ts_val.clone(),
+                Some(vec!["id", "to_local>", "ts", "val"])),
+            ("local replace", converting(local, Replace), id_ts_val.clone(),
+                Some(vec!["id", "to_local", "val"])),
+            ("local after", converting(local, After), id_ts_val.clone(),
+                Some(vec!["id", "ts", "<to_local", "val"])),
+            ("offset before", converting(to_offset, Before), id_ts_val.clone(),
+                Some(vec!["id", "to_offset>", "ts", "val"])),
+            ("offset replace", converting(to_offset, Replace), id_ts_val.clone(),
+                Some(vec!["id", "to_offset", "val"])),
+            ("offset after", converting(to_offset, After), id_ts_val.clone(),
+                Some(vec!["id", "ts", "<to_offset", "val"])),
+            (
+                "offset, column out of bounds",
+                flags(|args| {
+                    to_offset(args);
+                    args.selected_column = 9;
+                }),
+                id_ts_val.clone(),
+                None,
+            ),
+            ("duration before", converting(duration, Before), id_ts_val.clone(),
+                Some(vec!["id", "duration>", "ts", "val"])),
+            ("duration replace", converting(duration, Replace), id_ts_val.clone(),
+                Some(vec!["id", "duration", "val"])),
+            ("duration after", converting(duration, After), id_ts_val.clone(),
+                Some(vec!["id", "ts", "<duration", "val"])),
+            (
+                "two-column duration defaults to the second column",
+                flags(|args| {
+                    duration(args);
+                    args.selected_column = 1;
+                    args.second_column = Some(2);
+                }),
+                id_start_end.clone(),
+                Some(vec!["id", "start", "end", "<row_duration"]),
+            ),
+            ("two-column duration, -i 2 before", paired(Before, Some(2)), id_start_end.clone(),
+                Some(vec!["id", "start", "row_duration>", "end"])),
+            ("two-column duration, -i 2 replace", paired(Replace, Some(2)), id_start_end.clone(),
+                Some(vec!["id", "start", "row_duration"])),
+            ("two-column duration, -i 2 after", paired(After, Some(2)), id_start_end.clone(),
+                Some(vec!["id", "start", "end", "<row_duration"])),
+            (
+                "two-column duration, second column out of bounds",
+                flags(|args| {
+                    duration(args);
+                    args.selected_column = 0;
+                    args.second_column = Some(9);
+                }),
+                id_start_end.clone(),
+                None,
+            ),
+            (
+                "remove",
+                flags(|args| {
+                    args.action_remove = true;
+                    args.remove_columns = vec![1];
+                }),
+                id_ts_val.clone(),
+                Some(vec!["id", "val"]),
+            ),
+            (
+                "arrange, named columns first and then the rest",
+                flags(|args| {
+                    args.action_arrange = true;
+                    args.arrange_columns = vec![3, 1];
+                    args.arrange_listed = vec![1, 3];
+                }),
+                vec!["a", "b", "c", "d", "e"],
+                Some(vec!["d", "b", "a", "c", "e"]),
+            ),
+            (
+                // As --remove's parsing produces it: highest index first.
+                "remove several columns",
+                flags(|args| {
+                    args.action_remove = true;
+                    args.remove_columns = vec![3, 1];
+                }),
+                vec!["id", "ts", "val", "note"],
+                Some(vec!["id", "val"]),
+            ),
+            (
+                "remove refuses the list if any column is out of bounds",
+                flags(|args| {
+                    args.action_remove = true;
+                    args.remove_columns = vec![9, 0];
+                }),
+                vec!["id", "ts"],
+                None,
+            ),
+            (
+                "remove, column out of bounds",
+                flags(|args| {
+                    args.action_remove = true;
+                    args.remove_columns = vec![9];
+                }),
+                id_ts_val.clone(),
+                None,
+            ),
+            (
+                // Bounds-checking by `vecbuff.len() - 1` would underflow (a
+                // subtraction overflow panic) when the record has zero fields,
+                // e.g. the header row on genuinely empty input. Any column
+                // index must be a clean error against a zero-field record.
+                "zero-field record",
+                flags(|args| {
+                    args.action_remove = true;
+                    args.remove_columns = vec![0];
+                }),
+                vec![],
+                None,
+            ),
+        ];
+        for (label, args, input, expected) in cases {
+            let result = process_headers(headers(&input), &args);
+            match expected {
+                Some(expected) => {
+                    let written = result.unwrap_or_else(|error| panic!("{label}: {error}"));
+                    assert_eq!(as_vec(&written), expected, "{label}");
+                },
+                None => assert!(result.is_err(), "{label}: expected an error"),
+            }
         }
     }
 
-    #[test]
-    fn headers_duration_two_column_defaults_to_second_column() {
-        let mut args = default_args();
-        args.action_duration = true;
-        args.selected_column = 1;
-        args.second_column = Some(2);
-        let result = process_headers(headers(&["id", "start", "end"]), &args).unwrap();
-        assert_eq!(as_vec(&result), vec!["id", "start", "end", "<row_duration"]);
+    // Convenience wrapper for the cases below, which assert on a whole
+    // StringRecord. The streaming path writes the borrowed field list
+    // straight out instead.
+    fn process_record(
+        record: &csv::StringRecord,
+        args: &ArgumentFlags,
+        dt_cache: Option<DateTime<FixedOffset>>,
+    ) -> Result<(csv::StringRecord, Option<DateTime<FixedOffset>>), Box<dyn Error>> {
+        let (edit, cache) = plan_row_edit(record, args, dt_cache)?;
+        let mut fields: Vec<&str> = Vec::with_capacity(record.len() + 2);
+        apply_row_edit(record, args, &edit, &mut fields);
+        Ok((csv::StringRecord::from(fields), cache))
     }
 
+    // No row-over-row cache goes in, and none comes out, for any case here.
     #[test]
-    fn headers_duration_two_column_explicit_insert_position() {
-        for (mode, expected) in [
-            ("before", vec!["id", "start", "row_duration>", "end"]),
-            ("replace", vec!["id", "start", "row_duration"]),
-            ("after", vec!["id", "start", "end", "<row_duration"]),
-        ] {
-            let mut args = default_args();
-            args.action_duration = true;
-            args.selected_column = 1;
-            args.second_column = Some(2);
-            args.insert_column = Some(2);
-            args.insert_position = mode.to_string();
-            let result = process_headers(headers(&["id", "start", "end"]), &args).unwrap();
-            assert_eq!(as_vec(&result), expected, "mode={mode}");
+    fn process_record_writes_what_each_action_makes_of_a_row() {
+        use InsertPosition::{After, Before, Replace};
+        fn split(args: &mut ArgumentFlags) {
+            args.action_split = true;
+        }
+        fn rfc3339(args: &mut ArgumentFlags) {
+            args.action_to_rfc3339 = true;
+        }
+        let huge = i64::MAX.to_string();
+        let cases: Vec<Case> = vec![
+            (
+                "arrange keeps the width and puts the named columns first",
+                flags(|args| {
+                    args.action_arrange = true;
+                    args.arrange_columns = vec![2, 0];
+                    args.arrange_listed = vec![0, 2];
+                }),
+                vec!["a", "b", "c", "d"],
+                Some(vec!["c", "a", "b", "d"]),
+            ),
+            (
+                "arrange, column out of bounds",
+                flags(|args| {
+                    args.action_arrange = true;
+                    args.arrange_columns = vec![9];
+                    args.arrange_listed = vec![9];
+                }),
+                vec!["a", "b"],
+                None,
+            ),
+            (
+                "remove, column out of bounds",
+                flags(|args| {
+                    args.action_remove = true;
+                    args.remove_columns = vec![9];
+                }),
+                vec!["1", "2", "3"],
+                None,
+            ),
+            (
+                "remove at the last valid index",
+                flags(|args| {
+                    args.action_remove = true;
+                    args.remove_columns = vec![2];
+                }),
+                vec!["1", "2", "3"],
+                Some(vec!["1", "2"]),
+            ),
+            (
+                "zero-field record",
+                flags(|args| {
+                    args.action_remove = true;
+                    args.remove_columns = vec![0];
+                }),
+                vec![],
+                None,
+            ),
+            (
+                "split, default position",
+                flags(|args| {
+                    split(args);
+                    args.selected_column = 1;
+                }),
+                vec!["1", "2024-01-15T10:30:00Z", "x"],
+                Some(vec!["1", "2024-01-15T10:30:00Z", "2024-01-15", "10:30:00 +00:00", "x"]),
+            ),
+            (
+                // 00:30+05:00 and 19:30Z the day before are the same instant,
+                // but split must report the date and time as given in the
+                // input's own offset: it does not convert to UTC first.
+                "split reports the input's own offset",
+                converting(split, Replace),
+                vec!["1", "2024-01-01T00:30:00+05:00", "x"],
+                Some(vec!["1", "2024-01-01", "00:30:00 +05:00", "x"]),
+            ),
+            (
+                "split accepts an offset missing its colon",
+                flags(|args| {
+                    split(args);
+                    args.selected_column = 1;
+                }),
+                vec!["1", "2024-01-15T10:30:00+0000", "x"],
+                Some(vec!["1", "2024-01-15T10:30:00+0000", "2024-01-15", "10:30:00 +00:00", "x"]),
+            ),
+            // A data row's parse-error marker is the plain token in every
+            // position; the '>' and '<' decorations belong to the header.
+            (
+                "split, invalid timestamp before",
+                converting(split, Before),
+                vec!["1", "not-a-date", "x"],
+                Some(vec!["1", "parse_err", "parse_err", "not-a-date", "x"]),
+            ),
+            (
+                "split, invalid timestamp replace",
+                converting(split, Replace),
+                vec!["1", "not-a-date", "x"],
+                Some(vec!["1", "parse_err", "parse_err", "x"]),
+            ),
+            (
+                "split, invalid timestamp after",
+                converting(split, After),
+                vec!["1", "not-a-date", "x"],
+                Some(vec!["1", "not-a-date", "parse_err", "parse_err", "x"]),
+            ),
+            (
+                "rfc3339, valid epoch",
+                converting(rfc3339, Replace),
+                vec!["1", "1700000000", "x"],
+                Some(vec!["1", "2023-11-14T22:13:20+00:00", "x"]),
+            ),
+            (
+                "rfc3339, non-numeric value",
+                converting(rfc3339, Replace),
+                vec!["1", "abc", "x"],
+                Some(vec!["1", "parse_err", "x"]),
+            ),
+            (
+                "rfc3339, epoch chrono cannot represent",
+                converting(rfc3339, Replace),
+                vec!["1", &huge, "x"],
+                Some(vec!["1", "parse_err", "x"]),
+            ),
+            (
+                "utc converts the offset",
+                converting(to_utc, Replace),
+                vec!["1", "2024-06-01T10:00:00+05:00", "x"],
+                Some(vec!["1", "2024-06-01T05:00:00+00:00", "x"]),
+            ),
+            (
+                "utc accepts an offset missing its colon",
+                converting(to_utc, Replace),
+                vec!["1", "2024-06-01T10:00:00+0500", "x"],
+                Some(vec!["1", "2024-06-01T05:00:00+00:00", "x"]),
+            ),
+            (
+                // 01:00+05:00 is the previous UTC day: a pure offset shift,
+                // with no zone or daylight-saving logic, but the date
+                // rollover arithmetic still has to be right.
+                "utc shifts the calendar date across midnight",
+                converting(to_utc, Replace),
+                vec!["1", "2024-01-01T01:00:00+05:00", "x"],
+                Some(vec!["1", "2023-12-31T20:00:00+00:00", "x"]),
+            ),
+            (
+                "utc, invalid timestamp",
+                converting(to_utc, Replace),
+                vec!["1", "nope", "x"],
+                Some(vec!["1", "parse_err", "x"]),
+            ),
+            (
+                "offset converts to the explicit target",
+                converting(to_offset, Replace),
+                vec!["1", "2024-06-15T14:00:00+02:00", "x"],
+                Some(vec!["1", "2024-06-15T06:00:00-06:00", "x"]),
+            ),
+            (
+                "offset accepts an offset missing its colon",
+                converting(to_offset, Replace),
+                vec!["1", "2024-06-15T14:00:00+0200", "x"],
+                Some(vec!["1", "2024-06-15T06:00:00-06:00", "x"]),
+            ),
+            (
+                // 00:30+02:00 on Jan 1 shifts back across both midnight and
+                // the year boundary once re-expressed at -06:00.
+                "offset shifts the calendar date and year across midnight",
+                converting(to_offset, Replace),
+                vec!["1", "2024-01-01T00:30:00+02:00", "x"],
+                Some(vec!["1", "2023-12-31T16:30:00-06:00", "x"]),
+            ),
+            (
+                "offset, invalid timestamp",
+                converting(to_offset, Replace),
+                vec!["1", "nope", "x"],
+                Some(vec!["1", "parse_err", "x"]),
+            ),
+            (
+                "offset, -i independent of its own column",
+                flags(|args| {
+                    to_offset(args);
+                    args.selected_column = 1;
+                    args.insert_column = Some(0);
+                    args.insert_position = Before;
+                }),
+                vec!["1", "2024-06-15T14:00:00+02:00", "x"],
+                Some(vec!["2024-06-15T06:00:00-06:00", "1", "2024-06-15T14:00:00+02:00", "x"]),
+            ),
+            (
+                // -i can target a column that is neither of --duration's own
+                // two columns.
+                "two-column duration, -i independent of its columns",
+                flags(|args| {
+                    args.action_duration = true;
+                    args.selected_column = 0;
+                    args.second_column = Some(2);
+                    args.insert_column = Some(1);
+                    args.insert_position = Replace;
+                }),
+                vec!["2024-01-01T00:00:00Z", "untouched", "2024-01-02T12:00:00Z"],
+                Some(vec!["2024-01-01T00:00:00Z", "P1DT12H", "2024-01-02T12:00:00Z"]),
+            ),
+            (
+                // Highest index first, so dropping one cannot shift another
+                // still to come: columns 0 and 1 of the input, not 0 and then
+                // whatever moved up.
+                "remove several columns by input position",
+                flags(|args| {
+                    args.action_remove = true;
+                    args.remove_columns = vec![1, 0];
+                }),
+                vec!["a", "b", "c", "d"],
+                Some(vec!["c", "d"]),
+            ),
+            (
+                "remove drops the named column",
+                flags(|args| {
+                    args.action_remove = true;
+                    args.remove_columns = vec![1];
+                }),
+                vec!["1", "2", "3"],
+                Some(vec!["1", "3"]),
+            ),
+            ("no action leaves the row alone", default_args(), vec!["1", "2", "3"],
+                Some(vec!["1", "2", "3"])),
+        ];
+        for (label, args, input, expected) in cases {
+            let result = process_record(&record(&input), &args, None);
+            match expected {
+                Some(expected) => {
+                    let (written, cache) = result.unwrap_or_else(|error| panic!("{label}: {error}"));
+                    assert_eq!(as_vec(&written), expected, "{label}");
+                    assert_eq!(cache, None, "{label}: the cache must stay empty");
+                },
+                None => assert!(result.is_err(), "{label}: expected an error"),
+            }
         }
     }
 
-    #[test]
-    fn headers_duration_two_column_out_of_bound_second_column_is_a_clean_error() {
-        let mut args = default_args();
-        args.action_duration = true;
-        args.selected_column = 0;
-        args.second_column = Some(9);
-        let result = process_headers(headers(&["id", "start", "end"]), &args);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn headers_remove() {
-        let mut args = default_args();
-        args.action_remove = true;
-        args.remove_columns = vec![1];
-        let result = process_headers(headers(&["id", "ts", "val"]), &args).unwrap();
-        assert_eq!(as_vec(&result), vec!["id", "val"]);
-    }
-
-    #[test]
-    fn headers_arrange_named_first_then_the_rest() {
-        let mut args = default_args();
-        args.action_arrange = true;
-        args.arrange_columns = vec![3, 1];
-        args.arrange_listed = vec![1, 3];
-        let result =
-            process_headers(headers(&["a", "b", "c", "d", "e"]), &args).unwrap();
-        assert_eq!(as_vec(&result), vec!["d", "b", "a", "c", "e"]);
-    }
-
-    #[test]
-    fn record_arrange_preserves_width_and_order() {
-        let mut args = default_args();
-        args.action_arrange = true;
-        args.arrange_columns = vec![2, 0];
-        args.arrange_listed = vec![0, 2];
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) =
-            process_record(&record(&["a", "b", "c", "d"]), &args, cache).unwrap();
-        assert_eq!(as_vec(&result), vec!["c", "a", "b", "d"]);
-    }
-
-    #[test]
-    fn record_arrange_out_of_bound_is_a_clean_error() {
-        let mut args = default_args();
-        args.action_arrange = true;
-        args.arrange_columns = vec![9];
-        args.arrange_listed = vec![9];
-        let cache: Option<DateTime<FixedOffset>> = None;
-        assert!(process_record(&record(&["a", "b"]), &args, cache).is_err());
-    }
-
-    #[test]
-    fn headers_remove_several_columns() {
-        let mut args = default_args();
-        args.action_remove = true;
-        // As --remove's parsing produces it: highest index first.
-        args.remove_columns = vec![3, 1];
-        let result = process_headers(headers(&["id", "ts", "val", "note"]), &args).unwrap();
-        assert_eq!(as_vec(&result), vec!["id", "val"]);
-    }
-
-    #[test]
-    fn headers_remove_rejects_the_list_if_any_column_is_out_of_bound() {
-        let mut args = default_args();
-        args.action_remove = true;
-        args.remove_columns = vec![9, 0];
-        assert!(process_headers(headers(&["id", "ts"]), &args).is_err());
-    }
-
-    #[test]
-    fn headers_remove_out_of_bounds_is_a_clean_error() {
-        let mut args = default_args();
-        args.action_remove = true;
-        args.remove_columns = vec![9];
-        let result = process_headers(headers(&["id", "ts", "val"]), &args);
-        assert!(result.is_err());
-    }
-
-    // Bounds-checking by `vecbuff.len() - 1` would underflow (a subtraction
-    // overflow panic) when the record has zero fields, e.g. the header row on
-    // genuinely empty input.
-    // Any column index must be a clean error against a zero-field record.
-    #[test]
-    fn headers_zero_field_record_is_a_clean_error_not_a_panic() {
-        let mut args = default_args();
-        args.action_remove = true;
-        args.remove_columns = vec![0];
-        let result = process_headers(headers(&[]), &args);
-        assert!(result.is_err());
-    }
-
-    // ---- process_record: bounds checking ----------------------------------
-
-    #[test]
-    fn record_out_of_bound_column_is_a_clean_error() {
-        let mut args = default_args();
-        args.action_remove = true;
-        args.remove_columns = vec![9];
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let result = process_record(&record(&["1", "2", "3"]), &args, cache);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn record_column_at_last_valid_index_is_allowed() {
-        let mut args = default_args();
-        args.action_remove = true;
-        args.remove_columns = vec![2]; // last index of a 3-field record
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(&record(&["1", "2", "3"]), &args, cache).unwrap();
-        assert_eq!(as_vec(&result), vec!["1", "2"]);
-    }
-
-    #[test]
-    fn record_zero_field_record_is_a_clean_error_not_a_panic() {
-        let mut args = default_args();
-        args.action_remove = true;
-        args.remove_columns = vec![0];
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let result = process_record(&record(&[]), &args, cache);
-        assert!(result.is_err());
-    }
 
     // ---- insert_offset_colon / parse_rfc3339_lenient -----------------------
 
@@ -5301,212 +4526,14 @@ mod tests {
         assert!(parse_position_word("sideways").is_err());
     }
 
-    // ---- process_record: split --------------------------------------------
-
-    #[test]
-    fn record_split_valid_timestamp_default_position() {
-        let mut args = default_args();
-        args.action_split = true;
-        args.selected_column = 1;
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["1", "2024-01-15T10:30:00Z", "x"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["1", "2024-01-15T10:30:00Z", "2024-01-15", "10:30:00 +00:00", "x"]
-        );
-    }
-
-    #[test]
-    fn record_split_uses_the_inputs_own_offset_not_utcs_date() {
-        // 00:30+05:00 and 19:30Z the day before are the same instant, but
-        // split must report the date/time as given in the input's own
-        // offset: it doesn't convert to UTC first.
-        let mut args = default_args();
-        args.action_split = true;
-        args.selected_column = 1;
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["1", "2024-01-01T00:30:00+05:00", "x"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["1", "2024-01-01", "00:30:00 +05:00", "x"]
-        );
-    }
-
-    #[test]
-    fn record_split_accepts_offset_missing_a_colon() {
-        let mut args = default_args();
-        args.action_split = true;
-        args.selected_column = 1;
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["1", "2024-01-15T10:30:00+0000", "x"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["1", "2024-01-15T10:30:00+0000", "2024-01-15", "10:30:00 +00:00", "x"]
-        );
-    }
-
-    #[test]
-    fn record_split_invalid_timestamp_all_positions() {
-        // A data row's parse-error marker is always the plain token, in every
-        // position, the `>`/`<` decorations are a header-only convention.
-        for (mode, expected) in [
-            (
-                "before",
-                vec!["1", "parse_err", "parse_err", "not-a-date", "x"],
-            ),
-            ("replace", vec!["1", "parse_err", "parse_err", "x"]),
-            (
-                "after",
-                vec!["1", "not-a-date", "parse_err", "parse_err", "x"],
-            ),
-        ] {
-            let mut args = default_args();
-            args.action_split = true;
-            args.selected_column = 1;
-            args.insert_position = mode.to_string();
-            let cache: Option<DateTime<FixedOffset>> = None;
-            let (result, _) =
-                process_record(&record(&["1", "not-a-date", "x"]), &args, cache).unwrap();
-            assert_eq!(as_vec(&result), expected, "mode={mode}");
-        }
-    }
-
-    // ---- process_record: to_rfc3339 ----------------------------------------
-
-    #[test]
-    fn record_to_rfc3339_valid_epoch() {
-        let mut args = default_args();
-        args.action_to_rfc3339 = true;
-        args.selected_column = 1;
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) =
-            process_record(&record(&["1", "1700000000", "x"]), &args, cache).unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["1", "2023-11-14T22:13:20+00:00", "x"]
-        );
-    }
-
-    #[test]
-    fn record_to_rfc3339_non_numeric_is_parse_err() {
-        let mut args = default_args();
-        args.action_to_rfc3339 = true;
-        args.selected_column = 1;
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(&record(&["1", "abc", "x"]), &args, cache).unwrap();
-        assert_eq!(as_vec(&result), vec!["1", "parse_err", "x"]);
-    }
-
-    #[test]
-    fn record_to_rfc3339_unrepresentable_epoch_is_a_parse_err() {
-        let mut args = default_args();
-        args.action_to_rfc3339 = true;
-        args.selected_column = 1;
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let huge = i64::MAX.to_string();
-        let (result, _) =
-            process_record(&record(&["1", &huge, "x"]), &args, cache).unwrap();
-        assert_eq!(as_vec(&result), vec!["1", "parse_err", "x"]);
-    }
-
-    // ---- process_record: to_utc / to_local ---------------------------------
-
-    #[test]
-    fn record_to_utc_converts_offset() {
-        let mut args = default_args();
-        args.action_to_utc = true;
-        args.selected_column = 1;
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["1", "2024-06-01T10:00:00+05:00", "x"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["1", "2024-06-01T05:00:00+00:00", "x"]
-        );
-    }
-
-    #[test]
-    fn record_to_utc_accepts_offset_missing_a_colon() {
-        let mut args = default_args();
-        args.action_to_utc = true;
-        args.selected_column = 1;
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["1", "2024-06-01T10:00:00+0500", "x"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["1", "2024-06-01T05:00:00+00:00", "x"]
-        );
-    }
-
-    #[test]
-    fn record_to_utc_shifts_the_calendar_date_across_midnight() {
-        // 01:00+05:00 is the previous UTC day, a pure offset shift, no
-        // timezone/DST logic involved, but the date-rollover arithmetic
-        // still has to be right.
-        let mut args = default_args();
-        args.action_to_utc = true;
-        args.selected_column = 1;
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["1", "2024-01-01T01:00:00+05:00", "x"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["1", "2023-12-31T20:00:00+00:00", "x"]
-        );
-    }
-
-    #[test]
-    fn record_to_utc_invalid_timestamp_is_parse_err() {
-        let mut args = default_args();
-        args.action_to_utc = true;
-        args.selected_column = 1;
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(&record(&["1", "nope", "x"]), &args, cache).unwrap();
-        assert_eq!(as_vec(&result), vec!["1", "parse_err", "x"]);
-    }
+    // ---- process_record: to_local ------------------------------------------
 
     #[test]
     fn record_to_local_produces_the_same_instant_as_utc() {
         let mut args = default_args();
         args.action_to_local = true;
         args.selected_column = 1;
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
         let (result, _) = process_record(
             &record(&["1", "2024-06-01T10:00:00+05:00", "x"]),
@@ -5525,7 +4552,7 @@ mod tests {
         let mut args = default_args();
         args.action_to_local = true;
         args.selected_column = 1;
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
         let (result, _) = process_record(
             &record(&["1", "2024-06-01T10:00:00+0500", "x"]),
@@ -5648,103 +4675,6 @@ mod tests {
         }
     }
 
-    // ---- process_record: offset ----------------------------------------------
-
-    #[test]
-    fn record_offset_converts_to_the_explicit_target() {
-        let mut args = default_args();
-        args.action_offset = true;
-        args.selected_column = 1;
-        args.target_offset = Some(FixedOffset::west_opt(6 * 3600).unwrap());
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["1", "2024-06-15T14:00:00+02:00", "x"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["1", "2024-06-15T06:00:00-06:00", "x"]
-        );
-    }
-
-    #[test]
-    fn record_offset_accepts_offset_missing_a_colon() {
-        let mut args = default_args();
-        args.action_offset = true;
-        args.selected_column = 1;
-        args.target_offset = Some(FixedOffset::west_opt(6 * 3600).unwrap());
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["1", "2024-06-15T14:00:00+0200", "x"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["1", "2024-06-15T06:00:00-06:00", "x"]
-        );
-    }
-
-    #[test]
-    fn record_offset_shifts_the_calendar_date_and_year_across_midnight() {
-        // 00:30+02:00 on Jan 1 shifts back across both midnight and the
-        // year boundary once re-expressed at -06:00.
-        let mut args = default_args();
-        args.action_offset = true;
-        args.selected_column = 1;
-        args.target_offset = Some(FixedOffset::west_opt(6 * 3600).unwrap());
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["1", "2024-01-01T00:30:00+02:00", "x"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["1", "2023-12-31T16:30:00-06:00", "x"]
-        );
-    }
-
-    #[test]
-    fn record_offset_invalid_timestamp_is_a_parse_err() {
-        let mut args = default_args();
-        args.action_offset = true;
-        args.selected_column = 1;
-        args.target_offset = Some(FixedOffset::west_opt(6 * 3600).unwrap());
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(&record(&["1", "nope", "x"]), &args, cache).unwrap();
-        assert_eq!(as_vec(&result), vec!["1", "parse_err", "x"]);
-    }
-
-    #[test]
-    fn record_offset_insert_column_independent_of_own_column() {
-        let mut args = default_args();
-        args.action_offset = true;
-        args.selected_column = 1;
-        args.target_offset = Some(FixedOffset::west_opt(6 * 3600).unwrap());
-        args.insert_column = Some(0);
-        args.insert_position = "before".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["1", "2024-06-15T14:00:00+02:00", "x"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["2024-06-15T06:00:00-06:00", "1", "2024-06-15T14:00:00+02:00", "x"]
-        );
-    }
-
     // ---- process_record: duration (single column) --------------------------
 
     #[test]
@@ -5752,7 +4682,7 @@ mod tests {
         let mut args = default_args();
         args.action_duration = true;
         args.selected_column = 1;
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
         let (result, new_cache) = process_record(
             &record(&["1", "2024-01-01T00:00:00Z"]),
@@ -5772,7 +4702,7 @@ mod tests {
         let mut args = default_args();
         args.action_duration = true;
         args.selected_column = 1;
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
         let (result, new_cache) = process_record(
             &record(&["1", "2024-01-01T00:00:00+0000"]),
@@ -5792,7 +4722,7 @@ mod tests {
         let mut args = default_args();
         args.action_duration = true;
         args.selected_column = 1;
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
 
         let mut cache: Option<DateTime<FixedOffset>> = None;
 
@@ -5826,7 +4756,7 @@ mod tests {
         let mut args = default_args();
         args.action_duration = true;
         args.selected_column = 1;
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
 
         let (r1, c1) = process_record(
@@ -5854,7 +4784,7 @@ mod tests {
         let mut args = default_args();
         args.action_duration = true;
         args.selected_column = 1;
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
 
         let (r1, c1) = process_record(
@@ -5879,7 +4809,7 @@ mod tests {
         let mut args = default_args();
         args.action_duration = true;
         args.selected_column = 1;
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let seed = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap();
 
         let (result, new_cache) =
@@ -5896,7 +4826,7 @@ mod tests {
         args.action_duration = true;
         args.selected_column = 0;
         args.second_column = Some(4);
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
 
         // column 0 earlier than column 4; result replaces column 4 (the second column)
@@ -5924,7 +4854,7 @@ mod tests {
         args.action_duration = true;
         args.selected_column = 0;
         args.second_column = Some(1);
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
         let (result, _) = process_record(
             &record(&["2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z"]),
@@ -5941,7 +4871,7 @@ mod tests {
         args.action_duration = true;
         args.selected_column = 0;
         args.second_column = Some(1);
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
         let (result, _) = process_record(
             &record(&["2024-01-01T00:00:00+0000", "2024-01-02T00:00:00+0000"]),
@@ -5958,7 +4888,7 @@ mod tests {
         args.action_duration = true;
         args.selected_column = 0;
         args.second_column = Some(1);
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
 
         let (result, _) = process_record(
@@ -5988,7 +4918,7 @@ mod tests {
         args.action_duration = true;
         args.selected_column = 0;
         args.second_column = Some(1);
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
         let (result, _) = process_record(
             &record(&["2024-07-04T12:00:00-04:00", "2024-07-04T20:00:00+02:00"]),
@@ -6008,7 +4938,7 @@ mod tests {
         args.action_duration = true;
         args.selected_column = 0;
         args.second_column = Some(1);
-        args.insert_position = "replace".to_string();
+        args.insert_position = InsertPosition::Replace;
         let seed = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z").unwrap();
         let (_, new_cache) = process_record(
             &record(&["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]),
@@ -6028,63 +4958,6 @@ mod tests {
         let cache: Option<DateTime<FixedOffset>> = None;
         let result = process_record(&record(&["1", "2"]), &args, cache);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn record_duration_insert_column_independent_of_action_columns() {
-        // -i can target a column that's neither of --duration's own two columns.
-        let mut args = default_args();
-        args.action_duration = true;
-        args.selected_column = 0;
-        args.second_column = Some(2);
-        args.insert_column = Some(1);
-        args.insert_position = "replace".to_string();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(
-            &record(&["2024-01-01T00:00:00Z", "untouched", "2024-01-02T12:00:00Z"]),
-            &args,
-            cache,
-        )
-        .unwrap();
-        assert_eq!(
-            as_vec(&result),
-            vec!["2024-01-01T00:00:00Z", "P1DT12H", "2024-01-02T12:00:00Z"]
-        );
-    }
-
-    // ---- process_record: remove ---------------------------------------------
-
-    #[test]
-    fn record_remove_several_columns_uses_input_positions() {
-        // Highest index first, so dropping one cannot shift another still to
-        // come: columns 0 and 1 of the input, not 0 and then whatever moved up.
-        let mut args = default_args();
-        args.action_remove = true;
-        args.remove_columns = vec![1, 0];
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) =
-            process_record(&record(&["a", "b", "c", "d"]), &args, cache).unwrap();
-        assert_eq!(as_vec(&result), vec!["c", "d"]);
-    }
-
-    #[test]
-    fn record_remove_drops_the_named_column() {
-        let mut args = default_args();
-        args.action_remove = true;
-        args.remove_columns = vec![1];
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, _) = process_record(&record(&["1", "2", "3"]), &args, cache).unwrap();
-        assert_eq!(as_vec(&result), vec!["1", "3"]);
-    }
-
-    #[test]
-    fn record_no_action_is_unchanged() {
-        let args = default_args();
-        let cache: Option<DateTime<FixedOffset>> = None;
-        let (result, new_cache) =
-            process_record(&record(&["1", "2", "3"]), &args, cache).unwrap();
-        assert_eq!(as_vec(&result), vec!["1", "2", "3"]);
-        assert_eq!(new_cache, None);
     }
 
     // ---- is_rfc3339_year / is_rfc3339_offset / to_rfc3339_in_range ---------
@@ -6268,38 +5141,38 @@ mod tests {
         assert_eq!(insert_target(&args, 1, 3), 2);
     }
 
-    // ---- insert_single / insert_pair ---------------------------------------
+    // ---- insert_fields -----------------------------------------------------
 
     #[test]
-    fn insert_single_places_the_value_by_position() {
+    fn insert_fields_places_one_value_by_position() {
         for (position, expected) in [
-            ("before", vec!["a", "new>", "b", "c"]),
-            ("replace", vec!["a", "new", "c"]),
-            ("after", vec!["a", "b", "<new", "c"]),
+            (InsertPosition::Before, vec!["a", "new>", "b", "c"]),
+            (InsertPosition::Replace, vec!["a", "new", "c"]),
+            (InsertPosition::After, vec!["a", "b", "<new", "c"]),
         ] {
             let mut fields = vec!["a", "b", "c"];
-            insert_single(&mut fields, 1, position, "new>", "new", "<new");
-            assert_eq!(fields, expected, "position={position}");
+            insert_fields(&mut fields, 1, position, &["new>"], &["new"], &["<new"]);
+            assert_eq!(fields, expected, "position={position:?}");
         }
         // "after" the last column appends rather than running past the end.
         let mut fields = vec!["a", "b", "c"];
-        insert_single(&mut fields, 2, "after", "new>", "new", "<new");
+        insert_fields(&mut fields, 2, InsertPosition::After, &["new>"], &["new"], &["<new"]);
         assert_eq!(fields, vec!["a", "b", "c", "<new"]);
     }
 
     #[test]
-    fn insert_pair_keeps_its_two_values_in_order() {
+    fn insert_fields_keeps_two_values_in_order() {
         // The pair is written left-to-right whichever side of the column it
-        // lands on, which the two separate inserts make easy to get backwards.
+        // lands on, which two separate inserts make easy to get backwards.
         for (position, expected) in [
-            ("before", vec!["a", "one>", "two>", "b", "c"]),
-            ("replace", vec!["a", "one", "two", "c"]),
-            ("after", vec!["a", "b", "<one", "<two", "c"]),
+            (InsertPosition::Before, vec!["a", "one>", "two>", "b", "c"]),
+            (InsertPosition::Replace, vec!["a", "one", "two", "c"]),
+            (InsertPosition::After, vec!["a", "b", "<one", "<two", "c"]),
         ] {
             let mut fields = vec!["a", "b", "c"];
-            insert_pair(&mut fields, 1, position,
-                ("one>", "two>"), ("one", "two"), ("<one", "<two"));
-            assert_eq!(fields, expected, "position={position}");
+            insert_fields(&mut fields, 1, position,
+                &["one>", "two>"], &["one", "two"], &["<one", "<two"]);
+            assert_eq!(fields, expected, "position={position:?}");
         }
     }
 
