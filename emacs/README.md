@@ -2,7 +2,7 @@
 
 An Emacs front end for `csvdt`, meant to sit alongside `csv-mode`.
 
-## Nothing here needs updating when csvdt changes
+## Staying in step with csvdt
 
 Piping `csvdt --help` into a help buffer is trivial and always current. But the
 binary can also tell Emacs what its options *are*, so the package doesn't need
@@ -358,7 +358,7 @@ narrowing`.
 
 ## Banked lines
 
-### Why this needs saying at all
+### Background
 
 Emacs has no notion of *banked lines*. It has a **region**, and a region may be
 non-contiguous (`region-bounds` reports one `(BEG . END)` per piece) and a
@@ -396,7 +396,7 @@ order, touching stretches merged, and the lot sent as a single file so a
 duration is measured across what was banked rather than across what was
 skipped.
 
-**If the package has a function for it, use that.**
+If the package has a function for it, use that.
 
 ```elisp
 (setq csvdt-banked-lines-function #'some-package-banked-lines)
@@ -460,7 +460,7 @@ package takes, so one line connects them:
 
 Without it, `csvdt-run-banked` says there are no banked lines however many you
 have banked, and `csvdt-run-dwim` quietly falls back to the region; see
-[Why this needs saying at all](#why-this-needs-saying-at-all).
+[Background](#background).
 
 Verified: banking two rows with `donkey-bank-selection` and then running
 `-H -p -u0 -i 0,replace` over the bank converts those two rows and no others,
@@ -495,7 +495,7 @@ and the eye lands on `donkey-banked-selection`, which is the **face**, the
 nothing. Naming `face` finds the banked lines *and* everything else highlighted
 in that buffer.
 
-**Failing that, name the overlay property it sets.** Most packages mark banked
+Failing that, name the overlay property it sets. Most packages mark banked
 lines with an overlay:
 
 ```elisp
@@ -645,7 +645,7 @@ left on the previous result are removed with it. That matters more than it
 sounds: emptying a buffer collapses an overlay to zero width rather than
 removing it, and one created to advance with text inserted at its end then
 grows over whatever replaces it, so a line highlighted for having been banked
-in the output buffer used to colour the entire next result.
+in the output buffer would colour the entire next result.
 
 The buffer is sent as UTF-8 with Unix line endings whatever the locale's
 process encoding is, since csvdt requires UTF-8 and refuses anything else. So a
@@ -690,10 +690,10 @@ The count is checked, not just printed. A run reaching fewer checks than the
 file declares says `ONLY 288 OF 300 CHECKS RAN` and fails, because `ALL PASS`
 is also what a run prints where nothing was tried: a check commented out while
 something was being chased, a `let` that returned early, an edit that left the
-calls unreachable. Deleting twelve checks used to print `ALL PASS` and exit 0.
-And because the line that prints the verdict is itself in that file, the runner
-insists on seeing one: a tail that stops being reached takes Emacs out at 0 with
-nothing said, and that now fails too.
+calls unreachable. Deleting twelve checks would otherwise print `ALL PASS` and
+exit 0. And because the line that prints the verdict is itself in that file, the
+runner insists on seeing one: a tail that stops being reached takes Emacs out at
+0 with nothing said, and that fails too.
 
 Point it at a different binary with `CSVDT=/path/to/csvdt emacs/run-tests.sh`,
 or a different Emacs with `EMACS=`.

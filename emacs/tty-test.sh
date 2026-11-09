@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Keystroke-level tests, which need a real terminal -- `emacs --batch' reads
+# Keystroke-level tests, which need a real terminal: `emacs --batch' reads
 # its own stdin, so a keyboard macro never reaches a minibuffer there.  Kept
 # separate from run-tests.sh for that reason.
 #

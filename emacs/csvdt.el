@@ -63,9 +63,9 @@ The default assumes a file with a header row, as buffers visited with
 It is prefilled *selected*, so typing replaces it rather than adding to
 it, and it takes a deliberate keystroke to keep.  That matters because
 the two possible mistakes are not symmetric: passing the header option to
-a file that has no header is quiet -- the first row is taken as a header
+a file that has no header is quiet (the first row is taken as a header
 and, depending on the insert position, either goes through unconverted or
-is replaced by the generated header name and lost -- while leaving it off
+is replaced by the generated header name and lost) while leaving it off
 a file that does have one is loud, the header coming back as a parse
 error marker.  A prefill that had to be noticed and deleted pointed at
 the quiet mistake; one that has to be kept does not."
@@ -75,7 +75,7 @@ the quiet mistake; one that has to be kept does not."
 (defcustom csvdt-region-carries-header t
   "Whether a region run is given the buffer's header line.
 A region selected below the header has no header of its own, so csvdt
-would take its first row as one -- and quietly, since a header is exempt
+would take its first row as one, and quietly, since a header is exempt
 from whatever conversion is being applied: the row is either passed
 through unconverted or, where the action replaces its column, lost
 altogether.  With this on, the buffer's real header line is put in front
@@ -120,15 +120,15 @@ Covered by the same test, so a rename cannot leave it silently wrong."
 
 (defcustom csvdt-banked-lines-function nil
   "Where banked lines come from, when something banks them.
-Banking -- picking out lines here and there and working on those, rather
-than on one stretch -- is not this package's to provide, and packages that
+Banking (picking out lines here and there and working on those, rather
+than on one stretch) is not this package's to provide, and packages that
 do it already exist.  This is how one is plugged in.
 
 The value is a function of no arguments, called in the buffer being
-processed, returning either a list of (BEG . END) positions -- integers
-or markers -- or a list of overlays.  Ranges are put in buffer order and
-widened to whole lines -- and out to whole records, where a quoted field
-spans several -- before use, so an implementation need not do either.
+processed, returning either a list of (BEG . END) positions, integers
+or markers, or a list of overlays.  Ranges are put in buffer order and
+widened to whole lines (and out to whole records, where a quoted field
+spans several) before use, so an implementation need not do either.
 
 nil, the default, means nothing is banked and the region or the buffer is
 used as before."
@@ -154,7 +154,7 @@ declined rather than misread.")
 Keyed on the program's path and modification time, so a csvdt upgrade
 invalidates it by itself without a subprocess being spawned to ask: the
 cache used to be checked against `csvdt --version\', which meant one run
-of the binary per lookup -- and a single command looks options up once
+of the binary per lookup, and a single command looks options up once
 per argument, so a run with four arguments forked csvdt several times to
 learn nothing had changed.  VERSION is kept for anything that wants to
 say which csvdt the records came from.")
@@ -182,10 +182,9 @@ say which csvdt the records came from.")
                (not (file-directory-p csvdt-executable))
                (expand-file-name csvdt-executable))
         (executable-find csvdt-executable))
-      ;; Named for what is actually the matter. All three of these used to
-      ;; come back as "Cannot find", which is the one thing a file sitting
-      ;; right there at that path is not: the reader checks with ls, sees it,
-      ;; and goes looking for the wrong problem.
+      ;; Named for what is actually the matter. "Cannot find" would be the
+      ;; one thing a file sitting right there at that path is not: the reader
+      ;; checks with ls, sees it, and goes looking for the wrong problem.
       (cond
        ((and (file-name-directory csvdt-executable)
              (file-directory-p csvdt-executable))
@@ -212,14 +211,12 @@ Returns nil when csvdt exits non-zero, so callers can degrade rather than
 break if a future version declines the arguments."
   (with-temp-buffer
     ;; The same commitment csvdt--run makes: csvdt speaks UTF-8 in both
-    ;; directions.  --help held a curly quote when this was written, and
-    ;; leaving the decoding to the locale rendered it as mojibake in the help
-    ;; buffer anywhere the locale is not UTF-8.  The help corpus is ASCII now,
-    ;; the manual page rendered from it has to be, so nothing in it is
-    ;; misread today; this stays because the commitment is to the encoding
-    ;; csvdt writes rather than to what it currently happens to say, and any
-    ;; non-ASCII returning to --help or --list-options would be corrupted the
-    ;; same way.
+    ;; directions.  The help corpus is ASCII, and the manual page rendered
+    ;; from it has to be, so nothing in it is misread today.  This stays
+    ;; because the commitment is to the encoding csvdt writes rather than to
+    ;; what it currently happens to say: leaving the decoding to the locale
+    ;; would turn any non-ASCII text in --help or --list-options into
+    ;; mojibake wherever the locale is not UTF-8.
     (let* ((coding-system-for-read 'utf-8-unix)
            (coding-system-for-write 'utf-8-unix)
            (status (apply #'call-process (csvdt--program) nil
@@ -281,7 +278,7 @@ fall back to `--help' instead."
 Matches both the short-and-long form (\"  -x, --xxx <VALUE>\") and the
 long-only form (\"      --xxx <VALUE>\"), so no option name appears in this
 file at all.  A help layout does not say whether an option takes a value
-in any way worth parsing, so :value is left nil, meaning not known --
+in any way worth parsing, so :value is left nil, meaning not known,
 and `csvdt--file-arguments\=' declines to guess at filenames without that
 knowledge, rather than mistaking an option's value for one."
   (let ((records '())
@@ -337,7 +334,7 @@ that point and stored alongside, not consulted per call."
   "Return csvdt's version line without spawning it when the cache is warm.
 The prompt shows the version on every command, and reading it live undid
 half of what the mtime-keyed cache saved: one spawn per command, for a
-string that only changes when the binary does -- exactly what the cache
+string that only changes when the binary does: exactly what the cache
 already tracks.  `csvdt-version-string\=' stays live for the command that
 exists to ask."
   (csvdt--option-records)
@@ -389,7 +386,7 @@ end of the prefill, where moving forward would only ring the bell."
   "Keymap used while reading a csvdt command line.
 TAB completes the argument at point.  `minibuffer-local-map' is the
 parent rather than `minibuffer-local-completion-map', because the line is
-a list of arguments and only some of them are options -- SPC and comma
+a list of arguments and only some of them are options: SPC and comma
 have to insert themselves.")
 
 (defun csvdt--complete-argument ()
@@ -433,18 +430,18 @@ which is what csvdt's own value lists need.
 Both quote characters, because the examples people paste come from a
 shell and a shell takes either.  Only the double one used to be
 understood, so a pasted \\='#\\=' arrived as three characters and csvdt
-refused it -- clearly, but for a reason that was about this prompt rather
+refused it: clearly, but for a reason that was about this prompt rather
 than about the option.
 
-A double-quoted run honours the shell-familiar backslash escapes --
+A double-quoted run honours the shell-familiar backslash escapes
 \\t \\n \\r \\\\ \\\" and no others, so \\=\"\\t\" is a tab and
-\\=\"C:\\data\" is refused rather than read as Lisp's DEL escape --
+\\=\"C:\\data\" is refused rather than read as Lisp's DEL escape,
 while a single-quoted one is literal throughout.  So a lone quote
 character is written by wrapping it in the other kind, and a value that
 must keep its backslashes belongs in single quotes.
 
 Outside quotes a backslash is left as itself, which is not the shell's
-rule but is the one this prompt has always had -- a Windows path typed
+rule but is the one this prompt has always had: a Windows path typed
 as a value has to survive, and there is no filename here for a shell's
 escaping to be worth more than that."
   (let ((index 0)
@@ -473,14 +470,14 @@ escaping to be worth more than that."
                               (substring line (1+ index) end)
                             ;; Only the shell-familiar escapes reach the
                             ;; reader.  It knows more of them: \d is DEL and
-                            ;; \a is a bell, so "C:\data" read raw became
-                            ;; C-followed-by-DEL-ata with no error, while
-                            ;; "C:\Users" tripped over \U and was refused: the
-                            ;; same path corrupted or caught by the letter
-                            ;; after the backslash.  Now every sequence
-                            ;; outside the familiar set is answered the same
-                            ;; way, with the way out: single quotes take
-                            ;; backslashes literally.
+                            ;; \a is a bell, so "C:\data" read raw would
+                            ;; become C-followed-by-DEL-ata with no error,
+                            ;; while "C:\Users" would trip over \U and be
+                            ;; refused: the same path corrupted or caught by
+                            ;; the letter after the backslash.  Every
+                            ;; sequence outside the familiar set is answered
+                            ;; the same way, with the way out: single quotes
+                            ;; take backslashes literally.
                             (let ((run (substring line (1+ index) end))
                                   (scan 0))
                               (while (< scan (length run))
@@ -554,9 +551,9 @@ replaces it and \\<csvdt--arguments-map>\\[csvdt--keep-prefill] keeps it."
 A mode that turns out not to be available leaves the buffer plain rather
 than aborting a run csvdt has already done the work for."
   ;; A mode that exists and then signals costs the same run as one that
-  ;; does not exist, and used to cost more: the error escaped past the
-  ;; line count, the stderr notes and the window, leaving the result in a
-  ;; buffer nobody was shown.  Both failures now end the same way.
+  ;; does not exist.  An error escaping here would skip the line count, the
+  ;; stderr notes and the window, leaving the result in a buffer nobody was
+  ;; shown.
   (if (fboundp csvdt-output-mode)
       (condition-case nil
           (funcall csvdt-output-mode)
@@ -567,11 +564,11 @@ than aborting a run csvdt has already done the work for."
   "Return the short flags clustered in ARGUMENT, or nil if it is not a cluster.
 clap lets flags be written together, so \"-Hp\" is two of them.  A short
 option whose value can be attached consumes the rest of the argument, so
-scanning stops at the first of those -- which is what makes
+scanning stops at the first of those, which is what makes
 \"-i0,replace\" one option and its value rather than a run of flags.
 A short whose value must be attached with \"=\" does not: nothing after
 it in a cluster can be its value, so to clap it is just another flag and
-scanning walks over it -- \"-fH\" is two flags, and treating it as \"-f
+scanning walks over it: \"-fH\" is two flags, and treating it as \"-f
 plus a value\" hid the \"-H\" from `csvdt--header-requested-p\'.  Which
 options are which comes from csvdt itself; when it does not say, none
 are assumed and only whole arguments match."
@@ -643,11 +640,11 @@ Only ones that name something on disk: an argument left where the filename
 goes is worth reporting when csvdt would silently read it, and when it
 would not, csvdt's own error says so better than a guess from here could.
 That matters because these commands always send the input on standard
-input, so a filename does not add a second input -- it replaces the
+input, so a filename does not add a second input: it replaces the
 selection, and the result looks exactly like a successful run on it.
 
 Nothing is reported at all when the option table cannot say which
-options take a separate value -- the `--help' fallback's records, where
+options take a separate value: the `--help' fallback's records, where
 :value is nil throughout.  Telling a value from a positional then needs
 exactly the knowledge that is missing, and guessing refused valid runs:
 an option's separate value was scanned as a filename, and refused
@@ -697,7 +694,7 @@ argument spelled -H there is a filename, not the option."
 
 (defun csvdt--header-line (beg args)
   "Return the buffer's header line to put in front of a region at BEG.
-Nil unless ARGS ask for a header and BEG is below it -- a region starting
+Nil unless ARGS ask for a header and BEG is below it: a region starting
 inside the header line is left alone, since it already carries part of
 one and guessing what was meant would be worse than not."
   (when (and csvdt-region-carries-header
@@ -724,7 +721,7 @@ would hand csvdt a truncated row.  A range ending exactly at the start of
 a line stops there, having been selected up to the previous line\'s
 newline rather than into this one.
 
-Whole lines are not yet whole records -- a quoted field may hold newlines
+Whole lines are not yet whole records: a quoted field may hold newlines
 and carry one record across several.  `csvdt--whole-records\=' finishes
 the job; this is the cheap part of it, and the whole of it for a file
 whose fields hold no newlines."
@@ -785,7 +782,7 @@ DELIMITER or a line ending."
 Read from the start of the accessible portion, since nothing nearer can
 say which side of a quote a position is on.  Jumps quote to quote rather
 than character to character, so the cost follows how many QUOTE
-characters come before POS rather than how much text does -- DELIMITER
+characters come before POS rather than how much text does: DELIMITER
 says where a field begins, which is the only place a quote opens one:
 measured at
 0.17 s over 14 MB holding twelve thousand of them, and 1.9 s over 18 MB
@@ -811,14 +808,14 @@ before it and pays nothing."
 
 (defun csvdt--whole-records (beg end quote delimiter)
   "Return BEG..END widened out to whole records.
-A record is not always a line.  A quoted field may hold newlines -- an
-address, a notes column, an embedded document -- and then one record
+A record is not always a line.  A quoted field may hold newlines (an
+address, a notes column, an embedded document) and then one record
 spans several lines, which is ordinary CSV and which csvdt reads and
 writes faithfully.  Widening to whole lines is therefore not enough on
 its own: a range starting inside such a field hands over the tail of a
 record as though it were a record of its own.  That parses cleanly,
 converts cleanly and reports success, and the field it produces is not
-the data -- x\\n y arrives as y\", with nothing to say so.
+the data: x\\n y arrives as y\", with nothing to say so.
 
 QUOTE and DELIMITER are the dialect the run will read with, since what
 counts as a record depends on both.
@@ -851,7 +848,7 @@ dialect the run will read with, which is what decides where a record ends.
 Widening can only reach as far as the accessible portion: a buffer
 narrowed to begin or end mid-record has nothing whole to widen to, so the clamp
 leaves half a record and nothing says so.  It goes to csvdt as a short
-row -- passed through truncated, or, once a conversion is asked for,
+row: passed through truncated, or, once a conversion is asked for,
 refused as a ragged record naming a line rather than the narrowing behind
 it.  Widening past the restriction would send lines nobody chose, so the
 run reports the cut instead of hiding or overriding it.
@@ -861,7 +858,7 @@ the plain one.  The other is a narrowing that ends at a line boundary
 which is nonetheless inside a quoted field: whole lines are reachable
 there, so the mid-line test saw nothing, while the record they belong to
 was still severed.  That one could pass quietly: asked to accept ragged
-records -- the obvious thing to reach for when a count looks off -- csvdt
+records (the obvious thing to reach for when a count looks off), csvdt
 took the truncated one rather than refusing it, and a field holding a
 newline arrived without the half of itself that was out of reach, exit 0,
 with the rows behind it gone."
@@ -901,9 +898,8 @@ with the rows behind it gone."
 
 (defun csvdt--cut-note (cut)
   "How to say that the narrowing left CUT half-reachable.
-One phrasing for both the run summary and the failure message: a run
-that fails because of the cut is the case the check exists for, and it
-was the one that did not mention it."
+One phrasing for both the run summary and the failure message, since a
+run that fails because of the cut is the case the check exists for."
   (pcase cut
     ('both "first and last records cut short by the narrowing")
     ('start "first record cut short by the narrowing")
@@ -916,7 +912,7 @@ region report pieces.  One decoding, shared by `csvdt--normalise-ranges\='
 and `csvdt--mid-line-boundary-p\=', so what counts as a live piece cannot
 drift between what a run covers and what it says about the selection.
 
-A pair's ends may be integers or markers -- a marker is how a package
+A pair's ends may be integers or markers: a marker is how a package
 holds a position that must survive edits, so pairs of them are what a
 banking package most naturally reports.  They were silently dropped
 instead, and `csvdt-run-dwim\=', finding nothing banked, ran over the
@@ -927,9 +923,9 @@ marker pointing nowhere; for an overlay or a marker belonging to
 another buffer, whose positions mean something else entirely here and
 would otherwise be clamped onto lines nobody picked out; and for a
 piece starting at or past the end of the buffer, which names no
-character -- clamped into range instead, a stale one in a buffer whose
-last line has no newline widened onto that line, where \"No banked
-lines\" was the truth.
+character: clamped into range instead, a stale one in a buffer whose
+last line has no newline would widen onto that line, where \"No banked
+lines\" is the truth.
 
 Either way round: a pair is two ends, not a direction, and
 `region-beginning\=' and `region-end\=' are the only reason one usually
@@ -950,7 +946,7 @@ empty range, so the lines it named went silently missing."
   "Whether BUFFER is this one, or shares its text as an indirect buffer.
 An indirect buffer and its base hold the same characters at the same
 positions, so a marker or overlay made in one names exactly the text the
-other would name -- unlike a position from an unrelated buffer, which is
+other would name: unlike a position from an unrelated buffer, which is
 what the foreign-buffer refusal is for.  `clone-indirect-buffer\=' is an
 ordinary way to look at a file, and banking made in the base was refused
 there: `csvdt-run-banked\=' said \"No banked lines\", and
@@ -963,8 +959,8 @@ there: `csvdt-run-banked\=' said \"No banked lines\", and
   "Return PART as a position in this buffer, or nil.
 PART is one end of a banked piece: an integer, a marker, or whatever a
 dead overlay reported an end as (nil).  A marker in an unrelated buffer
-gets the foreign overlay's treatment -- its position means something else
-entirely here -- and one pointing nowhere has no position to give."
+gets the foreign overlay's treatment (its position means something else
+entirely here) and one pointing nowhere has no position to give."
   (cond ((integerp part) part)
         ((and (markerp part)
               (csvdt--same-text-p (marker-buffer part)))
@@ -974,7 +970,7 @@ entirely here -- and one pointing nowhere has no position to give."
   "Return ITEMS as whole-line (BEG . END) conses, in buffer order.
 ITEMS may hold conses or overlays, in any order, overlapping or repeated.
 Dead overlays are dropped, every range is widened to whole lines, and
-ranges that touch are merged -- so a selection that happens to abut a
+ranges that touch are merged, so a selection that happens to abut a
 banked stretch becomes one, and no line is ever sent twice.
 SOURCE names where ITEMS came from, for the error a malformed one raises;
 it defaults to `csvdt-banked-lines-function\=', which is the usual source
@@ -991,8 +987,8 @@ and the one a reader would think to check."
       ;; Anything else that is neither a pair of positions nor an overlay
       ;; is a mistake worth naming, rather than a raw wrong-type-argument
       ;; from inside, and a cons with junk for an end, (5 . nil) say, is
-      ;; the same mistake in better disguise: it used to pass this check
-      ;; and be dropped without a word further down.
+      ;; the same mistake in better disguise: left unchecked it would be
+      ;; dropped without a word further down.
       (unless (or (null item) (overlayp item)
                   (and (consp item)
                        (or (integerp (car item)) (markerp (car item)))
@@ -1026,7 +1022,7 @@ rewritten."
   "Return RANGES with any part an earlier one already covers removed.
 Needed after widening, which brings ranges together that were apart: two
 banked lines inside one record that spans several widen to that same
-record, and it went out once per range -- a duplicate row, valid CSV,
+record, and it went out once per range: a duplicate row, valid CSV,
 clean-looking, and nothing in a count to question it.
 
 Order is left exactly as given, unlike `csvdt--merge-ranges\='.  Buffer
@@ -1088,9 +1084,9 @@ everything lying between them."
 (defun csvdt--banked-lines ()
   "Return what `csvdt-banked-lines-function' reports, or nil.
 A function that is named but not defined is a configuration error rather
-than an absence of banked lines: it came out as a bare \"Symbol\'s function
-definition is void\", which does not say that the setting is what is wrong,
-and returning nil instead would run over the whole buffer without a word.
+than an absence of banked lines: the bare \"Symbol\'s function definition
+is void\" does not say that the setting is what is wrong, and returning nil
+instead would run over the whole buffer without a word.
 The likeliest cause is the package that defines it not being loaded, or
 being older than the function named."
   (when csvdt-banked-lines-function
@@ -1103,15 +1099,15 @@ being older than the function named."
 
 (defun csvdt--mid-line-boundary-p (items)
   "Non-nil when a piece in ITEMS begins or ends inside a line.
-ITEMS are the raw pieces a command was given -- conses or overlays, as
-`csvdt--normalise-ranges\' takes them -- asked before normalising widens
+ITEMS are the raw pieces a command was given (conses or overlays, as
+`csvdt--normalise-ranges\' takes them) asked before normalising widens
 them, because afterwards every range is whole lines and nothing is left
 to notice.
 
 An end sits on a line boundary at the start of a line, at the end of
 one, or at the end of the buffer.  The end of a line, because an
-overlay covering a line usually stops before the newline -- that is the
-shape `csvdt-banked-lines-from-overlays\=' reports -- and the row it
+overlay covering a line usually stops before the newline (that is the
+shape `csvdt-banked-lines-from-overlays\=' reports) and the row it
 names is whole: widening adds only the newline, and calling that a
 widened selection put the notice on every banked run.  A beginning is
 on a boundary only at the start of a line: beginning at the end of one
@@ -1125,8 +1121,7 @@ pulls that entire line in, which is exactly the widening this reports."
                  (high (min (cdr bounds) (point-max))))
              ;; A zero-width piece widens to its entire containing line,
              ;; a row the selection held no character of, which is the
-             ;; largest widening there is, and was the one case this
-             ;; stayed silent about.
+             ;; largest widening there is, so it is reported.
              (if (= low high)
                  t
                (or (progn (goto-char low) (not (bolp)))
@@ -1142,8 +1137,8 @@ how banked lines reach csvdt as a single file.  Ranges below the buffer's
 header are sent with that header in front of them, so csvdt does not take
 the first selected row for one.  On failure the exit status and csvdt's
 own message are reported, since it writes a specific reason for every
-refusal; on success anything csvdt said on stderr -- how much did not
-convert, rows a re-read would take for comments -- is shown with the
+refusal; on success anything csvdt said on stderr (how much did not
+convert, rows a re-read would take for comments) is shown with the
 summary rather than thrown away.
 SNAPPED says the caller's raw selection had a boundary inside a line, so
 the run covers whole rows the selection only touched.  The commands
@@ -1169,14 +1164,14 @@ normalised ranges are already whole lines and carry no sign of it."
          ;; Whole lines are not yet whole records, though, because a quoted
          ;; field may hold newlines and then one record covers several lines.
          ;; A range that begins inside such a field looks like a row and is
-         ;; the tail of one; it converted cleanly and reported success, with
-         ;; the cut field arriving as data nobody wrote. Pushed out to the
-         ;; record boundaries instead, and said, since the run then covers
+         ;; the tail of one; it would convert cleanly and report success, with
+         ;; the cut field arriving as data nobody wrote. It is pushed out to
+         ;; the record boundaries instead, and said, since the run then covers
          ;; more than was selected.
          (dialect (csvdt--dialect args))
          ;; Merged again afterwards: widening can bring two ranges onto the
-         ;; same record, and sending it once per range put a duplicate row
-         ;; in the output that nothing else would have questioned.
+         ;; same record, and sending it once per range would put a duplicate
+         ;; row in the output that nothing else would question.
          (recorded (csvdt--drop-covered
                     (mapcar (lambda (range)
                               (csvdt--whole-records (car range) (cdr range)
@@ -1198,9 +1193,10 @@ normalised ranges are already whole lines and carry no sign of it."
          ;; Bound again inside the assemble path below, since a let-binding
          ;; made here binds whatever binding the SOURCE buffer has, and a
          ;; buffer-local one leaves the temp buffer that assembles the text
-         ;; seeing the global value instead.  A source buffer that had set
-         ;; either variable locally therefore sent latin-1 to a program that
-         ;; refuses it, and the run died on csvdt's invalid-UTF-8 error.
+         ;; seeing the global value instead.  A source buffer that sets
+         ;; either variable locally would send latin-1 to a program that
+         ;; refuses it, and the run would die on csvdt's invalid-UTF-8
+         ;; error.
          (coding-system-for-write 'utf-8-unix)
          (coding-system-for-read 'utf-8-unix)
          ;; Written to a scratch buffer rather than straight into the output
@@ -1245,9 +1241,9 @@ normalised ranges are already whole lines and carry no sign of it."
               ;; its parse_err markers are exactly the diagnostic csvdt's
               ;; own message points at; on a mid-stream abort the partial
               ;; rows show where it stopped.  A shell user has both in
-              ;; front of them, and dropping them left an Emacs user told
-              ;; "the output was written either way" about output no one
-              ;; could see.  Except when the run was fed from the output
+              ;; front of them, and dropping them would leave an Emacs user
+              ;; told "the output was written either way" about output no one
+              ;; can see.  Except when the run was fed from the output
               ;; buffer itself: there its contents are the input, and a
               ;; failed run must not replace the data with its debris.
               (unless (or (zerop (buffer-size result))
@@ -1332,15 +1328,15 @@ normalised ranges are already whole lines and carry no sign of it."
 (defun csvdt-run-region (args)
   "Run csvdt over the active region with ARGS.
 Useful for trying something on a handful of rows before the whole file.
-Every piece of the region, where it has more than one -- see
+Every piece of the region, where it has more than one: see
 `csvdt--region-ranges\='.
 The pieces are normalised first, as the banked ones always were.
 `csvdt--run\=' asks for ranges in buffer order, and a region need not
 report them that way: `region-bounds\=' does, but a package hooking
 `region-extract-function\=' defines its own selection and may report the
 pieces in any order, overlapping, or naming nothing at all.  Handing those
-straight on sent rows out of buffer order -- which csvdt reads, where it
-measures between consecutive rows, as the order the events happened in --
+straight on sent rows out of buffer order (which csvdt reads, where it
+measures between consecutive rows, as the order the events happened in)
 and sent a line covered by two pieces twice."
   (interactive (list (csvdt--read-arguments)))
   (let* ((pieces (csvdt--region-ranges))
@@ -1396,7 +1392,7 @@ not send a line twice.  With neither, the whole buffer."
 (defun csvdt--describe-dialect ()
   "The dialect a run started from the prefilled arguments would read with.
 Which character quotes a field, and which separates them, decide where a
-record ends -- and `csvdt-describe-run' answers before any argument line
+record ends, and `csvdt-describe-run' answers before any argument line
 has been typed, so `csvdt-default-arguments' is the best statement of
 intent available to it.  A prefill that will not split is not worth
 failing this command over, since it is the one command that must not
@@ -1411,8 +1407,8 @@ whose own arguments name another may cover a little more than described."
   "Say what a run would cover, without running anything.
 For when the output covers more or less than expected: it reports what
 this package can see, which is not always what the buffer looks like.
-Lines that merely look banked -- highlighted by something else, or banked
-by a package `csvdt-banked-lines-function' does not point at -- are not
+Lines that merely look banked (highlighted by something else, or banked
+by a package `csvdt-banked-lines-function' does not point at) are not
 banked as far as csvdt is concerned, and this says so.
 
 Counted the way a run counts: whole records, so a stretch reaching into a
@@ -1421,12 +1417,11 @@ field that spans lines is described as reaching over all of it."
   (let* ((dialect (csvdt--describe-dialect))
          ;; Settled the way a run settles them: normalised, then widened out
          ;; to whole records and merged again. Stopping at the normalising
-         ;; was right when a record was a line and wrong afterwards: two
-         ;; banked lines inside one record that spans several were described
-         ;; as two stretches of one line where the run makes one stretch of
-         ;; three. This command is reached for when a run covered something
-         ;; unexpected, so being wrong exactly where the run is surprising is
-         ;; the one thing it cannot afford.
+         ;; would describe two banked lines inside one record that spans
+         ;; several as two stretches of one line, where the run makes one
+         ;; stretch of three. This command is reached for when a run covered
+         ;; something unexpected, so being wrong exactly where the run is
+         ;; surprising is the one thing it cannot afford.
          (settle
           (lambda (rs)
             (csvdt--drop-covered
@@ -1475,16 +1470,14 @@ which is not defined"
            (banked (funcall describe banked))
            (t "nothing reported -- lines that look banked may not be"))
      (if region (funcall describe region) "none")
-     ;; The run says this and this did not, which is the wrong way round:
-     ;; the command exists to be asked *before* a run, and a record the
-     ;; narrowing has cut in half is the plainest case of what it promises
-     ;; to report: what this package can see differing from what the
-     ;; buffer looks like. Only when there is one, so an ordinary buffer's
-     ;; answer is the sentence it always was.
-     ;; The note as its own sentence rather than under a "Narrowing:"
-     ;; label, which read "Narrowing: last record cut short by the
-     ;; narrowing". One phrasing is the point of the helper, so it is the
-     ;; label that goes.
+     ;; The run says this too, but the command exists to be asked *before*
+     ;; a run, and a record the narrowing has cut in half is the plainest
+     ;; case of what it promises to report: what this package can see
+     ;; differing from what the buffer looks like. Only when there is one,
+     ;; so an ordinary buffer's answer is unchanged.
+     ;; The note is its own sentence, not under a "Narrowing:" label, which
+     ;; would read "Narrowing: last record cut short by the narrowing".  One
+     ;; phrasing is the point of the helper.
      (if cut
          (let ((note (csvdt--cut-note cut)))
            (format "  %s%s." (upcase (substring note 0 1)) (substring note 1)))

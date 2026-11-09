@@ -5,7 +5,7 @@
 ;;; Commentary:
 
 ;; Drives the minibuffer with real key sequences, which `emacs --batch' cannot
-;; do -- it reads its own stdin, so a macro never reaches a minibuffer.  Run
+;; do: it reads its own stdin, so a macro never reaches a minibuffer.  Run
 ;; from this directory under a pty:
 ;;
 ;;     ./tty-test.sh
@@ -51,7 +51,7 @@ the ones it did reach said.")
 ;; A header and a timestamp, so that whether "-H -p" survived is visible in the
 ;; output: with it the header is named after the action, without it the header
 ;; is parsed as data and comes back as a parse error marker.  The plain buffer
-;; cannot show the difference -- an action-free run looks the same either way.
+;; cannot show the difference: an action-free run looks the same either way.
 (defconst csvdt-tty-timestamps "ts,other\n2026-07-25T12:00:00+02:00,x\n")
 
 ;; Several rows, so that a selection covering some of them can be told from
@@ -77,7 +77,7 @@ than what landed in the output buffer can still be typed for real."
        (define-key map (kbd "C-c d") #'csvdt-run-dwim)
        map))
     ;; The region has to be live for the commands that look
-    ;; for one, and -Q leaves the mode on -- but a run that
+    ;; for one, and -Q leaves the mode on, but a run that
     ;; inherited it off would quietly test the fallback path
     ;; three times instead.
     (transient-mark-mode 1)
@@ -189,7 +189,7 @@ went and not what some earlier one left behind."
 
   ;; A region marked with real keys.  Every check above runs the whole
     ;; buffer, and the batch tests reach the region by setting the mark
-    ;; themselves -- which is the one thing they cannot do the way a person
+    ;; themselves, which is the one thing they cannot do the way a person
     ;; does it.  `use-region-p' consults `transient-mark-mode' and whether
     ;; the mark was activated by a command, and only the command loop
     ;; settles either, so a region that is live here may be dead in batch
@@ -223,12 +223,12 @@ went and not what some earlier one left behind."
                      "a,b\n0,zero\n1,one\n2,two\n3,three\n"
                      "C-c d"))
 
-  ;; Counted, not just tallied.  ALL PASS was printed whenever nothing had
-  ;; failed, which is also true of a run where nothing was tried -- a check
+  ;; Counted, not just tallied. ALL PASS would be printed whenever nothing had
+  ;; failed, which is also true of a run where nothing was tried: a check
   ;; commented out while something was being chased, a `let' that returned
-  ;; early, an edit that left the calls unreachable.  This file is the only
-  ;; keystroke cover there is, and it runs under a pty in CI where nobody
-  ;; reads the lines above the verdict.
+  ;; early, an edit that left the calls unreachable. This file is the only
+  ;; keystroke cover there is, and it runs under a pty in CI where nobody reads
+  ;; the lines above the verdict.
   (setq csvdt-tty-ran (length csvdt-tty-log))
   (let* ((ran csvdt-tty-ran)
          (expected csvdt-tty-expected)

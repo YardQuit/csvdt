@@ -154,16 +154,16 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   (test-csvdt-check "a cache recorded against another program is re-read"
                     (member "--stale" (csvdt-options)) nil)
 
-  ;; This binary's path, another mtime -- what a rebuild leaves behind.
+  ;; This binary's path, another mtime: what a rebuild leaves behind.
   ;; A time in the past rather than a touch, so the file is not written to.
   (setq csvdt--options-cache
         (list program (time-subtract mtime 5) version stale))
   (test-csvdt-check "and a cache recorded against another mtime likewise"
                     (member "--stale" (csvdt-options)) nil)
 
-  ;; What the refill holds is this binary's own, version included -- the
-  ;; version is carried for anything that wants to say which csvdt the
-  ;; records came from, and is no longer what the lookup is keyed on.
+  ;; What the refill holds is this binary's own, version included: the version
+  ;; is carried for anything that wants to say which csvdt the records came
+  ;; from, and is not what the lookup is keyed on.
   (test-csvdt-check "the refill is this binary's options"
                     (and (member "-H" (csvdt-options)) t) t)
   (test-csvdt-check "and its version, not the one the stale cache claimed"
@@ -203,9 +203,10 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; Either quote character, because the examples people paste come from a shell
 ;;
-;; Only the double one used to be understood, so a pasted '#' arrived as three
-;; characters and csvdt refused it -- loudly, and with the stray quotes visible
-;; in the message, but for a reason about this prompt rather than the option.
+;; A single-quoted run is understood as well as a double-quoted one, so a
+;; pasted '#' arrives as one character. Otherwise csvdt would refuse it as
+;; three, loudly and with the stray quotes visible in the message, but for a
+;; reason about this prompt rather than the option.
 
 (dolist (case '(("--comment '#'" ("--comment" "#"))
                 ("-H -p --comment '#'" ("-H" "-p" "--comment" "#"))
@@ -229,7 +230,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;; The two differ as they do in a shell: a single-quoted run is literal
 ;; throughout, a double-quoted one honours backslash escapes.  That difference
-;; is how a lone quote character is written -- by wrapping it in the other kind.
+;; is how a lone quote character is written: by wrapping it in the other kind.
 (dolist (case '(("'a\\b'" ("a\\b"))
                 ("'\"'" ("\""))
                 ("\"'\" " ("'"))))
@@ -249,9 +250,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     (csvdt--split-arguments (car case))
                     (cadr case)))
 
-;; And inside a double-quoted run the escapes are the shell-familiar set --
-;; \t \n \r \\ \" -- read by `split-string-and-unquote' once they pass, so
-;; each means what it would in a shell and nothing else gets to mean anything.
+;; And inside a double-quoted run the escapes are the shell-familiar set (\t \n
+;; \r \\ \") read by `split-string-and-unquote' once they pass, so each means
+;; what it would in a shell and nothing else gets to mean anything.
 (dolist (case '(("--print-delimiter \"\\t\"" ("--print-delimiter" "\t"))
                 ("\"a\\nb\"" ("a\nb"))
                 ("\"a\\rb\"" ("a\rb"))
@@ -666,13 +667,13 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
              csvdt-read-delimiter-options)
  nil)
 
-;; How many of them there are is written down in three places outside this
-;; file -- csvdt.el's own commentary, the README, and the description of the
-;; emacs-csvdt subpackage in the rpm spec -- and all three said the wrong
-;; number for as long as there were more than one.  The checks above hold
-;; each list to options csvdt still reports, and the check below holds the
-;; file to naming no others, but neither notices a fourth list being added
-;; beside them, which is what the prose would then be wrong about.
+;; The number of these lists is written down in three places outside this file
+;; (csvdt.el's own commentary, the README, and the description of the
+;; emacs-csvdt subpackage in the rpm spec), and all three must give the right
+;; number. The checks above hold each list to options csvdt still reports, and
+;; the check below holds the file to naming no others, but neither notices a
+;; fourth list being added beside them, which is what the prose would then be
+;; wrong about.
 ;;
 ;; So the count is pinned.  A fourth is not forbidden: it fails here, and the
 ;; sentence in each of those three places is what wants writing before this
@@ -683,7 +684,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
           (lambda (symbol)
             ;; A list of strings, one of which opens with a dash. The other
             ;; defcustoms hold a string, a symbol, t or nil, and a symbol is
-            ;; not a sequence to look through -- hence the `listp' first.
+            ;; not a sequence to look through: hence the `listp' first.
             (let ((value (symbol-value symbol)))
               (and (listp value)
                    (seq-some (lambda (item)
@@ -780,12 +781,12 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; The package is one package.el can install
 
-;; Every convention of an installable package was here -- lexical binding, an
-;; Author, a URL, Package-Requires, an SPDX line, a Commentary, eight
-;; `;;;###autoload' cookies and a provide -- except the Version header
-;; package.el actually requires.  Without it `package-buffer-info' refuses the
-;; file outright, so `M-x package-install-file' could not install it and the
-;; autoload cookies were writing autoloads for a path nobody could reach.
+;; The file keeps every convention of an installable package (lexical binding,
+;; an Author, a URL, Package-Requires, an SPDX line, a Commentary, eight
+;; `;;;###autoload' cookies and a provide) and the Version header package.el
+;; requires. Without that header `package-buffer-info' refuses the file
+;; outright, so `M-x package-install-file' could not install it and the
+;; autoload cookies would write autoloads for a path nobody could reach.
 (let ((info (with-temp-buffer
               (insert-file-contents
                (expand-file-name "csvdt.el" test-csvdt-directory))
@@ -797,8 +798,8 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     t))
 
 ;; And the version it carries is csvdt's own.  The README's reason for having
-;; no separate version -- "the copy next to a given csvdt is the one that
-;; matches it" -- is the reason this header has to track the crate rather than
+;; no separate version ("the copy next to a given csvdt is the one that
+;; matches it") is the reason this header has to track the crate rather than
 ;; drift on its own, the same bargain the RPM spec's Version is held to in CI.
 (let* ((crate (with-temp-buffer
                 (insert-file-contents
@@ -825,7 +826,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
       (leaked '()))
   (dolist (option (csvdt-options))
     ;; The three the package calls to ask its questions are necessarily
-    ;; named, and so are the few a defcustom holds -- those are covered by
+    ;; named, and so are the few a defcustom holds: those are covered by
     ;; the staleness checks above.  Every other option must be absent, or
     ;; it could fall out of date.
     ;; As a standalone token: a private function name like
@@ -845,7 +846,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; Banked lines
 ;;
-;; Banking -- picking out lines here and there rather than one stretch -- is
+;; Banking (picking out lines here and there rather than one stretch) is
 ;; another package's job.  What is checked here is that this one asks for them,
 ;; puts them in order, snaps them to whole lines and sends them as one file.
 ;; A list standing in for the banking package is all that needs faking.
@@ -860,7 +861,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; Selection shapes
 ;;
-;; Whatever sets the region -- Emacs itself or a modal editor on top of it --
+;; Whatever sets the region (Emacs itself or a modal editor on top of it)
 ;; reaches this package as `use-region-p\=' and the region bounds, so what
 ;; matters is the shape it leaves behind rather than which package left it.
 
@@ -891,12 +892,11 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; A record is not always a line
 ;;
-;; A quoted field may hold newlines -- an address, a notes column, an
-;; embedded document -- and then one record spans several lines.  Widening
-;; a selection to whole lines is not enough there: a range starting inside
-;; such a field is the tail of a record, and it went out as though it were
-;; a record of its own.  That converted cleanly and reported success, with
-;; a field nobody wrote.
+;; A quoted field may hold newlines (an address, a notes column, an embedded
+;; document) and then one record spans several lines. Widening a selection to
+;; whole lines is not enough there: a range starting inside such a field is the
+;; tail of a record, and would go out as though it were a record of its own.
+;; That converts cleanly and reports success, with a field nobody wrote.
 
 (defconst test-csvdt-spanning
   (concat "h,when\n"
@@ -906,7 +906,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 (with-temp-buffer
   (insert test-csvdt-spanning)
-  ;; Line 3 is "y\",2026-..." -- the back half of record one.
+  ;; Line 3 is "y\",2026-...": the back half of record one.
   (let* ((beg (progn (goto-char (point-min)) (forward-line 2) (point)))
          (end (progn (forward-line 1) (point)))
          (range (csvdt--whole-records beg end ?\" ?,)))
@@ -924,11 +924,10 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                       range (cons beg end))))
 
 (with-temp-buffer
-  ;; Two banked lines inside one record that spans several.  They do not
-  ;; touch, so nothing merges them when the list is normalised -- and then
-  ;; each widens to the same record, which went out once per range: a
-  ;; duplicate row, valid CSV, clean-looking, and nothing in a count to
-  ;; question it.
+  ;; Two banked lines inside one record that spans several. They do not touch,
+  ;; so nothing merges them when the list is normalised, and then each widens
+  ;; to the same record, which would go out once per range: a duplicate row,
+  ;; valid CSV, clean-looking, and nothing in a count to question it.
   (insert "h,when\n\"x\ny\nz\",2026-07-25T12:00:00+02:00\nrow2,2026-07-26T12:00:00+02:00\n")
   (let* ((line (lambda (n)
                  (goto-char (point-min))
@@ -1051,7 +1050,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                       "ts,x\n")))
 
 ;; Overlays are accepted as well as conses, since that is how a banking
-;; package most likely holds them -- and a dead one is dropped rather than
+;; package most likely holds them, and a dead one is dropped rather than
 ;; signalling.
 (with-temp-buffer
   (insert test-csvdt-rows)
@@ -1090,12 +1089,10 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     (concat "csvdt would run over 2 lines in 2 stretches.  "
                             "Banked: 2 lines in 2 stretches.  Region: none.")))
 
-;; Counted the way a run counts, which since records may span lines means
-;; whole records.  Stopping at the normalising described two banked lines
-;; inside one such record as two stretches of one line, where the run makes
-;; one stretch of three -- and this is the command reached for when a run
-;; covered something unexpected, so being wrong exactly where the run is
-;; surprising is the one thing it cannot afford.
+;; Counted the way a run counts, which since records may span lines means whole
+;; records. Describing two banked lines inside one such record as two stretches
+;; of one line would be wrong where the run makes one stretch of three, and
+;; this is the command reached for when a run covered something unexpected.
 (with-temp-buffer
   (insert "h,when\n\"x\ny\nz\",2026-07-25T12:00:00+02:00\n"
           "row2,2026-07-26T12:00:00+02:00\n")
@@ -1174,7 +1171,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                       t))
 
   ;; An overlay from elsewhere describes positions in that buffer, which mean
-  ;; something else here -- and would be clamped into range rather than
+  ;; something else here, and would be clamped into range rather than
   ;; refused, so the run would quietly cover lines nobody picked out.
   (let ((elsewhere (generate-new-buffer "csvdt-elsewhere")))
     (with-current-buffer elsewhere (insert "not this buffer at all\n"))
@@ -1260,18 +1257,18 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     t))
 
 ;; A stretch that does not end in a newline must not run into the one sent
-;; after it.  No command can arrange that: the ranges are normalised into
-;; buffer order first, so the only stretch that can end without a newline --
-;; the one reaching the end of the buffer -- is always the last, with nothing
-;; after it to be joined onto and csvdt supplying the terminator itself.  The
-;; guard is `csvdt--run's, and buffer order is something its docstring asks
-;; for rather than something it imposes, so that is where the question is put:
-;; the newline-less line first, the line above it second.  Without the guard
-;; the two arrive as "3,41,2", one row made out of both.
+;; after it. No command can arrange that: the ranges are normalised into buffer
+;; order first, so the only stretch that can end without a newline (the one
+;; reaching the end of the buffer) is always the last, with nothing after it to
+;; be joined onto and csvdt supplying the terminator itself. The guard is
+;; `csvdt--run's, and buffer order is something its docstring asks for rather
+;; than something it imposes, so that is where the question is put: the
+;; newline-less line first, the line above it second. Without the guard the
+;; two arrive as "3,41,2", one row made out of both.
 (with-temp-buffer
   (insert "a,b\n1,2\n3,4")
   ;; No header option, so nothing is prepended and the two lines are all that
-  ;; comes back -- which is what makes a join visible if there is one.
+  ;; comes back, which is what makes a join visible if there is one.
   (csvdt--run (list (test-csvdt-line-bounds 3) (test-csvdt-line-bounds 2)) '())
   (test-csvdt-check "a stretch without a final newline does not join the next"
                     (test-csvdt-output) "3,4\n1,2\n"))
@@ -1376,12 +1373,12 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; A region's pieces are normalised, as the banked ones always were
 ;;
-;; `csvdt--run' asks for ranges in buffer order.  `region-bounds' reports them
+;; `csvdt--run' asks for ranges in buffer order. `region-bounds' reports them
 ;; that way, but a package hooking `region-extract-function' defines its own
 ;; selection and is under no such obligation: its pieces may arrive in any
-;; order, overlapping, or naming nothing.  Only the banked path normalised, so
-;; the region path handed them straight on -- out of order, and a line covered
-;; by two pieces sent twice.
+;; order, overlapping, or naming nothing. The region path normalises them like
+;; the banked path does, so none arrives out of order or sends a line covered
+;; by two pieces twice.
 
 (with-temp-buffer
   (insert test-csvdt-rows)
@@ -1403,7 +1400,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     (length (csvdt--region-ranges)) 3)
   (test-csvdt-typed "-u0 -i 0,replace"
     (call-interactively #'csvdt-run-region))
-  ;; Buffer order, and row 2 once. Unnormalised this was c, a, b, b -- which
+  ;; Buffer order, and row 2 once. Unnormalised this would be c, a, b, b, which
   ;; a conversion measuring between consecutive rows would read as the order
   ;; the events happened in.
   (test-csvdt-check "a run over them is in buffer order, with no line twice"
@@ -1413,7 +1410,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                             "2026-07-25T12:00:00+00:00,c\n")))
 
 ;; A rectangle's pieces are one per line and contiguous once widened, so a run
-;; makes one stretch of them -- and the command that says what a run would
+;; makes one stretch of them, and the command that says what a run would
 ;; cover has to agree with the run about that.
 (with-temp-buffer
   (insert test-csvdt-rows)
@@ -1432,9 +1429,8 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   (test-csvdt-check "but they normalise to the one stretch a run covers"
                     (length (csvdt--normalise-ranges (csvdt--region-ranges))) 1)
   ;; And the command that exists to say what a run would cover says the same
-  ;; number.  Describing the raw pieces instead reported a three-line
-  ;; rectangle as three stretches where the run makes one -- the one place
-  ;; the two are printed side by side and could disagree.
+  ;; number. Describing the raw pieces instead would report a three-line
+  ;; rectangle as three stretches where the run makes one.
   (test-csvdt-check "and describe-run counts them the way the run does"
                     (current-message-of (csvdt-describe-run))
                     (concat "csvdt would run over 3 lines in 1 stretch.  "
@@ -1446,7 +1442,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (with-temp-buffer
   (insert test-csvdt-rows)
   (setq-local transient-mark-mode t)
-  ;; A real, non-empty region -- otherwise `use-region-p' is nil and this
+  ;; A real, non-empty region: otherwise `use-region-p' is nil and this
   ;; never reaches the piece at all.
   (goto-char (point-min))
   (push-mark (point) t t)
@@ -1516,7 +1512,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
     (forward-char 5)
     (csvdt--run (list (cons beg (point))) '("-H" "-p")))
   ;; The region began at the first data row and ended five characters into the
-  ;; second, so both come out whole -- the partial one included rather than
+  ;; second, so both come out whole: the partial one included rather than
   ;; truncated or dropped.
   (test-csvdt-check "a region ending mid-row takes that row whole"
                     (test-csvdt-output)
@@ -1644,7 +1640,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 ;; The same table read the other way round, with a filename after the option:
 ;; one carrying its own value leaves the word after it where the filename
 ;; goes, and that word has to still be reported.  Taking every option for one
-;; that eats the next argument, "-u0 other.csv" stops being flagged -- csvdt
+;; that eats the next argument, "-u0 other.csv" stops being flagged: csvdt
 ;; reads that file, ignores the selection, and the output buffer looks exactly
 ;; like a successful run on the lines nobody sent.
 (let ((elsewhere (make-temp-file "test-csvdt-other" nil ".csv" "z,z\n9,9\n")))
@@ -1657,7 +1653,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;; The check only reports what csvdt would really open. A word left where the
 ;; filename goes that names nothing is left to csvdt, whose own message for it
-;; is better than a guess from here -- it names the option the word belongs to.
+;; is better than a guess from here: it names the option the word belongs to.
 (test-csvdt-check "a word that is not a file is left to csvdt"
                   (csvdt--file-arguments (list "-H" "-p" "-f" "fix"))
                   nil)
@@ -1681,9 +1677,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
  t)
 
 ;; A sequence the Lisp reader DOES know is refused all the same when it is
-;; outside the shell-familiar set: \d is DEL to the reader, so "C:\data"
-;; sailed through as C:<DEL>ata -- the same path as above, corrupted rather
-;; than caught, depending on the letter after the backslash.
+;; outside the shell-familiar set: \d is DEL to the reader, so "C:\data" would
+;; otherwise pass as C:<DEL>ata, corrupted rather than caught, depending on the
+;; letter after the backslash.
 (test-csvdt-check
  "a valid Lisp escape outside the shell set is refused, not read"
  (condition-case err
@@ -1700,7 +1696,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
  '("-x" "a\tb\nc"))
 
 ;; The declared Emacs 27.1 stays true by construction: the two calls that
-;; broke it must not come back.  Their names in comments are fine -- this
+;; broke it must not come back.  Their names in comments are fine: this
 ;; looks for call positions.
 (let ((source (with-temp-buffer
                 (insert-file-contents (expand-file-name "csvdt.el"
@@ -1717,8 +1713,8 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (test-csvdt-check "k is bound to csvdt-run-banked"
                   (lookup-key csvdt-command-map "k") #'csvdt-run-banked)
 
-;; "-fH" is two flags to clap -- -f's value must be attached with "=", so
-;; nothing after it in a cluster can be one -- and the header-carry logic has
+;; "-fH" is two flags to clap (-f's value must be attached with "=", so
+;; nothing after it in a cluster can be one) and the header-carry logic has
 ;; to see the -H in it.  "-uH" is -u with an attached value, and must not.
 (test-csvdt-check "-fH asks for a header"
                   (and (csvdt--header-requested-p '("-fH")) t) t)
@@ -1761,7 +1757,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
     (delete-file plain)))
 
 ;; A bare name is looked for along `exec-path', which is not the PATH of the
-;; shell that started Emacs unless something arranged for it to be -- the
+;; shell that started Emacs unless something arranged for it to be: the
 ;; usual reason a program on the terminal's PATH is not found here.
 (test-csvdt-check
  "a bare name that is nowhere names exec-path"
@@ -1786,8 +1782,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
  t)
 
 ;; The option cache is keyed on the binary's path and mtime, so a warm lookup
-;; spawns nothing -- it used to run `csvdt --version' per call -- and touching
-;; the binary invalidates it.
+;; spawns nothing and touching the binary invalidates it.
 (csvdt--option-records)
 (let ((spawns 0))
   (cl-letf* ((real (symbol-function 'call-process))
@@ -1815,8 +1810,8 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   (delete-file copy))
 
 ;; What csvdt says on stderr about a successful run reaches the summary
-;; message, and a mid-line selection is reported as widened again -- the
-;; notice was dead while every command handed csvdt--run pre-widened ranges.
+;; message, and a mid-line selection is reported as widened, though every
+;; command hands csvdt--run pre-widened ranges.
 (defvar test-csvdt-last-message nil)
 (defun test-csvdt-capture-message (format &rest arguments)
   (when format
@@ -1876,10 +1871,10 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; An end at end-of-line is whole
 ;;
-;; An overlay covering a line usually stops before the newline -- the shape
-;; `csvdt-banked-lines-from-overlays' reports -- and the boundary check called
-;; that end mid-line, so every banked run said "selection widened to whole
-;; lines" about rows that were whole.
+;; An overlay covering a line usually stops before the newline, the shape
+;; `csvdt-banked-lines-from-overlays' reports, and the boundary check must not
+;; call that end mid-line, or every banked run would say "selection widened to
+;; whole lines" about rows that were whole.
 
 (with-temp-buffer
   (insert "a,1\nb,2\nc,3\n")
@@ -1939,8 +1934,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 ;;; The third audit round, each fix pinned
 
 ;; A pasted line's trailing newline is a separator, not part of the last
-;; argument -- split-string-and-unquote always split on them, and the
-;; rewritten splitter regressed that.
+;; argument, as `split-string-and-unquote' treats it.
 (dolist (case '(("-H -p -u0\n" ("-H" "-p" "-u0"))
                 ("-H\n-p" ("-H" "-p"))
                 ("-H\r\n-p" ("-H" "-p"))))
@@ -1948,9 +1942,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     (csvdt--split-arguments (car case))
                     (cadr case)))
 
-;; The option cache keys on the truename's mtime, so a binary rebuilt
-;; behind a stable symlink invalidates it -- the link's own mtime never
-;; moves, and keying on it served stale records until Emacs restarted.
+;; The option cache keys on the truename's mtime, so a binary rebuilt behind a
+;; stable symlink invalidates it: the link's own mtime never moves, and keying
+;; on it would serve stale records until Emacs restarts.
 (let* ((dir (make-temp-file "csvdt-lnk" t))
        (copy (concat dir "/real-csvdt"))
        (link (concat dir "/csvdt")))
@@ -2019,10 +2013,10 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; Round five, each fix pinned
 
-;; An '=' anywhere means option=value to clap, never a cluster -- scanned
-;; as one, "-f=keep" yielded junk flags, and a customised
-;; csvdt-header-options naming a letter the value held prepended the
-;; buffer header to a run that never asked for one.
+;; An '=' anywhere means option=value to clap, never a cluster: scanned as one,
+;; "-f=keep" would yield junk flags, and a customised csvdt-header-options
+;; naming a letter the value held would prepend the buffer header to a run that
+;; never asked for one.
 (test-csvdt-check "-f=keep is not a flag cluster"
                   (csvdt--short-flags "-f=keep") nil)
 (test-csvdt-check "and cannot trip a customised header option"
@@ -2032,9 +2026,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (test-csvdt-check "a real cluster still scans"
                   (csvdt--short-flags "-Hp") '("-H" "-p"))
 
-;; A zero-width piece widens to its entire containing line -- a row the
-;; selection held no character of, the largest widening there is -- and
-;; was the one case the widened notice stayed silent about.
+;; A zero-width piece widens to its entire containing line (a row the selection
+;; held no character of, the largest widening there is), and the widened notice
+;; must say so.
 (with-temp-buffer
   (insert "a,1\nb,2\nc,3\n")
   (test-csvdt-check "an empty piece mid-line is the largest widening"
@@ -2050,11 +2044,11 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; Rounds eight and nine, each fix pinned
 
-;; A name carrying a directory part means that file -- execvp's rule, and
-;; the shell's.  `executable-find' does not hold to it: handed "./csvdt",
-;; it joins the name onto every `exec-path' entry, so a same-named binary
-;; installed anywhere on PATH silently won over the file the user actually
-;; named.  Two fakes with the same name, and the one on PATH must lose.
+;; A name carrying a directory part means that file: execvp's rule, and the
+;; shell's. `executable-find' does not hold to it: handed "./csvdt", it joins
+;; the name onto every `exec-path' entry, so a same-named binary installed
+;; anywhere on PATH would win over the file that was named. Two fakes with the
+;; same name, and the one on PATH must lose.
 (let ((dir (file-name-as-directory (make-temp-file "csvdt-here" t)))
       (path-dir (file-name-as-directory (make-temp-file "csvdt-on-path" t))))
   (dolist (file (list (concat dir "fake")
@@ -2096,9 +2090,8 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                         (buffer-substring (nth 0 capf) (nth 1 capf))
                         "--arr"))))
 
-;; Formfeed and vertical tab separate arguments, as
-;; `split-string-and-unquote' always had them do -- the rewritten splitter
-;; took newlines back but left these two folded into the argument.
+;; Formfeed and vertical tab separate arguments, as `split-string-and-unquote'
+;; has them do.
 (test-csvdt-check "formfeed and vertical tab separate arguments"
                   (csvdt--split-arguments "a\fb\vc")
                   '("a" "b" "c"))
@@ -2119,7 +2112,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                       (csvdt--normalise-ranges (list (cons (car bounds) end)))
                       (list bounds)))
 
-  ;; A marker from another buffer describes a position there, not here --
+  ;; A marker from another buffer describes a position there, not here:
   ;; the foreign overlay's treatment, for the same reason.
   (let ((elsewhere (generate-new-buffer "csvdt-marker-elsewhere")))
     (with-current-buffer elsewhere (insert "not this buffer at all\n"))
@@ -2143,9 +2136,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                       (user-error (and (string-match-p "neither" (cadr err)) t)))
                     t))
 
-;; Everything after "--" is positional to clap, so an -H there is a
-;; filename, not the option -- and scanning past the separator prepended
-;; the buffer's header to a run that never asked for one.
+;; Everything after "--" is positional to clap, so an -H there is a filename,
+;; not the option, and scanning past the separator would prepend the buffer's
+;; header to a run that never asked for one.
 (test-csvdt-check "-H before -- asks for a header"
                   (and (csvdt--header-requested-p '("-H" "--")) t) t)
 (test-csvdt-check "-H after -- is positional, not the option"
@@ -2205,11 +2198,10 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; Round ten, each fix pinned
 
-;; csvdt--run pins the process coding to UTF-8 in both directions, but
-;; csvdt--output-of -- through which --help, --list-options and --version
-;; arrive -- left decoding to the locale.  --help held a curly quote, so a
-;; latin-1 locale read its UTF-8 bytes as three characters of mojibake in
-;; the help buffer.
+;; csvdt--run pins the process coding to UTF-8 in both directions, and
+;; csvdt--output-of (through which --help, --list-options and --version arrive)
+;; must do the same, or a latin-1 locale reads UTF-8 bytes as mojibake in the
+;; help buffer.
 ;;
 ;; Asked of a stub rather than of csvdt itself.  This used to read csvdt's
 ;; own --help for the quote, and then the help corpus was made ASCII, which
@@ -2235,11 +2227,10 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                         t)))
   (delete-file stub))
 
-;; A run that exited non-zero had its output discarded.  On the
-;; nothing-converted exit csvdt writes the output in full, and its own
-;; message -- relayed verbatim -- points at the parse_err markers in it:
-;; dropping them left an Emacs user told "the output was written either way"
-;; about output no one could see.
+;; A run that exited non-zero keeps its output. On the nothing-converted exit
+;; csvdt writes the output in full, and its own message, relayed verbatim,
+;; points at the parse_err markers in it: dropping them would leave an Emacs
+;; user told "the output was written either way" about output no one can see.
 (when (get-buffer "*csvdt output*")
   (kill-buffer "*csvdt output*"))
 (with-temp-buffer
@@ -2276,7 +2267,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;; Feeding a result back through csvdt can fail too, and there the output
 ;; buffer's contents are the input: a failed run must not replace the data
-;; with its debris -- this failure writes rows, so without the guard it would.
+;; with its debris: this failure writes rows, so without the guard it would.
 (with-current-buffer (get-buffer-create "*csvdt output*")
   (erase-buffer)
   (insert "a,b\nx,2\n")
@@ -2289,13 +2280,13 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; Round eleven, each fix pinned
 
-;; The UTF-8 commitment was made with a let-binding in the source buffer,
-;; which binds whatever binding that buffer has: a buffer that had set
-;; either coding variable locally left the temp buffer where the assemble
-;; path -- a header carried, or more than one stretch -- actually starts the
-;; process seeing the global value instead.  Under a latin-1 locale that
-;; sent latin-1 bytes to a program that refuses them, and the run died on
-;; csvdt's invalid-UTF-8 error rather than converting anything.
+;; The UTF-8 commitment is made with a let-binding in the source buffer, which
+;; binds whatever binding that buffer has: a buffer that has set either coding
+;; variable locally would leave the temp buffer where the assemble path (a
+;; header carried, or more than one stretch) starts the process seeing the
+;; global value instead. Under a latin-1 locale that sends latin-1 bytes to a
+;; program that refuses them, and the run dies on csvdt's invalid-UTF-8 error
+;; instead of converting anything.
 (with-temp-buffer
   ;; U+00E9 by code point, as above, so the test does not depend on how this
   ;; file itself was decoded.
@@ -2334,7 +2325,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (with-temp-buffer
   (insert "a,b\n1,2\n3,4\n")
   ;; Narrowed to stop just after the last row's comma, so what is reachable
-  ;; of that record is "3," -- half a row, with no whole line to widen to.
+  ;; of that record is "3,": half a row, with no whole line to widen to.
   (narrow-to-region (point-min) (- (point-max) 2))
   (test-csvdt-check "a narrowing ending mid-line cuts the last record"
                     (and (csvdt--narrowing-cuts-record-p
@@ -2372,18 +2363,17 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;; The same cut at the other end.
 ;;
-;; Only the end of the accessible portion was asked about, so a narrowing
-;; that begins mid-record went unreported -- and it is the same cut, with
-;; the same two ways of happening.  Mid-line, csvdt sees a short first
-;; record and says so about a line, which sends the reader looking at data
-;; that is not the matter.  Inside a quoted field it was worse: the run
-;; succeeded, exit 0, with the first record's opening half out of reach and
-;; nothing said at all.
+;; The start of the accessible portion is asked about as well as the end, since
+;; a narrowing that begins mid-record is the same cut, with the same two ways
+;; of happening. Mid-line, csvdt sees a short first record and says so about a
+;; line, which sends the reader looking at data that is not the matter. Inside
+;; a quoted field it is worse: the run would succeed, exit 0, with the first
+;; record's opening half out of reach and nothing said at all.
 
 (with-temp-buffer
   (insert "a,b\n1,2\n3,4\n")
   ;; Beginning one character into the second line: what is reachable of
-  ;; that record is ",2" -- half a row, with no whole line to widen back to.
+  ;; that record is ",2": half a row, with no whole line to widen back to.
   (narrow-to-region (+ (point-min) 5) (point-max))
   (test-csvdt-check "a narrowing beginning mid-line cuts the first record"
                     (csvdt--narrowing-cuts-record-p
@@ -2440,10 +2430,10 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;; And `csvdt-describe-run' says it too.
 ;;
-;; The run reported the cut and the command for asking *before* a run did
-;; not, which is the wrong way round: a record the narrowing has cut in half
-;; is the plainest case of what that command promises to report -- what this
-;; package can see differing from what the buffer looks like.
+;; The run reports the cut, and so does the command for asking *before* a run:
+;; a record the narrowing has cut in half is the plainest case of what that
+;; command promises to report, which is what this package can see differing
+;; from what the buffer looks like.
 
 (with-temp-buffer
   (insert "a,b\n1,2\n3,4\n")
@@ -2479,7 +2469,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (with-temp-buffer
   ;; And the failure carries it, which is the case the check is for: csvdt
   ;; refuses the ragged record and names a line, and the line is not the
-  ;; matter -- the half of it out of reach is.
+  ;; matter: the half of it out of reach is.
   (insert "a,b,c\n1,2,3\n4,5,6\n")
   (narrow-to-region (+ (point-min) 8) (point-max))
   (test-csvdt-check "a failed run names the cut as well"
@@ -2495,12 +2485,12 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     t))
 
 (with-temp-buffer
-  ;; The cut that looked tidy: a narrowing ending exactly at a line
-  ;; boundary which is nonetheless inside a quoted field.  Whole lines are
-  ;; reachable, so the mid-line test saw nothing, while the record they
-  ;; belong to was severed all the same -- and asked to accept ragged
-  ;; records, csvdt took the truncated one rather than refusing it, so the
-  ;; field came back short of its second half at exit 0.
+  ;; The cut that looks tidy: a narrowing ending exactly at a line boundary
+  ;; which is nonetheless inside a quoted field. Whole lines are reachable, so
+  ;; a mid-line test sees nothing, while the record they belong to is severed
+  ;; all the same, and asked to accept ragged records, csvdt would take the
+  ;; truncated one rather than refusing it, so the field comes back short of
+  ;; its second half at exit 0.
   (insert "h,when\n\"x\ny\",2026-07-25T12:00:00+02:00\nrow2,2026-07-26T12:00:00+02:00\n")
   (narrow-to-region (point-min)
                     (progn (goto-char (point-min)) (forward-line 2) (point)))
@@ -2600,10 +2590,10 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; An output mode that signals costs no more than one that is missing
 
-;; A mode that does not exist has always left the buffer plain; one that
-;; exists and then signals took the whole run report with it -- no line
-;; count, no stderr notes, no window -- leaving the result in a buffer
-;; nobody was shown.  Both failures end the same way now.
+;; A mode that does not exist leaves the buffer plain; one that exists and then
+;; signals must not take the whole run report with it (the line count, the
+;; stderr notes, the window) and leave the result in a buffer nobody is shown.
+;; Both failures end the same way.
 
 (defun test-csvdt-exploding-mode ()
   ;; Half applied and then signalling, which is what a mode whose hook
@@ -2653,7 +2643,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (let ((before (test-csvdt-stderr-files)))
   (with-temp-buffer
     (insert "a,b\n1,2\n")
-    ;; Column 9 is out of bounds, so this one signals on its way out -- and
+    ;; Column 9 is out of bounds, so this one signals on its way out, and
     ;; the file has to go all the same.
     (condition-case nil
         (csvdt--run (list (cons (point-min) (point-max))) '("-H" "-p" "-u9"))
