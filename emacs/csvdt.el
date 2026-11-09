@@ -23,7 +23,7 @@
 ;; buffer is csvdt's own `--help' output, and the completion candidates come
 ;; from `csvdt --list-options', which csvdt prints from its own argument
 ;; definitions for exactly this purpose.  A csvdt that gains an option is
-;; therefore usable from Emacs immediately, with no change to this file --
+;; therefore usable from Emacs immediately, with no change to this file,
 ;; which is the whole point of doing it this way.
 ;;
 ;; Three options are named, in defcustoms, and only because a region run
@@ -164,10 +164,10 @@ say which csvdt the records came from.")
 (defun csvdt--program ()
   "Return the csvdt executable, or signal if it cannot be found."
   ;; A name carrying a directory part means that file, never a PATH
-  ;; search -- execvp's rule, and the shell's.  executable-find does not
+  ;; search, execvp's rule, and the shell's.  executable-find does not
   ;; hold to it: handed "./csvdt", it joins the name onto every
   ;; `exec-path' entry, so a same-named binary installed anywhere on
-  ;; PATH silently won over the file the user actually named.  Only a
+  ;; PATH silently won over the file actually named.  Only a
   ;; bare name is PATH-searched now; anything with a slash is taken as
   ;; the file it names.
   (or (if (file-name-directory csvdt-executable)
@@ -201,7 +201,7 @@ Set `csvdt-executable' to the program itself" csvdt-executable))
        (t
         ;; A bare name is looked for along `exec-path', which is not the
         ;; PATH of the shell that started Emacs unless something arranged
-        ;; for it to be -- the usual reason a program on the terminal's
+        ;; for it to be, which is the usual reason a program on the terminal's
         ;; PATH is not found here.
         (user-error "Cannot find `%s' on `exec-path'.  Set \
 `csvdt-executable' to its full path" csvdt-executable)))))
@@ -214,8 +214,8 @@ break if a future version declines the arguments."
     ;; The same commitment csvdt--run makes: csvdt speaks UTF-8 in both
     ;; directions.  --help held a curly quote when this was written, and
     ;; leaving the decoding to the locale rendered it as mojibake in the help
-    ;; buffer anywhere the locale is not UTF-8.  The help corpus is ASCII now
-    ;; -- the manual page rendered from it has to be -- so nothing in it is
+    ;; buffer anywhere the locale is not UTF-8.  The help corpus is ASCII now,
+    ;; the manual page rendered from it has to be, so nothing in it is
     ;; misread today; this stays because the commitment is to the encoding
     ;; csvdt writes rather than to what it currently happens to say, and any
     ;; non-ASCII returning to --help or --list-options would be corrupted the
@@ -295,7 +295,7 @@ knowledge, rather than mistaking an option's value for one."
         (let ((long (concat "--" (match-string 2))))
           ;; csvdt's own help text names options in its prose, and a wrapped
           ;; line can start with one, so the same option is matched more than
-          ;; once.  First match wins -- that is the entry in the options list,
+          ;; once.  First match wins: that is the entry in the options list,
           ;; the later ones being descriptions of it.
           (unless (seq-find (lambda (record) (equal (plist-get record :long) long))
                             records)
@@ -360,8 +360,8 @@ an argument built without it would be read as a filename instead."
 
 ;; The line is read whole and split the way a shell would, NOT as a
 ;; comma-separated list of arguments.  A comma is csvdt's own separator inside
-;; a value -- a column list, a column-and-position pair, a column-and-offset
-;; pair -- so splitting the line on commas tears those arguments in half and
+;; a value, a column list, a column-and-position pair, a column-and-offset
+;; pair, so splitting the line on commas tears those arguments in half and
 ;; hands csvdt nonsense.  Completion is therefore per token rather than over
 ;; the whole line, which is what TAB in the minibuffer does below.
 
@@ -456,7 +456,7 @@ escaping to be worth more than that."
         (cond
          ;; Whitespace outside quotes ends the argument being gathered.
          ;; Newlines included: a line pasted with its trailing newline used
-         ;; to fold it into the last argument, which csvdt then refused --
+         ;; to fold it into the last argument, which csvdt then refused.
          ;; `split-string-and-unquote\=' split on them, and this must too.
          ;; Formfeed and vertical tab likewise: that function split on
          ;; them, and dropping them from the set would fold one into an
@@ -472,8 +472,8 @@ escaping to be worth more than that."
                           (if (eq char ?')
                               (substring line (1+ index) end)
                             ;; Only the shell-familiar escapes reach the
-                            ;; reader.  It knows more of them -- \d is DEL and
-                            ;; \a is a bell -- so "C:\data" read raw became
+                            ;; reader.  It knows more of them: \d is DEL and
+                            ;; \a is a bell, so "C:\data" read raw became
                             ;; C-followed-by-DEL-ata with no error, while
                             ;; "C:\Users" tripped over \U and was refused: the
                             ;; same path corrupted or caught by the letter
@@ -577,7 +577,7 @@ options are which comes from csvdt itself; when it does not say, none
 are assumed and only whole arguments match."
   (when (and (string-prefix-p "-" argument)
              (not (string-prefix-p "--" argument))
-             ;; An '=' anywhere means option=value to clap -- "-f=keep" is
+             ;; An '=' anywhere means option=value to clap: "-f=keep" is
              ;; -f with an attached mode, never a cluster. Scanned as one it
              ;; yielded junk flags ("-=" "-k" ...), harmless under the
              ;; default `csvdt-header-options\=' but a false header-carry
@@ -675,7 +675,7 @@ stops a correct one."
          (t
           ;; Not "~" paths, though: `file-regular-p' expands the tilde and
           ;; csvdt does not, so csvdt answers such an argument with its own
-          ;; loud cannot-read error -- the silent replacement this check
+          ;; loud cannot-read error, so the silent replacement this check
           ;; exists to catch cannot happen, and flagging it here claimed
           ;; csvdt would read a file it never would.
           (when (and (not (string-empty-p argument))
@@ -708,7 +708,7 @@ one and guessing what was meant would be worse than not."
              ;; The header's whole record, not its first line.  A header
              ;; whose own field holds a newline spans two, and taking one
              ;; of them handed csvdt a fragment opening a quote that never
-             ;; closed -- which swallowed the rows behind it, and failed
+             ;; closed, which swallowed the rows behind it, and failed
              ;; the run for a reason that named neither the header nor the
              ;; field.
              (header-end (cdr (csvdt--whole-records
@@ -892,7 +892,7 @@ with the rows behind it gone."
                   (save-excursion
                     (goto-char finish)
                     ;; At end-of-line only the newline is out of reach, and
-                    ;; the record itself is whole -- csvdt supplies the
+                    ;; the record itself is whole: csvdt supplies the
                     ;; terminator.
                     (not (or (bolp) (eolp)))))))))
     (cond ((and at-start at-end) 'both)
@@ -980,7 +980,7 @@ SOURCE names where ITEMS came from, for the error a malformed one raises;
 it defaults to `csvdt-banked-lines-function\=', which is the usual source
 and the one a reader would think to check."
   ;; The naming below is per item, so a function returning something that
-  ;; is not a list at all -- a vector, a number, a string -- reached dolist
+  ;; is not a list at all, a vector, a number, a string, reached dolist
   ;; and signalled the raw wrong-type-argument this exists to prevent.
   (unless (listp items)
     (user-error "%s reported %S, which is not a list of positions or overlays"
@@ -990,7 +990,7 @@ and the one a reader would think to check."
       ;; nil is tolerated: a package filtering its own list produces them.
       ;; Anything else that is neither a pair of positions nor an overlay
       ;; is a mistake worth naming, rather than a raw wrong-type-argument
-      ;; from inside -- and a cons with junk for an end, (5 . nil) say, is
+      ;; from inside, and a cons with junk for an end, (5 . nil) say, is
       ;; the same mistake in better disguise: it used to pass this check
       ;; and be dropped without a word further down.
       (unless (or (null item) (overlayp item)
@@ -1002,7 +1002,7 @@ and the one a reader would think to check."
       (let ((bounds (csvdt--piece-bounds item)))
         (when bounds
           (let ((range (csvdt--whole-lines (car bounds) (cdr bounds))))
-            ;; A pair naming nothing -- both ends past the buffer, say --
+            ;; A pair naming nothing, both ends past the buffer, say,
             ;; widens to nothing.  Dropped, so it cannot pad the count of
             ;; stretches or make an empty run look like a successful one.
             (when (< (car range) (cdr range))
@@ -1123,7 +1123,7 @@ pulls that entire line in, which is exactly the widening this reports."
          (when bounds
            (let ((low (car bounds))
                  (high (min (cdr bounds) (point-max))))
-             ;; A zero-width piece widens to its entire containing line --
+             ;; A zero-width piece widens to its entire containing line,
              ;; a row the selection held no character of, which is the
              ;; largest widening there is, and was the one case this
              ;; stayed silent about.
@@ -1196,7 +1196,7 @@ normalised ranges are already whole lines and carry no sign of it."
          ;; reach csvdt with stray carriage returns inside its last field.
          ;;
          ;; Bound again inside the assemble path below, since a let-binding
-         ;; made here binds whatever binding the SOURCE buffer has -- and a
+         ;; made here binds whatever binding the SOURCE buffer has, and a
          ;; buffer-local one leaves the temp buffer that assembles the text
          ;; seeing the global value instead.  A source buffer that had set
          ;; either variable locally therefore sent latin-1 to a program that
@@ -1204,7 +1204,7 @@ normalised ranges are already whole lines and carry no sign of it."
          (coding-system-for-write 'utf-8-unix)
          (coding-system-for-read 'utf-8-unix)
          ;; Written to a scratch buffer rather than straight into the output
-         ;; buffer, because they can be the same buffer -- feeding a result
+         ;; buffer, because they can be the same buffer, feeding a result
          ;; back through csvdt is a reasonable thing to do, and erasing the
          ;; output buffer first would take the input away mid-read.
          (result (generate-new-buffer " *csvdt-result*"))
@@ -1259,7 +1259,7 @@ normalised ranges are already whole lines and carry no sign of it."
               ;; With the cut named, because this is the failure the check
               ;; is for: csvdt sees a short record and says so about a line,
               ;; which sends the reader looking at data that is not the
-              ;; matter -- the half of it out of reach is.
+              ;; matter: the half of it out of reach is.
               (user-error "csvdt exited %s: %s%s" status
                           (if (string-empty-p said)
                               "(no message)"
@@ -1311,7 +1311,7 @@ normalised ranges are already whole lines and carry no sign of it."
         ;; otherwise survive it.  Emptying the buffer collapses one to
         ;; zero width rather than removing it, and an overlay that
         ;; advances with text inserted at its end then grows over the
-        ;; whole of the next result -- so a line highlighted for having
+        ;; whole of the next result, so a line highlighted for having
         ;; been banked colours everything that replaces it.  The
         ;; contents they described are gone either way.
         (remove-overlays)
@@ -1377,7 +1377,7 @@ They are merged, so a selection abutting or inside a banked stretch does
 not send a line twice.  With neither, the whole buffer."
   (interactive (list (csvdt--read-arguments)))
   ;; Each list is normalised under its own name, so a malformed piece is
-  ;; blamed on whichever source reported it -- normalising the two together
+  ;; blamed on whichever source reported it, normalising the two together
   ;; pointed every complaint at `csvdt-banked-lines-function\=', including
   ;; for pieces the region supplied.  The merged result is normalised once
   ;; more, which is what merges a selection into a banked stretch it abuts.
@@ -1421,7 +1421,7 @@ field that spans lines is described as reaching over all of it."
   (let* ((dialect (csvdt--describe-dialect))
          ;; Settled the way a run settles them: normalised, then widened out
          ;; to whole records and merged again. Stopping at the normalising
-         ;; was right when a record was a line and wrong afterwards -- two
+         ;; was right when a record was a line and wrong afterwards: two
          ;; banked lines inside one record that spans several were described
          ;; as two stretches of one line where the run makes one stretch of
          ;; three. This command is reached for when a run covered something
@@ -1446,7 +1446,7 @@ field that spans lines is described as reaching over all of it."
          (ranges (funcall settle
                           (csvdt--normalise-ranges (append reported region))))
          ;; Asked of what a run would send, which with nothing banked or
-         ;; selected is the accessible portion -- the same range the run
+         ;; selected is the accessible portion, the same range the run
          ;; passes, so the same answer.
          (cut (csvdt--narrowing-cuts-record-p
                (or ranges (list (cons (point-min) (point-max))))
@@ -1478,7 +1478,7 @@ which is not defined"
      ;; The run says this and this did not, which is the wrong way round:
      ;; the command exists to be asked *before* a run, and a record the
      ;; narrowing has cut in half is the plainest case of what it promises
-     ;; to report -- what this package can see differing from what the
+     ;; to report: what this package can see differing from what the
      ;; buffer looks like. Only when there is one, so an ordinary buffer's
      ;; answer is the sentence it always was.
      ;; The note as its own sentence rather than under a "Narrowing:"
@@ -1498,7 +1498,7 @@ which is not defined"
 
 ;; Not `defvar-keymap', which arrived in Emacs 29: this package declares
 ;; 27.1, and this form is what 27 has.  Same for `string-search' (28.1),
-;; avoided above -- the declared minimum is only true if the file loads
+;; avoided above: the declared minimum is only true if the file loads
 ;; and runs there.
 (defvar csvdt-command-map
   (let ((map (make-sparse-keymap)))
