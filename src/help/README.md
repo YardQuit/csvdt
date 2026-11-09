@@ -1,7 +1,7 @@
 # The help corpus
 
-One file per option, plus the four trailing sections — `examples.txt`,
-`formats.txt`, `limits.txt`, `exit_status.txt` — that `--help` ends with and
+One file per option, plus the four trailing sections (`examples.txt`,
+`formats.txt`, `limits.txt`, `exit_status.txt`) that `--help` ends with and
 the manual page files under headings of their own.
 
 These files are the text of `--help` and, through `--generate-man`, of the
@@ -14,7 +14,7 @@ never rewraps, so the width you write is the width a reader gets.
 
 The page is different: roff fills prose to the width the reader's terminal
 happens to be, which is what a page is for. That is right for a paragraph and
-wrong for a command, a sample of output, or a diagram whose columns line up —
+wrong for a command, a sample of output, or a diagram whose columns line up:
 filled, two shell lines become one that runs neither.
 
 So mark those. A line that must reach the page exactly as written opens with
@@ -33,12 +33,12 @@ without it, and stripped again on the way into the page. Keep a marked line to
 64 columns like everything else, gutter counted: 64 plus the 14 the page
 leaves an option's help is 78.
 
-Fourteen, not the seven a section's body gets — a marked block lives in either,
+Fourteen, not the seven a section's body gets: a marked block lives in either,
 and it is the deeper indent that decides. And a marked line is not exempt from
 the measure the way it looks like it should be. The gutter buys a break, not
-`.nf`, so filling stays on and roff still wraps a line that does not fit — then
-justifies what it wrapped. A `--peek` example widened to 70 columns reached an
-80-column page as
+`.nf`, so filling stays on and roff still wraps a line that does not fit, and
+then justifies what it wrapped. A `--peek` example widened to 70 columns reached
+an 80-column page as
 
 ```
     $       csvdt       -H       -p        --peek        sales.csv
@@ -70,16 +70,16 @@ covers the three treatments against a block written out by hand;
 `the_help_files_fit_the_column_the_manual_page_leaves_them` holds every line
 to the 64 above, and ties that number to the 14 it is derived from rather
 than leaving it a bare constant; `every_verbatim_block_stands_clear_of_the_prose_around_it`
-asks the blank line either side of every marked block, in every file — a
+asks the blank line either side of every marked block, in every file: a
 count is not written down here, because a count goes stale the moment a file
 gains a block.
 
 An unmarked block that should have been marked is the failure worth watching
-for — but it is narrower than it sounds, because the gutter is not the only
+for, but it is narrower than it sounds, because the gutter is not the only
 thing that holds a block. A segment with two or more lines carrying a column
 gap is held whether it was marked or not, which covers every table in the
 corpus: take the gutter off the whole of one and the page does not change.
-What the gutter alone holds is the block with no column gap in it — a shell
+What the gutter alone holds is the block with no column gap in it: a shell
 command, a line of quoted stderr, a run of sample timestamps.
 
 Take it off *part* of one and the page does change, which is the trap that
@@ -89,7 +89,7 @@ them is a segment of one: no second line, no column gap, and it reaches the
 page as a nested paragraph for roff to fill while the rows above and below
 it stay held. Partial marking is worse than none.
 `every_verbatim_block_stands_clear_of_the_prose_around_it` does catch it,
-though as crowding rather than as what it is — the fragments it leaves sit
+though as crowding rather than as what it is: the fragments it leaves sit
 hard against the line that lost its gutter.
 
 A block left wholly unmarked mostly will not fail a test, since the corpus
@@ -119,7 +119,7 @@ abbreviation in that first sentence cuts it short:
           Remove a column, e.g.
 ```
 
-Put the abbreviation inside brackets — `(e.g. -o1,-06:00)` — which is where
+Put the abbreviation inside brackets: `(e.g. -o1,-06:00)`, which is where
 the splitter does not look. Some entries already do, and a file carrying one
 outside brackets further down is harmless, because the summary has ended by
 then.

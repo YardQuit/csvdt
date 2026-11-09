@@ -65,11 +65,10 @@ struct ArgumentFlags {
 }
 
 // Writes one line to stderr, accepting that it may not arrive. Everything
-// said on stderr is commentary on a result that already stands, a warning
+// said on stderr is commentary on a result that already stands: a warning
 // beside a successful run, or the reason for an exit status the caller reads
-// either way. eprintln! panics when stderr is closed or full, which turned
-// exactly those runs into exit 101 with the message lost too: reporting
-// became the failure it was reporting.
+// either way. eprintln! panics when stderr is closed or full, which would turn
+// those runs into exit 101 with the message lost too.
 fn note(message: &str) {
     use std::io::Write;
     let _ = writeln!(std::io::stderr(), "{message}");
@@ -78,15 +77,15 @@ fn note(message: &str) {
 // The last thing a failing run says, named the way every other diagnostic
 // here is. Anonymity costs nothing on a terminal, where the command just
 // typed is the line above; everywhere else it costs the only thing that
-// makes a line actionable. `csvdt big.csv | sort` with stderr in a log left
-// "No space left on device (os error 28)" with nothing saying which half of
-// the pipeline ran out of room.
+// makes a line actionable. `csvdt big.csv | sort` with stderr in a log would
+// otherwise leave "No space left on device (os error 28)" with nothing saying
+// which half of the pipeline ran out of room.
 fn fatal(message: &str) {
     note(&format!("csvdt: {message}"));
 }
 
-// Writes one of the answers csvdt gives about itself, the option list, the
-// manual page, and ends the run where it could not be written.
+// Writes one of the answers csvdt gives about itself (the option list, the
+// manual page) and ends the run where it could not be written.
 //
 // A closed pipe stays the caller's business: `csvdt --list-options | head -1`
 // is a reasonable thing to do and nothing has gone wrong. Every other failure
@@ -123,12 +122,10 @@ fn without_trailing_padding(text: &str) -> String {
 
 // Writes what clap renders for --help, -h and --version.
 //
-// clap prints these itself, and did until this: what its printer will not do
-// is leave a line of help without trailing spaces on it. Every line of an
+// clap's own printer leaves trailing spaces on help lines. Every line of an
 // option's long help is indented ten columns, blank lines included, so a
-// blank line inside one arrives as ten spaces and a newline. 83 lines of
-// --help were whitespace and nothing else, which is invisible on a terminal
-// and litter in a file, a diff or a paste.
+// blank line inside one arrives as ten spaces and a newline. That is
+// invisible on a terminal and litter in a file, a diff or a paste.
 //
 // The bytes are still clap's. StyledStr::ansi() hands back the same string
 // clap's own printer writes, and it goes out through the same
@@ -138,7 +135,7 @@ fn without_trailing_padding(text: &str) -> String {
 // the stream is the one clap would have picked: help and version to standard
 // output, and anything else that renders like help to standard error.
 //
-// What changes is the trailing spaces, and only those.
+// Only the trailing spaces differ.
 fn say_as_clap_would(error: &clap::Error) -> std::io::Result<()> {
     use std::io::Write;
     let rendered = error.render();
@@ -180,11 +177,9 @@ fn answered(written: std::io::Result<()>) {
 //
 // The log is created, and creating truncates, so this is asked before the
 // file is opened rather than after. 'csvdt -f=widest --fill-log data.csv
-// data.csv' emptied the input, then read the empty file it had just made,
-// wrote nothing, and exited 0, the same shape of loss
-// refuse_input_that_is_also_the_output was written for, arriving through a
-// door that guard does not watch. It was 75 bytes of somebody's data and
-// then it was a header line.
+// data.csv' would empty the input, read the empty file it had just made, write
+// nothing and exit 0: the same loss refuse_input_that_is_also_the_output
+// guards against, by a route that guard does not watch.
 //
 // Asked by identity rather than by path, so a symbolic link to the input is
 // caught with it, and so is a redirection: 'csvdt --fill-log data.csv <
@@ -237,8 +232,8 @@ fn main() {
     // Asked before anything is parsed, so that every route to standard output
     // is covered by one question rather than each having to remember it.
     // --help and --version are printed by clap on its way out of get_matches,
-    // where there is nothing of csvdt's left to ask, and they were the two
-    // that went on reporting success over output nobody received.
+    // where there is nothing of csvdt's left to ask, so they are handled
+    // before clap gets that far.
     if let Err(error) = platform::require_writable_stdout() {
         fatal(&error.to_string());
         std::process::exit(1);
@@ -305,11 +300,11 @@ const ENCODING_PROBE_BYTES: usize = 512;
 // A byte-order mark settles it outright. Without one, pure-ASCII UTF-16 is
 // still recognisable because every second byte is NUL, and that case matters
 // more than it looks: a NUL is valid UTF-8, so nothing downstream objects to
-// it. Such a file read with --flexible produced NUL-interleaved output and
-// exited 0, which is the one thing this tool must not do.
+// it. Such a file read with --flexible would produce NUL-interleaved output
+// and exit 0, which this tool must not do.
 //
 // The test is the full alternating pattern rather than merely "contains a
-// NUL", so a field that genuinely holds NUL bytes still passes through.
+// NUL", so a field that holds NUL bytes still passes through.
 fn reject_utf16<R: std::io::Read>(mut input: R) -> Result<impl std::io::Read, Box<dyn Error>> {
     let mut probe = vec![0u8; ENCODING_PROBE_BYTES];
     let mut filled = 0;
@@ -416,8 +411,6 @@ impl<R: std::io::Read> std::io::Read for EndInNewline<R> {
     }
 }
 
-// The reader's dialect, in one place so the counting pass and the real pass
-// cannot disagree about where the fields are.
 // The full forms --trim and --quote accept. Both may be abbreviated, and both
 // are matched case-insensitively, from this one list each. A second hand-written
 // copy at the point of use could drift from it: if one copy lowercased and the
@@ -529,15 +522,14 @@ impl Drop for TempSpool {
 
 // Removing the spool when a signal ends the run.
 //
-// Drop covers every ending Rust knows about, a clean finish, an error on its
-// way out, a panic unwinding, but a signal is not one of them: the process
-// stops where it stands and no destructor runs. So Ctrl-C during the copy, or
-// the SIGTERM a job scheduler sends when a run overruns its slot, left the
-// spool in the temporary directory holding the whole of the input, which is
-// usually a log, and nothing ever came back for it. The help says the file is
-// removed when the run ends, including if it fails; that promise did not
-// survive the most ordinary way of ending a long run, and a long run is what
-// this mode is for.
+// Drop covers every ending Rust knows about (a clean finish, an error on its
+// way out, a panic unwinding), but a signal is not one of them: the process
+// stops where it stands and no destructor runs. Without this, Ctrl-C during
+// the copy, or the SIGTERM a job scheduler sends when a run overruns its
+// slot, would leave the spool in the temporary directory holding the whole of
+// the input, which is usually a log. The help promises the file is removed
+// when the run ends, including if it fails, and a long run is what this mode
+// is for.
 //
 // The handler may only do async-signal-safe things, which rules out the
 // allocator and so the PathBuf itself. The name is therefore laid down as a
@@ -608,7 +600,7 @@ fn disarm_spool_signals() {
 // name, restoring the mask on the way out.
 //
 // The two steps cannot be done in one, and either order leaves a hole. Armed
-// after the file is created, as it was, a signal in between takes the
+// after the file is created, a signal in between takes the
 // default action and leaves the copy behind, which is the one thing
 // --flexible says it does not do. Armed before, the handler is pointed at a
 // path this run has not created yet, and a signal there unlinks whatever
@@ -663,11 +655,11 @@ const SPOOL_ATTEMPTS: u32 = 8;
 // machine, so two things matter beyond simply opening a file:
 //
 //   * create_new, so an existing path is refused rather than written through.
-//     Plain create followed a symlink left at the name csvdt was going to use,
-//     which had csvdt overwrite whatever the symlink pointed at, anything the
-//     user could write, and drop then removed the symlink behind it.
-//   * mode 0600 on Unix, because the default 0644 published the whole input to
-//     every account on the machine, and this input is often a log.
+//     Plain create follows a symlink left at the name csvdt is going to use,
+//     which would have csvdt overwrite whatever the symlink points at, and
+//     drop would then remove the symlink behind it.
+//   * mode 0600 on Unix, because the default 0644 would publish the whole
+//     input to every account on the machine, and this input is often a log.
 fn create_spool_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -685,8 +677,8 @@ fn create_spool_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
 //
 // Named rather than assumed, because the two families disagree and the advice
 // is worthless where it is wrong: std::env::temp_dir reads TMPDIR on Unix and
-// TMP then TEMP on Windows, so a Windows user told to "set TMPDIR" sets
-// something nothing reads, tries again, and gets the same error. The
+// TMP then TEMP on Windows, so a Windows reader told to "set TMPDIR" would set
+// something nothing reads and get the same error again. The
 // remaining platforms fall back to the Unix spelling, which is what
 // temp_dir's own fallback path does.
 #[cfg(windows)]
@@ -732,10 +724,9 @@ fn spool(mut input: impl std::io::Read) -> Result<TempSpool, Box<dyn Error>> {
                 // being made was held rather than lost, and lands here.
                 #[cfg(unix)]
                 drop(held);
-                // Both failures here surfaced as a bare OS error, "No such
-                // file or directory (os error 2)" with no path, no TMPDIR, no
-                // mention of the spool, while open_input exists precisely to
-                // never do that to a path the caller can see.
+                // Both failures here would surface as a bare OS error, "No such
+                // file or directory (os error 2)" with no path, no TMPDIR and
+                // no mention of the spool, which open_input exists to avoid.
                 if let Err(error) = std::io::copy(&mut input, &mut file) {
                     return Err(format!(
                         "could not copy the input to '{}', which \
@@ -774,9 +765,8 @@ fn spool(mut input: impl std::io::Read) -> Result<TempSpool, Box<dyn Error>> {
 // Whether a path can be opened and read a second time and give the same thing
 // again. A regular file can; a fifo cannot, and neither can the pipe that
 // process substitution puts behind a filename. Reading one of those twice
-// drained it on the counting pass and left the real pass with nothing, so a
-// file came back empty with a success status, or, for a fifo with no further
-// writer, waited for one that was never coming.
+// drains it on the counting pass and leaves the real pass with nothing, or,
+// for a fifo with no further writer, waits for one that never comes.
 fn is_rereadable(path: &str) -> bool {
     // Follows symlinks deliberately: /dev/stdin naming a redirected regular
     // file is as re-readable as the file itself.
@@ -786,11 +776,10 @@ fn is_rereadable(path: &str) -> bool {
 }
 
 // Opens a named input, saying which path failed and why. The bare io error says
-// neither: a script handed the wrong path was told "No such file or directory
-// (os error 2)", with nothing in it to say which of its paths that was. A
-// directory is refused here too, rather than at the first read, where it
-// surfaced as "Is a directory" from somewhere inside the CSV reader, also
-// without naming it.
+// neither: "No such file or directory (os error 2)" does not say which of a
+// script's paths that was. A directory is refused here too, rather than at
+// the first read, where it would surface as "Is a directory" from somewhere
+// inside the CSV reader, also without naming it.
 fn open_input(path: &str) -> Result<std::fs::File, Box<dyn Error>> {
     let named = |error: std::io::Error| -> Box<dyn Error> {
         Box::new(std::io::Error::new(
@@ -844,7 +833,7 @@ fn scan_widest_record(args: &ArgumentFlags, path: &str) -> Result<usize, Box<dyn
     Ok(widest)
 }
 
-fn reader_writer(args:ArgumentFlags) -> Result<(), Box<dyn Error>> {
+fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
     let reader_builder = configure_reader(&args);
 
     let mut writer_builder = csv::WriterBuilder::new();
@@ -1086,9 +1075,6 @@ fn peek_stream<R: std::io::Read>(
     Ok(peek_table(&rows))
 }
 
-// Shared by both the stdin and file input paths so the header/record loop
-// exists once; monomorphized per `R`, so this costs nothing over the
-// previous hand-duplicated loops.
 // The record-by-record account --fill-log writes.
 //
 // A filling mode changes the input, and the WARNING under --flexible says so:
@@ -1154,29 +1140,18 @@ impl FillLog {
             &width.to_string(),
             // Fields minus width: how far the row is from the shape it was
             // measured against, negative where it falls short and positive
-            // where it runs over. That way round because the row is what is
-            // being described, the deviation is the row's, so the row's
-            // count leads, as an observation does against the value it is
-            // measured against. The other way round put a minus sign beside
-            // the word 'over', which reads as a contradiction rather than as
-            // an amount.
+            // where it runs over. The row's count comes first because the
+            // deviation is the row's; the other way round would put a minus
+            // sign beside the word 'over'.
             //
-            // A fact about the row rather than about what was done to it,
-            // which is why it is not named for either, 'added' was, and so
-            // meant what was added under 'padded' and what would have been
-            // under a row nothing was done to, which a reader seeing
-            // "added 2" beside an untouched row could only take for the
-            // first.
+            // It describes the row, not what was done to it, so it is not
+            // called 'added': beside an untouched row, "added 2" would read
+            // as something done to it.
             //
             // Signed rather than saturating, so it says something on every
-            // row. At zero the column was dead for the whole of 'over': a row
-            // seven fields wide against a width of two read 0, and how far
-            // over it was, the number wanted most on exactly those rows,
-            // could only be had by subtracting two other columns.
-            //
-            // 'delta' rather than a word naming one direction, since it
-            // has two, and never zero: a row matching the width is not
-            // logged at all, so every row here is off by at least one.
+            // row, including how far over a wide row runs. It is never zero:
+            // a row matching the width is not logged at all. 'delta' names
+            // neither direction because it has two.
             &(fields as i64 - width as i64).to_string(),
             action,
         ])?;
@@ -1206,9 +1181,7 @@ fn process_stream<R: std::io::Read, W: std::io::Write>(
     // The width --flexible=fix pads out to. Streaming with flat memory means
     // the widest row can't be known without reading the whole file first, so
     // the first record sets it: the header when there is one, otherwise the
-    // first data row.
-    // Widest mode brings its width in from the counting pass; FirstRecord takes
-    // it from whichever record comes first.
+    // first data row. Widest mode brings its width in from the counting pass.
     let mut fill_width: Option<usize> = scanned_width;
 
     if args.has_headers {
@@ -1247,7 +1220,7 @@ fn process_stream<R: std::io::Read, W: std::io::Write>(
                 // the header included, the counting pass read it too. A
                 // header that is means the input changed between the two
                 // reads, which the data rows already report in those terms;
-                // unchecked here, it fell through to the writer's bare
+                // unchecked here, it would fall through to the writer's bare
                 // record-length error instead.
                 if headers.len() > width {
                     if let Some(log) = fill_log.as_deref_mut() {
@@ -1276,8 +1249,8 @@ fn process_stream<R: std::io::Read, W: std::io::Write>(
                 // Asked of the header too, and only when one is actually
                 // written: a run without -p/--print-header puts no header in
                 // the output, so there is none there to be read back as a
-                // comment. Missing this left the worst case of the three
-                // uncounted, see report_tally.
+                // comment. It is the worst of the three cases, see
+                // report_tally.
                 let names: Vec<&str> = new_headers.iter().collect();
                 tally.record_written(&names, args, true);
                 writer.write_record(&new_headers)?;
@@ -1358,8 +1331,8 @@ fn process_stream<R: std::io::Read, W: std::io::Write>(
 
 // The CSV reader has no error for a quote that is opened and never closed: it
 // reads everything after it, newlines included, as one field, so the file
-// arrives as a record with too few fields. That is the same error a genuinely
-// ragged file gives, and the documented remedy for raggedness, --flexible,
+// arrives as a record with too few fields. That is the same error a ragged
+// file gives, and the documented remedy for raggedness, --flexible,
 // accepts the mangled record rather than reporting it, so the message that
 // misdirects there is the one to say what else to look for.
 fn explain_unequal_lengths(error: csv::Error) -> Box<dyn Error> {
@@ -1409,8 +1382,8 @@ fn row_wider_than_reference(row_len: usize, width: usize, mode: FillMode) -> Box
 // Reads the single character an option like --read-delimiter takes.
 //
 // The CSV reader and writer work in bytes, so the value has to be one ASCII
-// character, a multi-byte one cannot be a byte, and the old check counted
-// bytes rather than characters, so it reported a single 'e' as a string. An
+// character, since a multi-byte one cannot be a byte. The check counts
+// characters, so a single non-ASCII one is reported as such. An
 // empty value is refused rather than quietly leaving the default in place: it
 // is far more often an unset shell variable than a request for the default,
 // and silently reading with the wrong delimiter is the kind of thing that is
@@ -1509,10 +1482,9 @@ fn out_of_bound() -> Box<dyn Error> {
 }
 
 // Attaches which row an out-of-bound column was measured against, in the
-// same terms the CSV reader's own errors use. The bare message named neither
-// the record nor its width, and it bites exactly where that matters: a
-// ragged file, where one short row is the whole story and finding it is the
-// task. Recognised by the exact message rather than a type, since
+// same terms the CSV reader's own errors use. The bare message names neither
+// the record nor its width, which matters most in a ragged file, where
+// finding the one short row is the task. Recognised by the exact message rather than a type, since
 // out_of_bound is its only source; the header checks keep the bare form, as
 // they are about the arguments rather than any row.
 fn locate_out_of_bound(
@@ -1573,10 +1545,10 @@ fn is_rfc3339_year<Zone: chrono::TimeZone>(datetime: &DateTime<Zone>) -> bool {
 //
 // chrono renders those by rounding the offset to the nearest minute while the
 // clock time keeps its seconds, so the two halves of the result disagree:
-// 1971-06-01T12:00:00Z came out as 1971-06-01T11:15:30-00:45, which reads back
-// as 12:00:30Z. A timestamp naming a different instant from the one it was made
-// from is the quiet wrong answer this tool exists to avoid, so such a value is
-// marked instead, the input is still there beside it to be read.
+// 1971-06-01T12:00:00Z would come out as 1971-06-01T11:15:30-00:45, which
+// reads back as 12:00:30Z. A timestamp naming a different instant from the one
+// it was made from is the quiet wrong answer this tool exists to avoid, so
+// such a value is marked instead, and the input is still there beside it.
 fn is_rfc3339_offset<Zone: chrono::TimeZone>(datetime: &DateTime<Zone>) -> bool {
     use chrono::Offset;
     datetime.offset().fix().local_minus_utc() % 60 == 0
@@ -1610,8 +1582,8 @@ fn clamp_insert_column(value: i64, len: usize) -> usize {
         return 0;
     }
     // try_from rather than `as`: on a 32-bit target `as usize` truncates, so
-    // a column past 2^32 wrapped to a small index instead of clamping to the
-    // last column as documented. A value usize cannot hold is over any
+    // a column past 2^32 would wrap to a small index instead of clamping to
+    // the last column as documented. A value usize cannot hold is over any
     // record's length by construction, which is the Err arm.
     match usize::try_from(value) {
         Ok(column) if column < len => column,
@@ -1715,19 +1687,17 @@ fn parse_rfc3339_lenient(value: &str) -> Result<DateTime<FixedOffset>, chrono::P
 // can tell them apart. That makes a damaged value: :60 is what a formatter
 // that rounds 59.5 up without carrying writes, read as a different instant
 // than the one it names, quietly, where this tool's rule is to mark what it
-// cannot answer faithfully. It was written back out wearing :60 as well, and
-// on an ordinary minute that is not RFC3339 at all: standard readers refuse
-// it, so the output did not read back.
+// cannot answer faithfully. Written back out wearing :60, it would also not be
+// RFC3339 on an ordinary minute: standard readers refuse it.
 //
 // A leap second is the last second of a UTC month and is simultaneous
 // everywhere, so the test is on the instant rather than on the clock face the
 // record happens to carry: 2017-01-01T05:29:60+05:30 is the real one at the
 // end of 2016 and is kept, while 2016-12-31T23:59:60+02:00 reads 23:59:60 on
 // its own clock but lands mid-evening in UTC and is not. Structural rather
-// than a table of the leap seconds IERS has actually declared: a table would
-// refuse every future one until the binary was rebuilt, which is the failure
-// the bundled tz data already has to live with and not worth repeating for a
-// value the format itself permits.
+// than a table of the leap seconds IERS has declared: a table would refuse
+// every future one until the binary was rebuilt, and the format itself
+// permits them.
 fn leap_second_is_possible(stamp: DateTime<FixedOffset>) -> bool {
     // chrono carries a leap second as :59 with a nanosecond field run past a
     // whole second, which is the only way to recognise one after parsing.
@@ -1792,21 +1762,6 @@ fn insert_offset_colon(value: &str) -> Option<String> {
     }
 }
 
-// Resolves the timezone -l/--local converts into, once at startup rather
-// than per row.
-//
-// The zone is looked up in the IANA database bundled with the binary
-// (chrono-tz) instead of read from the host's tzdata files. That keeps a
-// conversion reproducible: the same input gives the same output on any
-// machine, whatever tzdata the operating system happens to carry, which
-// matters when the result may be relied on as evidence. It also sidesteps a
-// defect in chrono's own tzdata reader, which never applies Morocco's
-// daylight-saving rule and so reports Africa/Casablanca and Africa/El_Aaiun
-// an hour early year-round.
-//
-// Returns None when TZ holds a POSIX rule string rather than a zone name
-// (e.g. "EST5EDT,M3.2.0,M11.1.0"), which the bundled database can't name;
-// the caller falls back to chrono's own handling for that case.
 // Whether a TZ value spells POSIX rules rather than naming a zone. POSIX
 // writes an abbreviation of three or more letters, or a bracketed form like
 // "<+04>", followed immediately by its offset: "EST5EDT,M3.2.0,M11.1.0",
@@ -1865,10 +1820,9 @@ fn posix_rule_std_offset(value: &str) -> Option<i32> {
 //
 // chrono reads the rule itself, and where it cannot, a transition time
 // past 24:00, which real zones publish; Asia/Jerusalem's own footer is
-// IST-2IDT,M3.4.4/26,M10.5.0, it falls back to UTC without a word. That
-// left `-l` answering +00:00 for a rule naming a zone hours away, exit 0:
-// the same quiet mistake the unknown-name refusal above exists to stop,
-// arrived at by a different road.
+// IST-2IDT,M3.4.4/26,M10.5.0, it falls back to UTC without a word. Left
+// alone, `-l` would answer +00:00 for a rule naming a zone hours away and
+// exit 0, the same quiet mistake the unknown-name refusal exists to stop.
 //
 // Two probes six months apart, because whichever of them falls in standard
 // time must carry the offset the rule declares, and which one that is
@@ -1887,7 +1841,17 @@ fn chrono_reads_posix_rule(declared: i32) -> bool {
     })
 }
 
-// Resolves the zone -l works in, from TZ or from the platform.
+// Resolves the zone -l works in, from TZ or from the platform, once at
+// startup rather than per row.
+//
+// The zone is looked up in the IANA database bundled with the binary
+// (chrono-tz) instead of read from the host's tzdata files. That keeps a
+// conversion reproducible: the same input gives the same output on any
+// machine, whatever tzdata the operating system happens to carry, which
+// matters when the result may be relied on as evidence. It also sidesteps a
+// defect in chrono's own tzdata reader, which never applies Morocco's
+// daylight-saving rule and so reports Africa/Casablanca and Africa/El_Aaiun
+// an hour early year-round.
 //
 // Ok(Some) is a zone found in the bundled database. Ok(None) means the value
 // does not name a zone and is left to chrono's own reading, POSIX rules, or
@@ -1961,8 +1925,8 @@ fn local_timezone() -> Result<Option<chrono_tz::Tz>, Box<dyn Error>> {
     }
 
     // Which message depends on where the name came from. Blaming TZ for a
-    // name the platform supplied sent the reader checking the spelling of a
-    // variable they never set, and a system-configured zone cannot be
+    // name the platform supplied would send the reader checking the spelling
+    // of a variable they never set, and a system-configured zone cannot be
     // misspelt, so the likely cause there is the other one: a zone newer
     // than this build's database. Refused either way rather than answered
     // from the host's own rules, which would quietly use a different rule
@@ -1998,8 +1962,8 @@ const MAX_TARGET_OFFSET_SECONDS: i32 = 14 * 3600;
 // accepts anything up to +/-23:59, so without this a typo like "+15:00" for
 // "+05:00" would be honoured and produce a plausible-looking timestamp
 // carrying an offset that cannot exist, exactly the sort of quiet error
-// this tool otherwise goes out of its way not to make. Only the target the
-// user asks for is checked; offsets found in the data are left alone, since
+// this tool otherwise goes out of its way not to make. Only the target
+// that was asked for is checked; offsets found in the data are left alone, since
 // those are the input's business rather than a mistake in the command.
 fn parse_offset(value: &str) -> Result<FixedOffset, Box<dyn Error>> {
     let malformed = || -> Box<dyn Error> {
@@ -2041,8 +2005,7 @@ fn format_iso8601_duration(delta: chrono::TimeDelta, round_seconds: bool) -> Str
     let mut nanos = delta.subsec_nanos();
 
     if round_seconds {
-        // Half-up to the nearest second. Only ever reached when the user
-        // explicitly passes --round-seconds.
+        // Half-up to the nearest second. Only reached with --round-seconds.
         if nanos >= 500_000_000 {
             total_seconds += 1;
         }
@@ -2350,15 +2313,6 @@ impl Tally {
     }
 }
 
-// Says at the end of a run how much of it did not convert.
-//
-// A few failures among many rows is ordinary, one malformed line should not
-// throw away a large log, so that stays exit 0 and is reported on stderr,
-// where it does not disturb the output but a person can see it. Nothing
-// converting at all is a different thing: the column given is not the one
-// holding the timestamps, or they are not in a format csvdt reads. That is an
-// error exit, because exit 0 is indistinguishable from success and a script
-// would carry on and analyse a file of markers.
 // Says on stderr that the log has something in it, and what it measured
 // against, since the three modes do not agree on that and a reader comparing
 // two logs of the same file would otherwise have to guess.
@@ -2382,6 +2336,15 @@ fn report_fill_log(rows: u64, args: &ArgumentFlags) {
          measured against {reference}"));
 }
 
+// Says at the end of a run how much of it did not convert.
+//
+// A few failures among many rows is ordinary: one malformed line should not
+// throw away a large log, so that stays exit 0 and is reported on stderr,
+// where it does not disturb the output but a person can see it. Nothing
+// converting at all is a different thing: the column given is not the one
+// holding the timestamps, or they are not in a format csvdt reads. That is an
+// error exit, because exit 0 is indistinguishable from success and a script
+// would carry on and analyse a file of markers.
 fn report_tally(tally: &Tally, comment: Option<char>, delimiter: char)
     -> Result<(), Box<dyn Error>> {
     // Said whatever else the run did, since it is about the output rather than
@@ -2502,8 +2465,8 @@ fn plan_row_edit(
             Ok(datetime) => (
                 format!("{}", datetime.date_naive()),
                 // %.f keeps a fraction the source carried and prints nothing
-                // when there is none, as RFC3339 output does. Hard-coded whole
-                // seconds dropped it silently, which no other conversion here
+                // when there is none, as RFC3339 output does. Whole seconds
+                // would drop it silently, which no other conversion here
                 // does: -d keeps it unless --round-seconds asks otherwise, and
                 // -u/-l/-o write back whatever came in.
                 format!("{}", datetime.format("%H:%M:%S%.f %Z")),
@@ -2840,12 +2803,12 @@ fn wrapped(text: &str) -> String {
 //
 // Keeps the newline the paragraph ends on, which is the blank line the help
 // template puts between the introduction and the usage line.
+//
 // A paragraph ends at a blank line, which is not the same as ending at
 // "\n\n": git hands a Windows checkout the corpus with CRLF endings, where
 // the blank line is "\r\n\r\n" and the shorter pattern is nowhere in the
-// file. Looking for "\n\n" there found nothing, so -h printed the whole
-// introduction, the durations paragraph included, on the one platform
-// nobody reads the help on while writing it.
+// file, so -h would print the whole introduction, the durations paragraph
+// included.
 fn first_paragraph(text: &str) -> &str {
     let mut at = 0;
     for line in text.split_inclusive('\n') {
@@ -3630,7 +3593,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
     if let Some(mode) = matches.get_one::<String>("flexible") {
         args.flexible_record = true;
         // Resolved rather than matched literally, so -f=FIX cannot pass clap
-        // and then land on the fallback, which is what '--trim ALL' did.
+        // and then land on the fallback.
         args.fill_mode = match resolve_value(&FLEXIBLE_VALUES, mode) {
             Some("fix") => FillMode::FirstRecord,
             Some("widest") => FillMode::Widest,
@@ -3657,9 +3620,9 @@ fn describe_character(character: char) -> String {
 }
 
 // Refuses delimiter and comment characters that cannot do the job asked of
-// them, as opposed to ones that merely look unusual. Each of these was
-// accepted, and each then produced output that could not be read back, or
-// dropped rows, the same quiet wrongness -o refuses an impossible offset for.
+// them, as opposed to ones that merely look unusual. Each of these would be
+// accepted and then produce output that cannot be read back, or drop rows,
+// the same quiet wrongness -o refuses an impossible offset for.
 //
 // A tab is not among them: that is how TSV is read and written.
 fn check_special_characters(args: &ArgumentFlags) -> Result<(), Box<dyn Error>> {
@@ -3673,8 +3636,8 @@ fn check_special_characters(args: &ArgumentFlags) -> Result<(), Box<dyn Error>> 
     let read_delimiter = args.input_delimiter.unwrap_or(',');
 
     // A record ends at one of these, so nothing within one can be marked by
-    // one: what follows it is the next row. Given as a delimiter it silently
-    // made the whole line, or the whole file, into a single field.
+    // one: what follows it is the next row. Given as a delimiter it would
+    // silently make the whole line, or the whole file, a single field.
     for (option, character) in [
         ("--read-delimiter", args.input_delimiter),
         ("--print-delimiter", args.output_delimiter),
@@ -3692,8 +3655,8 @@ fn check_special_characters(args: &ArgumentFlags) -> Result<(), Box<dyn Error>> 
 
     // Quoting is the only way to write a field that holds the delimiter, so a
     // delimiter that is also the quote character leaves no way to write one.
-    // Reading came out silently misparsed and writing came out unreadable,
-    // where both should have been refused.
+    // Reading would be silently misparsed and writing unreadable, so both
+    // are refused.
     for (option, character, quote, because) in [
         ("--read-delimiter", args.input_delimiter, read_quote,
          if args.input_quotes { " for reading, because of '--single-quote'" } else { "" }),
@@ -3724,7 +3687,7 @@ fn check_special_characters(args: &ArgumentFlags) -> Result<(), Box<dyn Error>> 
     // nothing, so no line under it gains a quote character the field did not
     // hold, a field that starts with one itself is exactly what the tally
     // counts. Under those styles the collision cannot happen and the pairing
-    // stays accepted, as it always was.
+    // stays accepted.
     if let Some(comment) = args.read_as_comment {
         let write_delimiter = args.output_delimiter.unwrap_or(',');
         let style = resolve_value(&QUOTE_VALUES, &args.output_quotes);
@@ -3805,8 +3768,7 @@ mod tests {
 
     // Padding comes off the end of a line; the line ending does not.
     //
-    // The carriage return is the case that matters, and the one that got
-    // away: on Windows the corpus is checked out CRLF, so a blank line inside
+    // The carriage return is the case that matters: on Windows the corpus is checked out CRLF, so a blank line inside
     // an option's long help is ten spaces and a CR. A trim that knew only
     // spaces and tabs would stop at the CR and leave all ten.
     #[test]
@@ -3916,7 +3878,7 @@ mod tests {
     fn an_ambiguous_or_unknown_value_resolves_to_nothing() {
         // Every value clap accepts resolves, so these cannot be reached
         // through the command line: the point is that if the two ever part
-        // company again, the result is no match rather than a wrong one.
+        // company, the result is no match rather than a wrong one.
         for given in ["n", "ne", "", "x", "alll", "fieldss"] {
             assert_eq!(resolve_value(&QUOTE_VALUES, given), None, "{given}");
         }
@@ -4169,7 +4131,7 @@ mod tests {
             (
                 // Bounds-checking by `vecbuff.len() - 1` would underflow (a
                 // subtraction overflow panic) when the record has zero fields,
-                // e.g. the header row on genuinely empty input. Any column
+                // e.g. the header row on empty input. Any column
                 // index must be a clean error against a zero-field record.
                 "zero-field record",
                 flags(|args| {
@@ -4829,7 +4791,7 @@ mod tests {
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
 
-        // column 0 earlier than column 4; result replaces column 4 (the second column)
+        // Column 0 is earlier than column 4; the result replaces column 4.
         let (result, _) = process_record(
             &record(&["2024-01-01T00:00:00Z", "a", "b", "c", "2024-01-02T12:00:00Z"]),
             &args,
@@ -5047,10 +5009,8 @@ mod tests {
 
         // 'widest' takes its width from a pass over the whole input, so no row
         // can be wider than it. Getting here means the file is not the one
-        // that was counted, and saying "the width of the first record" named
-        // both a mode that was not asked for and a width source that was
-        // not theirs, while the guarantee that had apparently failed went
-        // unmentioned.
+        // that was counted, so the message names widest and the changed
+        // input, not the first record.
         let widest = row_wider_than_reference(4, 2, FillMode::Widest).to_string();
         assert!(widest.contains("--flexible=widest"), "said: {widest}");
         assert!(widest.contains("changed between the two reads"), "said: {widest}");
@@ -5067,8 +5027,9 @@ mod tests {
     fn a_header_wider_than_the_widest_count_gets_the_widest_message() {
         // The header is read by both of widest's passes, so it too can only
         // be wider than the counted width if the input changed between them.
-        // Unchecked, that fell through to the writer's bare record-length
-        // error while a data row in the same state got the tailored one.
+        // Unchecked, that would fall through to the writer's bare
+        // record-length error while a data row in the same state gets the
+        // tailored one.
         let mut args = default_args();
         args.has_headers = true;
         args.flexible_record = true;
@@ -5117,11 +5078,11 @@ mod tests {
         assert_eq!(clamp_insert_column(-1, 3), 0);
         assert_eq!(clamp_insert_column(i64::MIN, 3), 0);
         assert_eq!(clamp_insert_column(i64::MAX, 3), 2);
-        // One past u32::MAX: on a 32-bit target the old `as usize` cast
-        // truncated this to 0, so the insert landed before the first column
-        // instead of clamping to the last. On the 64-bit hosts CI runs, both
-        // codings agree, this line pins the documented answer, and would
-        // catch the wrap on any 32-bit runner that is ever added.
+        // One past u32::MAX: an `as usize` cast on a 32-bit target would
+        // truncate this to 0 and insert before the first column instead of
+        // clamping to the last. On 64-bit hosts both codings agree, so this
+        // line pins the documented answer and would catch the wrap on a
+        // 32-bit runner.
         assert_eq!(clamp_insert_column(4_294_967_296, 3), 2);
         // An empty record has no column to clamp to. The actions all refuse a
         // zero-length record before reaching here, so this is the defensive
@@ -5309,7 +5270,7 @@ mod tests {
 
     #[test]
     fn record_written_counts_only_a_first_field_the_writer_leaves_bare() {
-        // 'never' is now the style that leaves a leading comment character
+        // 'never' is the style that leaves a leading comment character
         // bare; under the default the writer quotes it itself.
         let args = commented_args(Some('#'), "never");
         let mut tally = Tally::default();
@@ -5446,10 +5407,9 @@ mod tests {
 
         // "Number" is csv-core's own is_non_numeric, asked directly, and its
         // reading is a float parse, so scientific notation and even the
-        // infinities count as numbers and are written bare. Pinned since the
-        // answer now comes from the writer's crate rather than a mirror, and
-        // these are the cases where a hand-rolled "is it a number" would have
-        // guessed differently.
+        // infinities count as numbers and are written bare. Pinned because
+        // these are the cases where a hand-rolled "is it a number" would
+        // guess differently.
         assert!(writer_leaves_comment_bare("-1e5", "nonnumeric"));
         assert!(writer_leaves_comment_bare("-inf", "nonnumeric"));
         assert!(writer_leaves_comment_bare("-5.", "nonnumeric"));

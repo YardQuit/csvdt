@@ -16,8 +16,8 @@ use std::error::Error;
 // run can notice, because the flush that should have failed returns Ok too.
 //
 // The check is a dup of the descriptor and a write of nothing to it. A
-// zero-length write puts no byte anywhere and touches no reader, Linux
-// answers a null write on a pipe before it looks for one, while still
+// zero-length write puts no byte anywhere and touches no reader (Linux
+// answers a null write on a pipe before it looks for one), while still
 // going through the kernel's check that the descriptor exists and was opened
 // for writing.
 //
@@ -103,8 +103,8 @@ pub(crate) fn file_identity(file: &std::fs::File) -> Option<(u64, u64)> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
     let about = file.metadata().ok()?;
     // A regular file has data to lose; a fifo has a reader to mislead, which
-    // is the same harm by another route, '--fill-log /dev/stdout' into a
-    // pipe put the log's own rows into the CSV somebody was reading, which is
+    // is the same harm by another route: '--fill-log /dev/stdout' into a
+    // pipe would put the log's own rows into the CSV somebody is reading,
     // the corruption the option exists to keep out of the output. A character
     // device is neither: '/dev/null' twice over is one identity with nothing
     // to lose and nobody to mislead, and refusing it would be refusing a run
@@ -181,17 +181,17 @@ pub(crate) fn stdout_identity() -> Option<(u64, u64)> {
 // Refuses an input file that is also where the output is going.
 //
 // The shell opens a redirection before csvdt is started, so `csvdt in.csv >
-// in.csv` hands over a file already truncated to nothing: csvdt read an empty
-// file, wrote nothing and exited 0, and the only sign anything had happened
-// was that the data was gone. `csvdt in.csv >> in.csv` is the other half, and
-// there the file is still whole when this is asked, left to run it came out
-// as the input followed by a conversion of the input, also at 0.
+// in.csv` hands over a file already truncated to nothing: csvdt would read an
+// empty file, write nothing and exit 0, and the only sign anything had
+// happened would be that the data was gone. `csvdt in.csv >> in.csv` is the
+// other half: the file is still whole when this is asked, and left to run it
+// would produce the input followed by a conversion of the input, also at 0.
 //
 // Compared by device and inode rather than by path, so a symbolic link, a
 // hard link, or a second spelling of the same directory is caught with it.
 //
 // Regular files only. Sharing a character device is meaningless rather than
-// damaging, `csvdt /dev/null > /dev/null` is one inode twice over and has
+// damaging: `csvdt /dev/null > /dev/null` is one inode twice over and has
 // nothing to lose, and a run cannot be both ends of a pipe.
 #[cfg(unix)]
 pub(crate) fn refuse_input_that_is_also_the_output(

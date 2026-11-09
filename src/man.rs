@@ -71,8 +71,8 @@ fn break_after_option_tags(rendered: &[u8]) -> Vec<u8> {
 //     COLUMNS  ARE  ADDRESSED  BY  POSITION  Always  by number from 0, never by
 //     header name, so a repeated header name is not ambiguous.
 //
-// Twelve of the fifteen headings under KNOWN LIMITS came out that way, which
-// leaves that section one long paragraph with capitals scattered through it.
+// Most of the headings under KNOWN LIMITS would come out that way, leaving
+// that section one long paragraph with capitals scattered through it.
 //
 // .SS is what the format has for this, and it settles the spacing as well as
 // the break: the blank line above is dropped when there is one, since .SS
@@ -179,8 +179,8 @@ fn promote_man_headings(rendered: &[u8], headings: &[&str]) -> Vec<u8> {
 //
 // '\%' at the start of a word tells roff not to hyphenate that word. It is
 // only ever a hint about breaking, so it costs nothing anywhere else: the
-// line count, the measure and every other break are exactly as they were,
-// and groff stays silent. The alternative, '.nh' over the whole page,
+// line count, the measure and every other break are unchanged, and groff
+// stays silent. The alternative, '.nh' over the whole page,
 // would also stop hyphenating the prose, which has no such problem and
 // justifies better for being allowed to break.
 //
@@ -200,10 +200,10 @@ fn protect_option_names(rendered: &[u8]) -> Vec<u8> {
 
     // Marks every option name in one span of text. A font macro's argument
     // is set in the surrounding paragraph and breaks exactly as running text
-    // does, so the two are the same problem and get the same answer, which
-    // they did not before: the macro branch marked an argument only when the
-    // whole of it was a name, so '.I the destination given to \-\-fill\-log'
-    // reached the page unprotected and could be broken at the hyphen.
+    // does, so the two are the same problem and get the same answer. A macro
+    // argument that is only partly a name, such as '.I the destination given
+    // to \-\-fill\-log', is protected too, or it could be broken at the
+    // hyphen.
     fn mark(span: &str, out: &mut String) {
         // Word-opening is the whole test: a hyphen inside a word is a real
         // hyphen, 'two-column', 'csvdt-widest-', and breaking there is
@@ -215,9 +215,10 @@ fn protect_option_names(rendered: &[u8]) -> Vec<u8> {
             out.push_str(before);
             // Only a hyphen that opens a word. '\%' in the middle of one is
             // not inert: it is an extra place roff may break, so getting
-            // this wrong does the opposite of what the pass is for: it broke
-            // the example rows in EXAMPLES at their dates, '2023\-11\-14'
-            // being a word whose second and third hyphens are internal.
+            // this wrong does the opposite of what the pass is for. The
+            // example rows in EXAMPLES would break at their dates, since
+            // '2023\-11\-14' is a word whose second and third hyphens are
+            // internal.
             let opens_word = before.ends_with(char::is_whitespace)
                 || (at_start && before.is_empty());
             // And a name, not a dash. NAME is spelled 'csvdt \- parse CSV
@@ -284,8 +285,8 @@ fn protect_option_names(rendered: &[u8]) -> Vec<u8> {
 // the reader is meant to copy.
 //
 // The gutter never reaches a reader. It is stripped from every string clap
-// is given, so --help and -h are the same bytes they were, and stripped
-// again here on the way into the page.
+// is given, so --help and -h carry no trace of it, and stripped again here
+// on the way into the page.
 pub(crate) const VERBATIM: char = '|';
 
 // Removes the verbatim gutter, leaving the line exactly as it was written.
@@ -539,11 +540,10 @@ fn insert_man_sections(rendered: &[u8], supplement: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     // A run of two lines with a column gap is a table even with nothing
-    // indented, which is what --trim and --list-options were. Written as a
-    // unit test because the corpus could not ask it: every table there had
-    // three such lines, so raising the threshold to three changed nothing
-    // in the manual page and would go unnoticed until the next two-row
-    // table was written.
+    // indented, as --trim and --list-options are. Written as a unit test
+    // because the corpus cannot ask it: every table there has three such
+    // lines, so raising the threshold to three would change nothing in the
+    // manual page and go unnoticed until the next two-row table was written.
     //
     // This is the only place that asks at all. Every table in the corpus is
     // laid out as a tag on its own line with its description indented under

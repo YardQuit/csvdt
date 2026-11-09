@@ -12,7 +12,7 @@ fn csvdt() -> Command {
 // whenever the wrapping moves. Two tests learned that the hard way and
 // collapsed the whitespace themselves; a third and fourth did not, and failed
 // on a rewrap with the sentence still present and still saying the same
-// thing -- reporting on formatting while claiming to report on content.
+// thing: reporting on formatting while claiming to report on content.
 fn help_words() -> String {
     let help = csvdt().arg("--help").output().unwrap();
     let help = String::from_utf8(help.stdout).expect("--help should be UTF-8");
@@ -31,7 +31,7 @@ fn help_output(flag: &str) -> String {
 // An entry begins at the left, near enough: '-H, --has-header' sits at two
 // columns and '--round-seconds', having no short form, at six. Everything
 // clap wraps into the description column is indented far past that, which
-// is what tells a continuation line from the next entry -- including the
+// is what tells a continuation line from the next entry, including the
 // value tables in the long form, whose rows begin with an option name of
 // their own and would otherwise read as entries.
 fn option_entries(text: &str) -> std::collections::BTreeMap<String, String> {
@@ -52,7 +52,7 @@ fn option_entries(text: &str) -> std::collections::BTreeMap<String, String> {
             continue;
         }
         // Text at the left margin closes the section: every line inside it
-        // is indented, and what follows is after-help. Not a blank line --
+        // is indented, and what follows is after-help. Not a blank line:
         // the long form puts one between every pair of entries, having given
         // each description a line of its own.
         if indent == 0 {
@@ -209,7 +209,7 @@ fn with_temp_dir(
 }
 
 // ---- column actions: split / rfc3339 / utc / local / duration / remove ---
-// Every action now takes its column number as its own argument (e.g. -s1),
+// Every action takes its column number as its own argument (e.g. -s1),
 // glued or space-separated. -i is independent: "-i <col> <mode>".
 
 #[test]
@@ -243,8 +243,8 @@ fn split_invalid_timestamp_yields_parse_err_markers() {
 fn every_conversion_marks_what_it_cannot_parse_the_same_way_and_still_exits_0() {
     // Not aborting is deliberate: one malformed line should not throw away a
     // run over a large log. The cost is that the status cannot be used to tell
-    // whether anything failed -- a file whose timestamps are not the assumed
-    // format converts "successfully" into a file of markers -- so the marker is
+    // whether anything failed (a file whose timestamps are not the assumed
+    // format converts "successfully" into a file of markers) so the marker is
     // the only signal there is, and every action has to use the same one for
     // `grep -c parse_err` to be the answer. KNOWN LIMITS says exactly this.
     for (action, convertible) in [
@@ -270,11 +270,11 @@ fn every_conversion_marks_what_it_cannot_parse_the_same_way_and_still_exits_0() 
 
 #[test]
 fn a_run_where_nothing_converted_is_a_failure_and_a_run_that_partly_did_is_not() {
-    // The two cases the old exit 0 could not tell apart. A few failures among
-    // many rows is ordinary -- one malformed line must not throw away a large
-    // log -- but nothing converting at all means the column given is not the
-    // one holding the timestamps, or they are not in a format csvdt reads. That
-    // exited 0 too, which is indistinguishable from success: a script would
+    // Two cases that must exit differently. A few failures among
+    // many rows is ordinary (one malformed line must not throw away a large
+    // log) but nothing converting at all means the column given is not the
+    // one holding the timestamps, or they are not in a format csvdt reads. Exit
+    // 0 there is indistinguishable from success: a script would
     // carry on and analyse a file of markers.
     csvdt()
         .args(["-H", "-p", "-u0"])
@@ -328,7 +328,7 @@ fn a_run_where_nothing_converted_is_a_failure_and_a_run_that_partly_did_is_not()
 fn a_value_that_will_not_parse_is_still_there_to_be_read_unless_replaced() {
     // The marker is a word rather than an empty field because an empty field is
     // invisible. For the same reason the value that failed should stay in the
-    // output next to it -- otherwise the marker says something went wrong
+    // output next to it: otherwise the marker says something went wrong
     // without saying what. -i replace is the documented exception.
     csvdt()
         .args(["-H", "-p", "-u0"])
@@ -365,12 +365,12 @@ fn help_says_what_parse_err_means_and_that_it_does_not_fail_the_run() {
 fn help_says_the_writer_knows_the_comment_character() {
     // The protection lives in the writer, so someone deciding whether the
     // output of a --comment run is safe to re-read has to be able to find the
-    // answer -- and the two styles it cannot protect under -- from --help.
+    // answer (and the two styles it cannot protect under) from --help.
     //
     // Read with the whitespace collapsed, because what is promised is that
     // --help says these things, not that it says them on one line. Asserting
     // the line breaks made this fail when a help file was rewrapped, with the
-    // sentence still present and still saying the same thing -- a test that
+    // sentence still present and still saying the same thing: a test that
     // reports on formatting while claiming to report on content.
     let help = help_words();
 
@@ -389,8 +389,8 @@ fn help_says_the_writer_knows_the_comment_character() {
 fn a_record_length_error_says_what_else_to_look_for() {
     // There is no error for a quote that is opened and never closed: the reader
     // takes everything after it as one field, to the end of the file, so it
-    // arrives as a record with too few fields. That is also what a genuinely
-    // ragged file gives -- and the answer to raggedness, --flexible, accepts the
+    // arrives as a record with too few fields. That is also what a
+    // ragged file gives, and the answer to raggedness, --flexible, accepts the
     // mangled record rather than reporting it. So the message that misdirects
     // has to say what else to look for.
     for input in [
@@ -412,8 +412,8 @@ fn a_record_length_error_says_what_else_to_look_for() {
 fn an_unclosed_quote_swallows_the_rest_of_the_file_under_flexible() {
     // The half that makes the hint above worth having. Three rows come out as
     // one field: valid CSV, nothing like the input, exit 0. Pinned because it is
-    // a limit rather than a bug -- a field genuinely holding newlines is a real
-    // thing, and once parsed the two are indistinguishable -- so it must not
+    // a limit rather than a bug (a field holding newlines is a real
+    // thing, and once parsed the two are indistinguishable) so it must not
     // quietly change without KNOWN LIMITS changing with it.
     csvdt()
         .args(["-H", "-p", "-f"])
@@ -437,7 +437,7 @@ fn an_unclosed_quote_swallows_the_rest_of_the_file_under_flexible() {
 #[test]
 fn a_conversion_that_leaves_rfc3339s_year_range_is_marked_not_written() {
     // RFC3339's date-fullyear is four digits. chrono reaches much further and
-    // falls back to ISO 8601's expanded form -- +10000-01-01, -0001-12-31 --
+    // falls back to ISO 8601's expanded form (+10000-01-01, -0001-12-31)
     // which is a different format wearing the same shape, cannot be read back,
     // and gave no sign of the boundary it had crossed. The guard for this
     // existed but was wired into -r alone, so -u, -o and -l wrote it out.
@@ -493,8 +493,8 @@ fn split_keeps_sub_second_precision_like_every_other_conversion() {
     // The time column was formatted with a hard-coded %H:%M:%S, so a fraction
     // the source carried was dropped without a word. Nothing else here does
     // that: -d keeps it unless --round-seconds asks otherwise, and -u/-l/-o
-    // write back what came in. The rendering matches theirs -- chrono's 3, 6 or
-    // 9 digits -- so a split column and a -u column agree about the same
+    // write back what came in. The rendering matches theirs (chrono's 3, 6 or
+    // 9 digits) so a split column and a -u column agree about the same
     // instant.
     for (input, expected) in [
         ("2024-01-15T10:30:00Z", "10:30:00 +00:00"),
@@ -544,7 +544,7 @@ fn rfc3339_epoch_outside_chrono_range_is_a_parse_error_marker() {
     // An i64 that parses fine but is out of chrono's representable timestamp
     // range (e.g. i64::MAX) must not make
     // `from_timestamp` return None and silently pass the row through
-    // unmodified, with no value written and no error marker. It must now be
+    // unmodified, with no value written and no error marker. It must be
     // treated the same as any other unparseable timestamp.
     csvdt()
         .args(["-H", "-p", "-r1", "-i", "1,replace"])
@@ -631,7 +631,7 @@ fn local_reflects_a_real_dst_transition_via_system_tzdata() {
 #[test]
 fn offset_converts_to_an_explicit_target_regardless_of_host_timezone() {
     // Unlike -l, -o doesn't depend on the machine's configured timezone at
-    // all -- no TZ env needed here to get a deterministic result.
+    // all: no TZ env needed here to get a deterministic result.
     csvdt()
         .args(["-H", "-p", "-o", "1,-06:00", "-i", "1,replace"])
         .write_stdin("id,ts\n1,2024-06-15T14:00:00+02:00\n")
@@ -748,7 +748,7 @@ fn duration_two_columns_correct_between_two_countries_own_dst_offsets() {
 
 #[test]
 fn duration_two_columns_computes_difference_on_the_same_row() {
-    // -d with two columns replaces the old --row-duration action. Default
+    // -d with two columns gives the difference on the same row. Default
     // insert position (no -i given) is after the second column.
     csvdt()
         .args(["-H", "-p", "-d", "0,4"])
@@ -829,7 +829,7 @@ fn duration_single_value_does_not_swallow_a_following_file_argument() {
 
 #[test]
 fn duration_extra_bare_token_is_a_clean_clap_error() {
-    // -d takes exactly one value now, so a leftover bare token after it is
+    // -d takes exactly one value, so a leftover bare token after it is
     // rejected outright by clap ("unexpected argument") instead of being
     // silently absorbed by the wrong argument.
     csvdt()
@@ -864,7 +864,7 @@ fn header_out_of_bound_column_is_a_clean_error() {
 
 #[test]
 fn empty_input_with_has_header_is_not_an_error_and_not_a_panic() {
-    // On genuinely empty input the header record has no fields. Computing
+    // On empty input the header record has no fields. Computing
     // the bound as `vecbuff.len() - 1` would underflow and panic with exit
     // 101, and a clean "out of bound" error would still be the wrong answer:
     // it blames the column argument for the input being empty, and only when
@@ -1024,7 +1024,7 @@ fn each_trim_mode_touches_the_half_of_the_file_it_names() {
     // Four modes, and only two of them were tested: 'none' and 'fields'.
     // The pair that acts on headers went in unexercised, and they are the
     // two where getting it backwards is invisible in a file whose header
-    // and data are whitespaced alike -- which is the file anyone reaches
+    // and data are whitespaced alike, which is the file anyone reaches
     // for first.
     //
     // So the fixture is whitespaced on both, and each mode is asked for
@@ -1065,8 +1065,8 @@ fn each_trim_mode_touches_the_half_of_the_file_it_names() {
 fn trimming_takes_every_whitespace_unicode_knows_including_the_stubborn_one() {
     // The help says whitespace without saying whose. It is Unicode's, not
     // the space bar's, and the one worth knowing about is the non-breaking
-    // space: it is usually there on purpose -- a thousands separator in a
-    // good many locales, or a space something was typeset with -- and it
+    // space: it is usually there on purpose (a thousands separator in a
+    // good many locales, or a space something was typeset with) and it
     // goes like any other.
     //
     // Written as bytes rather than as a character, so that what is being
@@ -1210,7 +1210,7 @@ fn a_field_holding_the_comment_character_is_quoted_so_the_output_reads_back() {
         }));
 
     // 'never' is the style the writer cannot quote under, so there the row
-    // is still lost on a second read -- counted and said, as before.
+    // is still lost on a second read: counted and said, as before.
     csvdt()
         .args(["-H", "-p", "--comment", "#", "--quote", "never"])
         .write_stdin("a,b\n\"#x\",2\n3,4\n\"#y\",5\n")
@@ -1232,7 +1232,7 @@ fn a_field_holding_the_comment_character_is_quoted_so_the_output_reads_back() {
 
 #[test]
 fn the_warning_names_the_styles_that_actually_protect() {
-    // It said "Every other style quotes such a field" -- but 'never' and
+    // It said "Every other style quotes such a field", but 'never' and
     // 'nonnumeric' are two independent gaps, so a user warned under one could
     // switch to the other and still lose the row. The advice must name the
     // two styles that protect it under every field, and nothing vaguer.
@@ -1249,10 +1249,9 @@ fn the_warning_names_the_styles_that_actually_protect() {
             .success()
             .stderr(predicate::str::contains(
                 "'necessary', the default, and 'always'"))
-            // And not the style this run is already using: the old wording
-            // is gone from the binary, so asserting its absence asserted
-            // nothing. What must stay true is that the style being warned
-            // about is never itself offered as the way out of the warning.
+            // And not the style this run is already using: the style being
+            // warned about must never itself be offered as the way out of the
+            // warning.
             .stderr(predicate::str::contains(gap).not());
     }
 }
@@ -1261,7 +1260,7 @@ fn the_warning_names_the_styles_that_actually_protect() {
 fn nonnumeric_still_writes_a_numeric_comment_field_bare_and_is_counted() {
     // 'nonnumeric' decides by whether the field is a number and consults
     // nothing else, so --comment '-' over the numeric field -5 is written
-    // bare -- the one gap besides 'never', and still counted.
+    // bare: the one gap besides 'never', and still counted.
     csvdt()
         .args(["-H", "-p", "--comment", "-", "--quote", "nonnumeric"])
         .write_stdin("a,b\n\"-5\",2\n")
@@ -1282,8 +1281,8 @@ fn nonnumeric_still_writes_a_numeric_comment_field_bare_and_is_counted() {
 #[test]
 fn nonnumeric_cannot_quote_a_number_holding_the_output_delimiter_and_says_so() {
     // The comment character is not the only thing 'nonnumeric' cannot quote a
-    // number away from. A --print-delimiter a number can itself hold -- '.',
-    // '-', '+', 'e', or a digit -- goes out bare inside one, and a second read
+    // number away from. A --print-delimiter a number can itself hold ('.',
+    // '-', '+', 'e', or a digit) goes out bare inside one, and a second read
     // finds three fields where two were written. This was silent, which is the
     // same quiet damage the comment count exists to prevent, so it is counted
     // the same way.
@@ -1334,7 +1333,7 @@ fn nonnumeric_cannot_quote_a_number_holding_the_output_delimiter_and_says_so() {
 fn the_help_names_every_delimiter_a_number_can_hold_and_no_others() {
     // KNOWN LIMITS gives the set as the float syntax: any digit, '.', '-',
     // '+', 'e' or 'E', and the letters of inf, infinity and nan in either
-    // case -- twenty-seven characters, and every other delimiter safe under
+    // case: twenty-seven characters, and every other delimiter safe under
     // this style. That set is csv-core's numeric test rather than ours, so an
     // upgrade there could widen or narrow it and leave the help describing a
     // different program. This asks the binary instead of trusting the prose.
@@ -1342,7 +1341,7 @@ fn the_help_names_every_delimiter_a_number_can_hold_and_no_others() {
     // The vocabulary is one row of numbers, each written bare by 'nonnumeric'
     // and between them holding every character a number can: if a candidate
     // delimiter is one of them it appears in this row, and the run must say
-    // so. If it is not, the row is safe bare and the run must stay quiet --
+    // so. If it is not, the row is safe bare and the run must stay quiet,
     // which is what makes the negative half mean anything.
     const NUMBERS: [&str; 11] = [
         "0123456789", "5.5", "-5", "+5", "1e5", "1E5",
@@ -1371,7 +1370,7 @@ fn the_help_names_every_delimiter_a_number_can_hold_and_no_others() {
         // number, the writer would leave it bare and the run would say so,
         // failing the quiet half rather than passing it by never having
         // offered the character. A syntax using none of these shapes could
-        // still slip past -- the set is asked of the binary, not proved
+        // still slip past: the set is asked of the binary, not proved
         // exhaustively.
         //
         // Every field is quoted going in, so a candidate that is also the read
@@ -1413,7 +1412,7 @@ fn the_help_names_every_delimiter_a_number_can_hold_and_no_others() {
 #[test]
 fn the_split_count_is_only_for_the_style_that_promised_to_quote() {
     // 'necessary' and 'always' quote a field holding the delimiter, so there is
-    // nothing to warn about -- and the output really does read back.
+    // nothing to warn about, and the output really does read back.
     for style in ["necessary", "always"] {
         csvdt()
             .args(["-H", "-p", "--read-delimiter", ";",
@@ -1467,7 +1466,7 @@ fn a_field_that_is_not_a_number_is_quoted_however_it_holds_the_delimiter() {
 #[test]
 fn a_row_that_is_one_empty_field_is_quoted_under_every_style() {
     // The one place 'never' writes a quote. Bare, the row is a blank line, and
-    // a blank line is not a record any reader keeps -- so the record would
+    // a blank line is not a record any reader keeps, so the record would
     // vanish rather than come back empty. --remove leaving a row with no
     // fields at all is written the same way.
     for style in ["never", "necessary", "always", "nonnumeric"] {
@@ -1489,7 +1488,7 @@ fn a_row_that_is_one_empty_field_is_quoted_under_every_style() {
 
 #[test]
 fn the_header_is_counted_among_them_and_said_separately() {
-    // Under the default style the writer now quotes a column name holding the
+    // Under the default style the writer quotes a column name holding the
     // comment character, so the header survives a second read like any row.
     csvdt()
         .args(["-H", "-p", "--comment", "#"])
@@ -1512,7 +1511,7 @@ fn the_header_is_counted_among_them_and_said_separately() {
         .stderr(predicate::str::contains("The header is one of them"));
 
     // A data row alone does not get the header sentence, since nothing is
-    // promoted -- that row is simply missing.
+    // promoted: that row is simply missing.
     csvdt()
         .args(["-H", "-p", "--comment", "#", "--quote", "never"])
         .write_stdin("id,ts\n\"#x\",a\n")
@@ -1556,7 +1555,7 @@ fn a_header_that_is_not_written_cannot_be_read_back_as_a_comment() {
 #[test]
 fn losing_the_header_promotes_a_row_rather_than_dropping_it() {
     // Why the header is the worst of the three. Read back, the header is gone
-    // and the first data row has become the column names -- and a header is
+    // and the first data row has become the column names, and a header is
     // exempt from every conversion, so that row is not missing from the
     // output, it is sitting in it unconverted, with every column number still
     // lining up. This pins the behaviour the warning describes.
@@ -1573,8 +1572,8 @@ fn losing_the_header_promotes_a_row_rather_than_dropping_it() {
 
 #[test]
 fn the_row_a_comment_would_swallow_is_named_by_the_count_not_the_exit_status() {
-    // A few rows like this is not a reason to fail the run -- the output is
-    // written either way and may never be read back with --comment at all --
+    // A few rows like this is not a reason to fail the run (the output is
+    // written either way and may never be read back with --comment at all)
     // so it stays exit 0, like the parse_err tally it sits beside. Both can
     // be said by the same run.
     csvdt()
@@ -1591,7 +1590,7 @@ fn comment_handling_is_off_until_the_option_is_given() {
     // --comment's help claimed a default of b'#', and there is none: without
     // the option a leading '#' is data. Worse, in the file above it is data of
     // the wrong width, so the run fails on the comment line rather than
-    // skipping it -- which is exactly the confusion the claim would cause.
+    // skipping it, which is exactly the confusion the claim would cause.
     csvdt()
         .write_stdin("# a comment\na,b\n1,2\n")
         .assert()
@@ -1625,7 +1624,7 @@ fn every_pair_of_actions_conflicts() {
     // one of the 21 possible pairs among the 7 actions. conflicts_with_all
     // is declared by hand on each action (not derived), so a missing or
     // one-sided entry would silently let two actions run together instead
-    // of erroring -- check every pair, not just one.
+    // of erroring: check every pair, not just one.
     let actions: Vec<Vec<&str>> = vec![
         vec!["-s1"],
         vec!["-r1"],
@@ -1666,7 +1665,7 @@ fn duration_two_columns_still_conflicts_with_other_actions() {
 #[test]
 fn remove_does_not_accept_an_insert_position() {
     // --remove is deliberately excluded from "actions_req", the group -i
-    // requires -- there's no before/after/replace concept for a removed
+    // requires: there's no before/after/replace concept for a removed
     // column. Combining --remove with -i should fail the same way -i with no
     // action at all does.
     csvdt()
@@ -1787,7 +1786,7 @@ fn parse_error_marker_is_plain_in_data_rows_for_every_action() {
     // row's parse failure is always the plain `parse_err` token so downstream
     // tooling can filter on one value.
     // Each action gets a value it can convert alongside, since a run where
-    // nothing converts is an error of its own now.
+    // nothing converts is an error of its own.
     for (action, convertible) in [
         ("-u0", "2024-01-01T00:00:00Z"),
         ("-l0", "2024-01-01T00:00:00Z"),
@@ -1968,7 +1967,7 @@ fn offset_handles_the_extremes_and_sub_hour_targets() {
 #[test]
 fn utc_and_offset_preserve_the_instant_across_a_conversion_chain() {
     // Converting to an arbitrary offset and back to UTC must land on exactly
-    // the original instant -- the property that matters most when a timestamp
+    // the original instant: the property that matters most when a timestamp
     // is evidence.
     let original = "2024-11-03T05:30:00+00:00";
     csvdt()
@@ -1991,7 +1990,7 @@ fn utc_and_offset_preserve_the_instant_across_a_conversion_chain() {
 fn there_is_no_year_zero_to_convert_into() {
     // Four digits would hold 0000, so a four-digit guard is not enough. The calendar
     // runs 1 BC straight into AD 1, and ISO 8601 writes 0000 for 1 BC only
-    // where both sides have agreed to read it that way -- RFC3339 makes no
+    // where both sides have agreed to read it that way: RFC3339 makes no
     // such agreement. A value landing there came from something other than a
     // date somebody recorded: a sentinel, or an epoch counted in the wrong
     // unit. AD 1 is the floor, and it converts.
@@ -2024,12 +2023,12 @@ fn there_is_no_year_zero_to_convert_into() {
 #[test]
 fn local_marks_a_zone_offset_that_is_not_whole_minutes() {
     // RFC3339 writes an offset as +HH:MM, with nowhere to put a seconds part.
-    // A zone's local mean time -- what every zone used before it adopted
-    // standard time -- is rarely a whole minute, and chrono renders one by
+    // A zone's local mean time (what every zone used before it adopted
+    // standard time) is rarely a whole minute, and chrono renders one by
     // rounding the offset while the clock time keeps its seconds. The result
     // named a different instant from the input: Africa/Monrovia's -00:44:30
     // turned 1971-06-01T12:00:00Z into 1971-06-01T11:15:30-00:45, which reads
-    // back as 12:00:30Z. Marked now, with the input still beside it.
+    // back as 12:00:30Z. It is marked, with the input still beside it.
     //
     // Monrovia rather than an 1800s date on purpose: it kept -00:44:30 until
     // January 1972, so this is inside the range of real logs.
@@ -2162,26 +2161,6 @@ fn local_handles_the_tz_variables_edge_cases() {
 }
 
 #[test]
-#[cfg(unix)]
-fn local_falls_back_to_chrono_for_a_posix_rule_string() {
-    // A TZ holding POSIX rules rather than a zone name can't be looked up in
-    // the IANA database, so -l defers to chrono's own parsing. Verified to
-    // match GNU date for this rule.
-    //
-    // Unix only: chrono reads TZ on Unix but not on Windows, where the system
-    // timezone wins and a rule string like this is ignored. Zone *names* are
-    // looked up by csvdt itself and so work identically on every platform --
-    // this test covers the one path that genuinely differs.
-    csvdt()
-        .args(["-H", "-p", "-l0", "-i", "0,replace"])
-        .env("TZ", "EST5EDT,M3.2.0,M11.1.0")
-        .write_stdin("ts\n2026-07-25T12:00:00Z\n")
-        .assert()
-        .success()
-        .stdout("to_local\n2026-07-25T08:00:00-04:00\n");
-}
-
-#[test]
 #[ignore = "known gap in the bundled IANA database (chrono-tz 0.10 / tzdata \
             2025b): the deprecated EET and WET aliases resolve an hour late \
             for historical dates -- EET in 1975-1976, WET before 1997. The \
@@ -2234,7 +2213,7 @@ fn the_manual_page_is_rendered_from_the_options_themselves() {
                     ".SH EXIT STATUS", ".SH VERSION"] {
         assert!(page.contains(section), "the page has no {section}");
     }
-    // And the catch-all itself is gone, since what it held now stands alone.
+    // And the catch-all itself is gone, since what it held stands alone.
     assert!(!page.contains(".SH EXTRA"), "the EXTRA catch-all is still there");
 
     // Prose mentioning a heading mid-sentence must not have become one.
@@ -2266,7 +2245,7 @@ fn the_manual_page_is_rendered_from_the_options_themselves() {
 #[test]
 fn the_help_files_fit_the_column_the_manual_page_leaves_them() {
     // man indents an option's help by 14 columns and a section's by 7, and
-    // the help files are laid out by hand -- so their own width decides
+    // the help files are laid out by hand, so their own width decides
     // whether the page fits an 80-column terminal. 64 leaves room for the
     // deeper of the two indents plus the margin groff keeps.
     //
@@ -2276,13 +2255,11 @@ fn the_help_files_fit_the_column_the_manual_page_leaves_them() {
     // inside the RPM build.
     const LIMIT: usize = 64;
     // Where the 64 comes from, so that raising it fails here rather than in
-    // the page. Both the corpus's README and the comment over
-    // preserve_aligned_blocks once put this at 72, reasoning from the
-    // 7-column indent a section's body gets and forgetting that a line in an
-    // option's help sits 14 in -- and that a marked line is held with '.br',
-    // which leaves filling on, so roff wraps a line too long for the terminal
-    // and then justifies what it wrapped. A '--peek' example widened to the
-    // 72 those two licensed reached an 80-column page as
+    // the page. Reasoning from the 7-column indent a section's body gets
+    // would allow 72, but a line in an option's help sits 14 in, and a marked
+    // line is held with '.br', which leaves filling on, so roff wraps a line
+    // too long for the terminal and then justifies what it wrapped. A
+    // '--peek' example widened to 72 reaches an 80-column page as
     //
     //     $       csvdt       -H       -p        --peek        sales.csv
     //     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -2335,7 +2312,7 @@ fn the_first_line_naming_an_option_is_that_option_s_own_entry() {
     // read, and takes the first line naming an option as that option's
     // entry, since csvdt's own prose names options and a wrapped line can
     // start with one. So a line of help text beginning '--help' becomes the
-    // entry for --help, and '-h' is lost with it -- which is exactly what
+    // entry for --help, and '-h' is lost with it, which is exactly what
     // --generate-man's help did the moment it gained a sentence beginning
     // that way, and what the front end's own checks caught.
     //
@@ -2381,7 +2358,7 @@ fn the_first_line_naming_an_option_is_that_option_s_own_entry() {
 #[test]
 fn no_help_line_begins_with_something_that_looks_like_an_option() {
     // In the description column a line beginning '--' is indistinguishable
-    // from the start of a new option entry -- to a reader skimming, and to
+    // from the start of a new option entry: to a reader skimming, and to
     // anything parsing --help, which is how rewrapping the corpus briefly
     // invented two options that do not exist:
     //
@@ -2440,7 +2417,7 @@ fn the_short_help_lists_every_option_the_long_one_does() {
 fn every_summary_is_the_opening_of_the_help_it_summarises() {
     // The point of the split: one authored text at two depths, rather than
     // two texts. A hand-written line of one-liners would be a second thing
-    // to keep true and the first to go stale -- which is this program's own
+    // to keep true and the first to go stale, which is this program's own
     // argument for generating its manual page instead of keeping one.
     //
     // So this asks the two rendered forms to agree, rather than working the
@@ -2468,8 +2445,8 @@ fn every_summary_is_the_opening_of_the_help_it_summarises() {
             "-h's --{name} is not how --help's begins:\n  -h    : {summary}\n\
              \x20 --help: {full}",
         );
-        // A sentence, not a cut. Four entries end in a worked example --
-        // '(e.g. -o1,-06:00)' -- whose full stop would halve the line and
+        // A sentence, not a cut. Four entries end in a worked example:
+        // '(e.g. -o1,-06:00)', whose full stop would halve the line and
         // take the syntax with it, which is the part a summary most needs.
         assert!(
             summary.ends_with('.') || summary == full,
@@ -2477,7 +2454,7 @@ fn every_summary_is_the_opening_of_the_help_it_summarises() {
         );
         // And a sentence rather than an abbreviation. The stop in 'e.g.' is
         // a stop like any other to the splitter, so a first sentence
-        // carrying one outside brackets is cut at it -- and the cut passes
+        // carrying one outside brackets is cut at it, and the cut passes
         // every check above, the one directly overhead included: it ends
         // with a full stop, it begins the long help, its brackets balance,
         // and it is shorter than what it summarises. What -h printed for
@@ -2488,7 +2465,7 @@ fn every_summary_is_the_opening_of_the_help_it_summarises() {
         //
         // with the whole suite green. The four entries that carry an
         // abbreviation put it inside brackets, where the splitter does not
-        // look, and that is what this makes a rule rather than a habit --
+        // look, and that is what this makes a rule rather than a habit:
         // duration.txt and split.txt each carry one outside brackets today
         // and are unharmed only because it falls past their first sentence.
         for abbreviation in ["e.g.", "i.e.", "etc.", "cf.", "vs."] {
@@ -2511,10 +2488,10 @@ fn every_summary_is_the_opening_of_the_help_it_summarises() {
 
     // A prefix that is the whole string is still a prefix, so the rule above
     // holds perfectly well when nothing is summarised at all. Most entries
-    // say more than their first sentence, and this is where that is asked:
-    // a first draft counted lines instead and passed a build whose short
-    // help carried every word of the long one, the two layouts differing
-    // enough to keep the ratio looking right.
+    // say more than their first sentence, and this is where that is asked.
+    // Counting lines instead would pass a build whose short help carried
+    // every word of the long one, the two layouts differing enough to keep
+    // the ratio looking right.
     assert!(
         shortened >= short.len() * 2 / 3,
         "only {shortened} of {} summaries are shorter than the help they \
@@ -2570,7 +2547,7 @@ fn the_short_help_leaves_out_the_reference_material_and_says_where_it_went() {
 #[test]
 fn neither_help_form_runs_past_the_column_the_corpus_is_written_to() {
     // clap fills a table to the terminal only with its wrap_help feature,
-    // which this program does not take -- the corpus is folded by hand at 64
+    // which this program does not take: the corpus is folded by hand at 64
     // columns instead, so that what a reader sees is what was written and a
     // table stays a table. A summary is made rather than written, so nothing
     // folds it unless the program does: one entry ran a single line of -h out
@@ -2592,19 +2569,19 @@ fn neither_help_form_runs_past_the_column_the_corpus_is_written_to() {
 fn every_heading_in_the_help_is_shaped_like_the_others() {
     // Five headings had three shapes between them: TIMESTAMP FORMATS with no
     // blank line above it, EXAMPLES and DOCUMENTATION with none below. Each
-    // reads fine alone, which is why it lasted -- the join between two
+    // reads fine alone, which is why it lasted: the join between two
     // sections is only wrong next to a join done the other way.
     //
     // One shape for all of them: a blank line above, and none below, so a
     // heading sits against what it introduces and apart from what came
     // before. The five section headings were the odd ones out once the rest
-    // were looked at -- the fifteen inside KNOWN LIMITS had always been
+    // were looked at: the fifteen inside KNOWN LIMITS had always been
     // written the second way.
     //
     // Found rather than listed, so a heading written later is held to the
     // same shape without anyone remembering to add it here. A heading is a
     // line at the margin whose words are capitals once the option names
-    // among them are set aside -- which is what separates 'A LEAP SECOND
+    // among them are set aside, which is what separates 'A LEAP SECOND
     // ADDS NOTHING TO A SPAN' from the paragraph beginning 'Unix epoch
     // (read by -r/--rfc3339, which converts FROM this'. The blank line
     // above is asked about rather than assumed, so a heading that loses one
@@ -2668,7 +2645,7 @@ fn the_corpus_still_has_the_blank_line_the_two_forms_are_split_at() {
     //
     // Asked the way first_paragraph asks it: a line that is empty once
     // trimmed ends the paragraph. That is what makes this true of the file
-    // as checked out rather than of one set of line endings -- git hands a
+    // as checked out rather than of one set of line endings: git hands a
     // Windows checkout CRLF, where a literal "\n\n" is nowhere in the file
     // and this failed every run on that leg while the program was fine.
     //
@@ -2689,7 +2666,7 @@ fn the_corpus_still_has_the_blank_line_the_two_forms_are_split_at() {
 #[test]
 fn the_manual_page_takes_the_long_help_not_the_summary() {
     // clap_mangen prefers long_help and falls back to help, so a page built
-    // from a Command whose long forms went missing would still render --
+    // from a Command whose long forms went missing would still render:
     // one sentence per option, valid roff, nothing to see. This asks for a
     // sentence that exists only past the first one.
     let page = String::from_utf8(
@@ -2840,7 +2817,7 @@ fn every_option_description_starts_on_its_own_line() {
     //
     // A break after every tag settles it for whatever is named next, short
     // or long, which is why this asks after all of them rather than after
-    // the one that was wrong.
+    // the one that is wrong.
     let page = String::from_utf8(
         csvdt().arg("--generate-man").output().unwrap().stdout,
     )
@@ -2880,8 +2857,8 @@ fn every_option_description_starts_on_its_own_line() {
 
 #[test]
 fn the_help_names_a_character_the_way_a_reader_writes_one() {
-    // Seven places spelled a character as Rust spells a byte -- b'#' for
-    // the comment character, b',' for the delimiter, b'"' for the quote --
+    // Seven places spelled a character as Rust spells a byte (b'#' for
+    // the comment character, b',' for the delimiter, b'"' for the quote)
     // which is the language the program is written in showing through the
     // text a user reads. Nothing else in the help is written that way; the
     // corpus quotes a literal plainly, '-H' and '-p' and the rest.
@@ -2898,8 +2875,8 @@ fn the_help_names_a_character_the_way_a_reader_writes_one() {
 fn no_option_name_in_the_manual_page_can_be_split_across_lines() {
     // roff hyphenates to fill a line, and it has no idea that --duration is
     // one word rather than English. At 80 columns two names came out broken
-    // -- '--du-' at the end of a line and 'ration).' at the start of the
-    // next -- which names an option that does not exist and cannot be
+    // ('--du-' at the end of a line and 'ration).' at the start of the
+    // next) which names an option that does not exist and cannot be
     // pasted. '\%' opening the word is what stops it.
     //
     // Checked in the roff rather than the rendering, so it holds without a
@@ -2955,7 +2932,7 @@ fn no_option_name_in_the_manual_page_can_be_split_across_lines() {
 fn the_manual_page_carries_the_sections_help_cannot() {
     // Everything above these is generated from the Command that parses a
     // command line, which is what keeps the page from describing options
-    // this build does not have -- and is why there is nowhere in it for what
+    // this build does not have, and is why there is nowhere in it for what
     // belongs to the program rather than to one of its options. GNU
     // coreutils merges a per-page man/prog.x for the same reason; this is
     // csvdt's one file of it, and this asks that it arrived.
@@ -3009,7 +2986,7 @@ fn what_the_manual_page_says_about_the_environment_is_what_csvdt_does() {
     // And the variable the page names is the one the message names, which is
     // the whole reason the section names it. Set through with_temp_dir rather
     // than by hand: TMPDIR alone moves nothing on Windows, so the run would
-    // spool to the real system directory and succeed -- which is exactly the
+    // spool to the real system directory and succeed, which is exactly the
     // difference this half of the test exists to pin.
     let temporary = tempfile_dir().join("man-environment");
     std::fs::create_dir_all(&temporary).unwrap();
@@ -3111,7 +3088,7 @@ fn the_manual_page_is_ascii() {
     //
     // One typographic apostrophe in one help file did that, and 'aren't' came
     // out of man as 'arenat'. roff has escapes for the characters worth
-    // having -- \(aq, \(oq, \(cq, \(em -- so the help text stays ASCII and
+    // having (\(aq, \(oq, \(cq, \(em) so the help text stays ASCII and
     // anything beyond it is written as an escape rather than a raw byte.
     let page = String::from_utf8(
         csvdt().arg("--generate-man").output().unwrap().stdout,
@@ -3142,7 +3119,7 @@ fn the_manual_page_keeps_the_line_breaks_the_help_was_written_with() {
     //              They are necessary when fields contain a  quote,  de-
     //   limiter or record
     //
-    // which is not a table, a paragraph, or readable -- and every section
+    // which is not a table, a paragraph, or readable, and every section
     // check passed over it, because the headings were all present.
     //
     // So a run of help lines with any indented line among them is laid out on
@@ -3165,14 +3142,14 @@ fn the_manual_page_keeps_the_line_breaks_the_help_was_written_with() {
         // undo. Compared with the escapes undone, since a page spells a
         // hyphen '\-' so that roff does not read it as one it may break at,
         // and opens an option name '\%' so that roff does not break the name
-        // itself. Neither sets anything -- both are instructions about
-        // breaking -- and this is a question about layout.
+        // itself. Neither sets anything, both are instructions about
+        // breaking, and this is a question about layout.
         //
         // The nesting is a '.RS' region rather than an indent written into
         // the text: the tag sits in one and its description in another, so
         // the description fills to the width the page is read at instead of
         // freezing at the width the help file is wrapped to. What this asks
-        // is unchanged -- that the tag stands over its description and was
+        // is unchanged: that the tag stands over its description and was
         // not filled into a paragraph beside it.
         //
         // The region is also what tells this table from the list of values
@@ -3212,7 +3189,7 @@ fn the_manual_page_keeps_the_line_breaks_the_help_was_written_with() {
 // endings are the bytes --help prints and the page is rendered from. Windows
 // checks text out with CRLF unless .gitattributes says otherwise, and the day
 // it did, a blank line inside an option's long help was ten spaces and a
-// carriage return -- which the trim that takes trailing padding off walked
+// carriage return, which the trim that takes trailing padding off walked
 // straight past, leaving 59 lines of whitespace in --help on windows-latest
 // and none anywhere else.
 //
@@ -3257,7 +3234,7 @@ fn the_text_compiled_into_the_binary_has_no_carriage_returns() {
 // --list-options is exempt from the trailing-space half, and only that half.
 // Its format is tab-separated fields and the last of them is empty for an
 // option that takes no value, so those lines end in a tab because the field
-// is there and empty -- a wrapper splitting on tabs counts on it. It is still
+// is there and empty: a wrapper splitting on tabs counts on it. It is still
 // held to having no line that is whitespace alone.
 #[test]
 fn what_csvdt_says_about_itself_has_no_trailing_whitespace() {
@@ -3301,13 +3278,13 @@ fn what_csvdt_says_about_itself_has_no_trailing_whitespace() {
 }
 
 // The verbatim gutter marks a block in the help files as text laid out on
-// purpose -- a command to copy, a sample of output, a diagram whose columns
+// purpose: a command to copy, a sample of output, a diagram whose columns
 // line up. It decides what the page holds as written and what it lets roff
 // fill, and it is meant for the renderer, never for a reader.
 //
 // Two things have to hold, and they pull against each other. The gutter must
 // reach none of the three things csvdt prints, and every line it marks must
-// reach the page exactly as it was written -- so a strip that took too much,
+// reach the page exactly as it was written, so a strip that took too much,
 // or a pass that filled a marked block, fails here.
 #[test]
 fn the_verbatim_gutter_marks_the_page_and_never_shows_in_it() {
@@ -3400,19 +3377,17 @@ fn the_verbatim_gutter_marks_the_page_and_never_shows_in_it() {
 
 #[test]
 fn every_verbatim_block_stands_clear_of_the_prose_around_it() {
-    // Seven marked blocks were once written hard against the sentence above
-    // or below, which reads as cramped in the page and in
-    // --help alike and makes the same kind of block look like two kinds
-    // depending on which file it is in. They were spaced alike, and the
-    // corpus README says to keep them that way -- but only one half of one
-    // file was ever asked.
+    // A marked block written hard against the sentence above or below reads
+    // as cramped in the page and in --help alike, and makes the same kind of
+    // block look like two kinds depending on which file it is in. The corpus
+    // README says to space them alike, and this asks it of every file.
     //
     // every_worked_example_stands_clear_of_the_prose_around_it asks the
     // rendered --help about lines beginning '$ csvdt', and only about the
     // blank line above them, which is the right question for the line it
     // finds: a command is followed by its own sample output, not by a blank.
     // The block is the thing with two sides, so the block is what this asks
-    // about -- and it asks it of every marked block, not only the ones that
+    // about, and it asks it of every marked block, not only the ones that
     // happen to be commands. Taking the blank line off the bottom of an
     // EXAMPLES block, or off the top of the sample timestamps in formats.txt,
     // left the whole suite green.
@@ -3484,7 +3459,7 @@ fn every_shell_command_in_the_corpus_is_held_verbatim() {
     // everything else is prose that ought to fill. One kind is neither. A
     // line whose first non-space is '$ ' is a command a reader is meant to
     // copy, and roff filling one produces the very thing the gutter exists
-    // to prevent -- the corpus README carries the specimen:
+    // to prevent: the corpus README carries the specimen:
     //
     //     $       csvdt       -H       -p        --peek        sales.csv
     //
@@ -3541,7 +3516,7 @@ fn the_value_tables_were_not_rewrapped_into_prose() {
     //   parsing. none    Preserves fields and headers. fields  Trim
     //   whitespace from fields, but not headers. headers Trim whitespace
     //
-    // in --help itself -- the one place the table had still been right. The
+    // in --help itself: the one place the table had still been right. The
     // --list-options table lost a row the same way: 'separator' ended up
     // inside the description of 'value', so the format's five fields were
     // documented as four.
@@ -3622,8 +3597,8 @@ fn every_known_limit_still_has_a_heading_to_find_it_by() {
 
 #[test]
 fn version_carries_build_metadata_only_when_stamped() {
-    // A published build carries semver build metadata naming the exact build
-    // -- "1.3.0+2026.08.a1b2c3d" -- set through CSVDT_BUILD_METADATA by the
+    // A published build carries semver build metadata naming the exact build,
+    // "1.3.0+2026.08.a1b2c3d", set through CSVDT_BUILD_METADATA by the
     // workflow that publishes it. A build made by hand carries none, so it
     // reads plainly and cannot be mistaken for something published.
     //
@@ -3965,7 +3940,7 @@ fn remove_can_drop_every_column() {
 fn remove_applies_per_row_when_rows_have_differing_widths() {
     // With -f each row is handled on its own width, so the same two input
     // positions are dropped from every row regardless of how many fields it
-    // has -- rather than a fixed number of trailing fields.
+    // has, rather than a fixed number of trailing fields.
     csvdt()
         .args(["-H", "-p", "-f", "--remove", "0,1"])
         .write_stdin(
@@ -4112,7 +4087,7 @@ fn arrange_rejects_a_repeated_column() {
 
 #[test]
 fn duration_rejects_a_column_measured_against_itself() {
-    // -d1,1 was accepted and answered PT0S on every row -- a full column of
+    // -d1,1 was accepted and answered PT0S on every row: a full column of
     // plausible results from a typo for -d1,2. Unlike parse_err, nothing in
     // the output said so, and PT0S is a value -d writes for real reasons
     // elsewhere. --remove and -a already refused the same shape of mistake.
@@ -4253,7 +4228,7 @@ fn the_fill_log_names_every_row_a_filling_mode_padded() {
     // What the option is for: the filling modes add fields that cannot be
     // told from fields the source really held, so the run has to be able to
     // say where it did that. One row per record touched, and the record
-    // named twice -- by line, which is what an editor jumps to, and by
+    // named twice: by line, which is what an editor jumps to, and by
     // record, which is a different number the moment a field holds a
     // newline.
     //
@@ -4279,7 +4254,7 @@ fn the_fill_log_says_needed_where_plain_flexible_changed_nothing() {
     //
     // Measured against the first record, which is all a single pass has.
     // That makes 'over' reachable here for a row wider than the first, where
-    // widest would simply have counted it -- the two modes disagree about
+    // widest would simply have counted it: the two modes disagree about
     // the same file, which is why the run says on stderr which reference it
     // used.
     // The header is three fields and the first data row two, so the log can
@@ -4320,7 +4295,7 @@ fn the_fill_log_ends_on_the_row_that_ended_the_run() {
 #[test]
 fn the_fill_log_counts_the_header_when_widest_pads_it() {
     // widest pads the header too, and the added names are empty rather than
-    // invented -- an analyst looking at a column with no name needs to know
+    // invented: an analyst looking at a column with no name needs to know
     // whether the source had none or csvdt made one. The header is read
     // before any record, so it has no position of its own: line 1, record 0,
     // which is what the reader would have said had it been asked.
@@ -4338,7 +4313,7 @@ fn the_fill_log_counts_the_header_when_widest_pads_it() {
 fn the_fill_log_refuses_to_be_the_input_or_the_output() {
     // The log is created, and creating truncates. Pointed at the input, it
     // emptied the file before the run read it, then read the empty file it
-    // had just made, wrote nothing, and exited 0 -- 75 bytes of somebody's
+    // had just made, wrote nothing, and exited 0: 75 bytes of somebody's
     // data replaced by a header line, with a successful status on top. That
     // is the loss refuse_input_that_is_also_the_output was written for,
     // reached through a door it does not watch.
@@ -4457,7 +4432,7 @@ fn the_fill_log_refuses_to_be_the_input_or_the_output() {
 #[test]
 fn the_fill_log_is_refused_where_it_would_have_nothing_to_say() {
     // Without a filling mode there is nothing to account for, and an empty
-    // log reads as a clean file -- the one conclusion it must never invite.
+    // log reads as a clean file: the one conclusion it must never invite.
     csvdt()
         .args(["-H", "--fill-log", "-"])
         .write_stdin("a,b\n1,2\n")
@@ -4503,7 +4478,7 @@ fn a_filling_mode_that_fails_partway_has_already_written_what_it_wrote() {
     // "Nothing incomplete is ever sent to the output" is true of the counting
     // pass and not of the run, so flexible.txt does not say it. Once a filling mode starts writing it writes as it
     // reads, so a failure partway leaves valid rectangular CSV that simply
-    // stops early -- and a filled file is the one kind a reader cannot tell
+    // stops early, and a filled file is the one kind a reader cannot tell
     // is short by looking, since every row in it is the right width.
     //
     // Measured once on a widest run whose file grew between its two reads: 1.5
@@ -4612,11 +4587,11 @@ fn help_says_widest_assumes_the_input_holds_still() {
 
 #[test]
 fn help_bounds_memory_by_the_widest_record_not_the_file() {
-    // It claimed memory "does not grow with the file, however large the
-    // input" -- measured false for the case its own unclosed-quote section
-    // documents: 200 MB of ordinary rows peak at 9 MB, the same bytes behind
-    // one unclosed quote become a single field and cost 260 MB. The claim
-    // now states the true bound, and this holds it to that.
+    // The help must not claim memory "does not grow with the file, however
+    // large the input": that is false for the case its own unclosed-quote
+    // section documents. 200 MB of ordinary rows peak at 9 MB, but the same
+    // bytes behind one unclosed quote become a single field and cost 260 MB.
+    // The claim states the true bound, and this holds it to that.
     //
     // Whitespace collapsed, for the reason the --comment test gives: what is
     // promised is that --help says this, not where the line breaks fall in it.
@@ -4710,9 +4685,9 @@ fn non_utf8_input_is_a_clean_error_naming_where_it_failed() {
     // action touches.
     //
     // Every coordinate the message gives is pinned here, because the docs
-    // describe them and only the words "invalid utf-8" were ever checked --
-    // which let the description say the byte offset was the first bad byte's
-    // for as long as nobody looked. It is the record's. In this file:
+    // describe them and only the words "invalid utf-8" were ever checked,
+    // so the description could say the byte offset was the first bad byte's
+    // and nobody would notice. It is the record's. In this file:
     //
     //   ts,note\n            bytes 0..7
     //   2024-...Z,caf\xe9\n  record 1, starting at byte 8
@@ -4735,7 +4710,7 @@ fn non_utf8_input_is_a_clean_error_naming_where_it_failed() {
         .code(1)
         .stderr(predicate::str::contains("invalid utf-8"))
         // The record and the line it is in, the field, and the byte the
-        // record begins at -- not the byte the bad one is at.
+        // record begins at: not the byte the bad one is at.
         .stderr(predicate::str::contains(
             "record 1 (line 2, field: 1, byte: 8)"))
         // And how far into that field it lies.
@@ -4882,7 +4857,7 @@ fn utf16_without_a_byte_order_mark_is_refused_not_silently_mangled() {
 #[test]
 fn the_utf16_check_does_not_catch_fields_that_really_contain_nuls() {
     // The test is the full alternating pattern, not merely the presence of a
-    // NUL, so genuine NUL bytes -- including a run of them -- still pass
+    // NUL, so genuine NUL bytes (including a run of them) still pass
     // through untouched.
     for (name, content) in [
         ("one.csv", b"a,b\nx\0y,z\n".to_vec()),
@@ -5011,7 +4986,7 @@ fn flexible_widest_is_idempotent() {
 #[test]
 fn flexible_widest_leaves_no_temporary_file_behind() {
     // The spool is removed by its Drop, so a run must not litter the temp
-    // directory -- on success or on failure. Each run gets a private TMPDIR so
+    // directory: on success or on failure. Each run gets a private TMPDIR so
     // this cannot see, or be confused by, a spool belonging to another test
     // running at the same time.
     let count_in = |dir: &std::path::Path| {
@@ -5042,7 +5017,7 @@ fn flexible_widest_leaves_no_temporary_file_behind() {
 #[test]
 fn flexible_widest_still_refuses_bad_encodings() {
     // The counting pass reads bytes without validating them, so the check has
-    // to still happen -- it does, when the file is opened for either pass.
+    // to still happen: it does, when the file is opened for either pass.
     let dir = tempfile_dir();
     let path = dir.join("w-latin1.csv");
     std::fs::write(&path, b"a,b\ncaf\xe9\n").unwrap();
@@ -5081,7 +5056,7 @@ fn peek_numbers_the_columns_above_the_header_and_the_first_row() {
 #[test]
 fn peek_follows_the_ordinary_meaning_of_has_header_and_print_header() {
     // -H says a header is there and the reader takes that record as one, so
-    // what is shown is the first *data* row -- the file's second line. It is
+    // what is shown is the first *data* row: the file's second line. It is
     // -p that asks for a header to be written, here as everywhere else.
     csvdt()
         .args(["-H", "--peek"])
@@ -5137,7 +5112,7 @@ fn peek_shows_a_ragged_file_rather_than_refusing_it() {
 fn peek_keeps_a_field_that_holds_a_newline_on_one_line() {
     // A quoted field may hold a record terminator, and left alone one field
     // turns a three-row table into five with the numbering standing above
-    // nothing -- the one thing this mode exists to get right.
+    // nothing: the one thing this mode exists to get right.
     csvdt()
         .args(["-H", "-p", "--peek"])
         .write_stdin("a,b\n\"x\ny\",\"p\tq\"\n")
@@ -5176,7 +5151,7 @@ fn peek_sees_the_same_fields_a_run_sees_under_every_reading_option() {
     // list of fields to beat; --peek writes the same fields padded into a
     // table. Every fixture is built from tokens holding no space, comma or
     // quote, so both forms come apart again on nothing more than whitespace
-    // and commas -- the padding is not what is under test here.
+    // and commas: the padding is not what is under test here.
     //
     // Each dialect is one that changes the answer, so a build ignoring it
     // fails rather than passing on a file it would have read the same way:
@@ -5238,8 +5213,8 @@ fn peek_sees_the_same_fields_a_run_sees_under_every_reading_option() {
 #[test]
 fn peek_tells_an_escape_in_the_data_from_one_it_wrote_itself() {
     // A tab is shown as '\t' so that one field stays one row. That leaves
-    // two different fields with one spelling -- a real tab, and the two
-    // characters a reader would type to mean one -- unless the backslash
+    // two different fields with one spelling (a real tab, and the two
+    // characters a reader would type to mean one) unless the backslash
     // that starts an escape is escaped too.
     //
     // Both are asked for at once, in neighbouring columns, since what is
@@ -5300,7 +5275,7 @@ fn peek_refuses_the_options_that_write() {
 fn peek_numbers_the_columns_a_run_would_see() {
     // peek.txt: "Reads the file the way a run would: '--read-delimiter',
     // '--comment', '--single-quote' and '--trim' all apply, so the columns
-    // are the ones a run would see." That is the claim the mode exists for --
+    // are the ones a run would see." That is the claim the mode exists for:
     // somebody reads a column number off --peek and hands it to a run, and a
     // number that meant something else there converts the wrong column and
     // returns a plausible answer.
@@ -5309,8 +5284,8 @@ fn peek_numbers_the_columns_a_run_would_see() {
     // built, so there are not two readers to disagree. Which is exactly why
     // it is worth asking. scan_widest_record had the same shape of guarantee
     // and nothing holding it, and every way of pulling that pair apart passed
-    // the whole suite. A refactor giving peek a reader of its own -- to look
-    // at a file without consuming the run's, say -- would diverge in silence.
+    // the whole suite. A refactor giving peek a reader of its own (to look
+    // at a file without consuming the run's, say) would diverge in silence.
     //
     // Asked as exact numbering rather than as agreement between the two. A
     // test that only compared them would pass a build whose reader was
@@ -5351,7 +5326,7 @@ fn peek_numbers_the_columns_a_run_would_see() {
         // Counted by the writer's own quoting rules rather than by splitting
         // on commas: '--single-quote' turns a,'b,c',d into three fields, and
         // the middle one is written back quoted, where a naive split finds
-        // four. Reading the output back through csvdt is the honest count.
+        // four. Reading the output back through csvdt is the right count.
         let widest = String::from_utf8(
             csvdt().arg("--peek").write_stdin(output).output().unwrap().stdout,
         )
@@ -5373,8 +5348,8 @@ fn peek_numbers_the_columns_a_run_would_see() {
 fn every_option_is_either_welcome_with_peek_or_refused_by_it() {
     // The list above is written out by hand, which pins the message but leaves
     // a fourteenth option free to arrive and be neither refused nor thought
-    // about. So the set comes from --list-options -- the binary's own account
-    // of what it takes -- and everything in it must land on one side or the
+    // about. So the set comes from --list-options (the binary's own account
+    // of what it takes) and everything in it must land on one side or the
     // other. A new option is refused by default here, and saying it should be
     // welcome means saying so below.
     let listed = String::from_utf8(
@@ -5388,7 +5363,7 @@ fn every_option_is_either_welcome_with_peek_or_refused_by_it() {
     // Each comes with an input the option changes the reading of, and what
     // --peek must show for it. Exit 0 is not the question: an option accepted
     // and then ignored would pass that, and being accepted is worth nothing
-    // here -- the whole promise is that the columns numbered are the ones a
+    // here: the whole promise is that the columns numbered are the ones a
     // run would see, which only holds if the option applied. So the same input
     // is peeked at again without it, and the two must differ.
     const WELCOME: [(&str, &[&str], &str, &str); 6] = [
@@ -5455,7 +5430,7 @@ fn every_option_is_either_welcome_with_peek_or_refused_by_it() {
                 String::from_utf8_lossy(&with), *expected,
                 "--peek {extra:?} showed something else",
             );
-            // And the same file without it, which must look different --
+            // And the same file without it, which must look different:
             // otherwise the case proves nothing about the option applying.
             let without = csvdt()
                 .arg("--peek")
@@ -5506,7 +5481,7 @@ fn every_option_is_either_welcome_with_peek_or_refused_by_it() {
 #[test]
 fn peek_reads_no_more_of_the_file_than_it_shows() {
     // A row beyond the first that no reader could finish: reaching it would
-    // be an error, and not reaching it is the claim -- the cost of peeking
+    // be an error, and not reaching it is the claim: the cost of peeking
     // at a huge file is its first record, not the file.
     csvdt()
         .args(["-H", "-p", "--peek"])
@@ -5545,7 +5520,7 @@ fn list_options_names_its_format_version_first() {
 fn list_options_covers_every_long_option_in_help() {
     // The real point of the test: --help and --list-options are rendered
     // independently, so comparing them catches an option that reaches one and
-    // not the other. Nothing here lists the options by name -- they come from
+    // not the other. Nothing here lists the options by name: they come from
     // the binary, which is what makes this a check rather than a restatement.
     let help = csvdt().arg("--help").output().unwrap();
     let help = String::from_utf8(help.stdout).unwrap();
@@ -5553,7 +5528,7 @@ fn list_options_covers_every_long_option_in_help() {
     // clap indents every option entry and begins it with the short form when
     // there is one, then the long. Wrapped description lines are indented much
     // further and begin with prose, so a '-' immediately after the indent is
-    // what marks an entry -- which is also why the description bodies here can
+    // what marks an entry, which is also why the description bodies here can
     // mention --help without being mistaken for one.
     let mut in_help = std::collections::BTreeSet::new();
     for line in help.lines() {
@@ -5662,7 +5637,7 @@ fn list_options_includes_the_automatic_help_and_version() {
 #[test]
 fn list_options_stands_alone_and_reads_no_input() {
     // It must answer on a bare invocation, since a wrapper calls it before it
-    // knows anything -- and combining it with a run would be ambiguous.
+    // knows anything, and combining it with a run would be ambiguous.
     csvdt()
         .args(["--list-options", "-H"])
         .assert()
@@ -5744,7 +5719,7 @@ fn empty_input_is_still_empty_under_every_filling_mode() {
 fn rfc3339_refuses_epochs_outside_the_formats_own_range() {
     // RFC3339's date-fullyear is four digits, so 9999 is the last year there
     // is. chrono reaches far beyond and falls back to ISO 8601's expanded form
-    // outside that -- "+57534-06-16T00:00:00+00:00" -- which is a different
+    // outside that, "+57534-06-16T00:00:00+00:00", which is a different
     // format wearing the same shape: csvdt cannot read it back, and nor can
     // anything else expecting RFC3339.
     //
@@ -5774,7 +5749,7 @@ fn rfc3339_refuses_epochs_outside_the_formats_own_range() {
 fn the_help_names_the_epoch_range_it_actually_has() {
     // The floor was named and explained and the ceiling was not, so a caller
     // scripting against -r had one end documented and had to find the other by
-    // trial. Both are named now, and both numbers are taken out of the help
+    // trial. Both are named, and both numbers are taken out of the help
     // rather than written here again: the pair cannot drift apart, because a
     // help that named the wrong number would fail this on the wrong number.
     // Collapsed, because the corpus is wrapped by hand: the phrase anchoring
@@ -5782,10 +5757,9 @@ fn the_help_names_the_epoch_range_it_actually_has() {
     let help = help_words();
 
     // Anchored on the whole clause rather than on "up to ", which is ordinary
-    // English and turns up elsewhere in the corpus. It did: a paragraph added
-    // to --flexible said "up to that point", --flexible is printed before
-    // --rfc3339, and this test then read that phrase instead of the number --
-    // failing, correctly, but on a bare ParseIntError that says nothing about
+    // English and turns up elsewhere in the corpus: "up to that point" in
+    // --flexible, which is printed before --rfc3339, would be read instead of
+    // the number and fail on a bare ParseIntError that says nothing about
     // what happened. The clause is what makes the anchor the sentence's own.
     let named = |after: &str| -> i64 {
         let tail = help
@@ -5838,8 +5812,8 @@ fn the_help_names_the_epoch_range_it_actually_has() {
 #[test]
 fn the_t_and_the_z_are_read_in_either_case() {
     // RFC3339 permits either case outright. The help documented the two
-    // leniencies csvdt adds -- an offset missing its colon, a space where the
-    // 'T' belongs -- and said nothing about the one the format itself grants.
+    // leniencies csvdt adds (an offset missing its colon, a space where the
+    // 'T' belongs) and said nothing about the one the format itself grants.
     for written in ["2024-06-15T14:00:00Z", "2024-06-15t14:00:00Z",
                     "2024-06-15T14:00:00z", "2024-06-15t14:00:00z"] {
         csvdt()
@@ -5856,9 +5830,9 @@ fn the_t_and_the_z_are_read_in_either_case() {
 #[test]
 fn an_offset_is_read_wider_than_it_can_be_written() {
     // A file may carry an offset no zone uses, and reading it is exact
-    // arithmetic either way -- so it converts. Naming the same offset as a
+    // arithmetic either way, so it converts. Naming the same offset as a
     // target for -o does not, since that would write a record no real clock
-    // reads. The two ranges differ, which the help now says.
+    // reads. The two ranges differ, and the help says so.
     for (offset, utc) in [("+14:00", "2024-06-15T00:00:00+00:00"),
                           ("+23:59", "2024-06-14T14:01:00+00:00"),
                           ("-23:59", "2024-06-16T13:59:00+00:00")] {
@@ -5894,7 +5868,7 @@ fn an_offset_is_read_wider_than_it_can_be_written() {
 
 #[test]
 fn a_fraction_is_read_to_nine_digits_and_written_at_three_six_or_nine() {
-    // The width changes on the way out -- .5 comes back .500 -- which is
+    // The width changes on the way out, .5 comes back .500, which is
     // visible in every such row and was stated nowhere. Nine digits is the
     // limit, and past it the value is refused rather than quietly shortened,
     // which is the difference between a timestamp and a rounded one.
@@ -5938,9 +5912,8 @@ fn rfc3339_reports_epoch_milliseconds_rather_than_answering_with_a_useless_year(
         .stdout("to_rfc3339\nparse_err\n2025-07-25T12:00:00+00:00\n");
 
     // A whole column of them fails the run, and the message sends the reader to
-    // TIMESTAMP FORMATS -- which for a long time said nothing about the
-    // likeliest cause of getting there. It names it now, so the pointer leads
-    // somewhere.
+    // TIMESTAMP FORMATS, which has to name the likeliest cause of getting
+    // there (epoch milliseconds) for the pointer to lead anywhere.
     csvdt()
         .args(["-H", "-p", "-r0", "-i", "0,replace"])
         .write_stdin("ts\n1753444800000\n1753444801000\n")
@@ -6017,16 +5990,16 @@ fn an_input_that_cannot_be_read_is_named_in_the_error() {
         .failure()
         .code(1)
         // The path is what csvdt adds and so what this pins. The reason after
-        // it is the operating system's own wording -- "No such file or
+        // it is the operating system's own wording ("No such file or
         // directory" on Unix, "The system cannot find the file specified" on
-        // Windows -- and not ours to assert.
+        // Windows) and not ours to assert.
         .stderr(predicate::str::contains(format!(
             "cannot read '{}'", missing.display())));
 
     // A directory would otherwise fail at the first read, as "Is a directory"
     // from somewhere inside the CSV reader, without naming it. The two
-    // platforms differ underneath -- Unix opens a directory and fails on the
-    // read, Windows refuses the open as access denied -- so the diagnosis is
+    // platforms differ underneath (Unix opens a directory and fails on the
+    // read, Windows refuses the open as access denied) so the diagnosis is
     // made on this side and the message is the same on both.
     csvdt()
         .args(["-H", "-p"])
@@ -6047,8 +6020,8 @@ fn an_input_that_cannot_be_read_is_named_in_the_error() {
         .stderr(predicate::str::contains(format!(
             "cannot read '{}'", missing.display())));
 
-    // csvdt does not take '-' for standard input -- it reads standard input
-    // when no file is named -- so this is a file that is not there, and the
+    // csvdt does not take '-' for standard input (it reads standard input
+    // when no file is named) so this is a file that is not there, and the
     // message says which one rather than leaving it to be guessed.
     csvdt()
         .args(["-H", "-p", "-"])
@@ -6129,7 +6102,7 @@ fn a_field_holding_a_newline_survives_being_written_again() {
 #[test]
 fn round_seconds_without_duration_is_refused_rather_than_ignored() {
     // clap is told --round-seconds requires --duration, and holds it to that
-    // when the flag is alone -- but not alongside another action, because that
+    // when the flag is alone, but not alongside another action, because that
     // action conflicts with --duration and the requirement is dropped with it.
     // So `-u0 --round-seconds` would be accepted and do nothing at all: -u
     // writes .600 back out, and the run would look as if it had rounded.
@@ -6160,8 +6133,8 @@ fn round_seconds_without_duration_is_refused_rather_than_ignored() {
 
 #[test]
 fn a_column_number_that_will_not_parse_says_which_option_and_what_it_got() {
-    // These reported Rust's own ParseIntError -- "invalid digit found in
-    // string", "cannot parse integer from empty string" -- which named neither
+    // These reported Rust's own ParseIntError ("invalid digit found in
+    // string", "cannot parse integer from empty string") which named neither
     // the option nor the value. `-a "1, 2"` is an easy thing to type, and being
     // told a digit was invalid does not point at the space.
     for (option, value) in [
@@ -6297,7 +6270,7 @@ fn an_empty_delimiter_is_refused_rather_than_silently_ignored() {
 #[test]
 fn trim_is_matched_case_insensitively_like_every_other_value() {
     // --trim ALL passed clap, which is told to ignore case, and then matched
-    // none of the hand-written lowercase arms behind it -- so it fell through
+    // none of the hand-written lowercase arms behind it, so it fell through
     // and left the reader's own default, which is Trim::None. Asking for ALL
     // therefore got the opposite: whitespace kept, in silence, on its way into
     // timestamp parsing. --quote had the to_lowercase its twin was missing.
@@ -6363,7 +6336,7 @@ fn abbreviations_are_accepted_for_trim_and_quote_but_not_ambiguous_ones() {
 fn every_option_taking_a_word_takes_it_in_any_case_and_abbreviated() {
     // --trim and --quote did, -i did, --flexible did not: -f=FIX was refused
     // while --trim ALL was accepted and then quietly meant something else.
-    // All four now resolve the same way, against one list each.
+    // All four resolve the same way, against one list each.
     for mode in ["fix", "FIX", "Fix", "f"] {
         csvdt()
             .args(["-H", "-p", &format!("-f={mode}")])
@@ -6443,7 +6416,7 @@ fn a_delimiter_that_is_also_the_quote_character_is_refused() {
 #[test]
 fn which_quote_character_is_refused_follows_single_quote() {
     // --single-quote changes what the reader quotes with, so it changes which
-    // character cannot also be the delimiter -- and frees the other one.
+    // character cannot also be the delimiter, and frees the other one.
     csvdt()
         .args(["-H", "-p", "--single-quote", "--read-delimiter", "'"])
         .write_stdin("a,b\n1,2\n")
@@ -6452,7 +6425,7 @@ fn which_quote_character_is_refused_follows_single_quote() {
         .code(100)
         .stderr(predicate::str::contains("because of '--single-quote'"));
 
-    // '"' is just a character to the reader now, so it can separate fields.
+    // '"' is just a character to the reader here, so it can separate fields.
     csvdt()
         .args(["-H", "-p", "--single-quote", "--read-delimiter", "\""])
         .write_stdin("a\"b\n1\"2\n")
@@ -6474,7 +6447,7 @@ fn a_comment_character_that_would_swallow_data_rows_is_refused() {
     // A comment character shares the start of a line with the data. As the
     // delimiter it made a comment of every row with an empty first field; as
     // the quote character, of every row starting with a quoted field. Both
-    // dropped rows and said nothing -- `--comment ,` on a,b/,2/3,4 returned
+    // dropped rows and said nothing: `--comment ,` on a,b/,2/3,4 returned
     // two rows out of three.
     csvdt()
         .args(["-H", "-p", "--comment", ","])
@@ -6487,7 +6460,7 @@ fn a_comment_character_that_would_swallow_data_rows_is_refused() {
     // Named for the read side, so asserted on the read side's own words:
     // "starting with a quoted field" is in the write-side message too, and
     // with the read-side branch gone this invocation simply falls through to
-    // that one -- still exit 100, still that phrase, nothing tested.
+    // that one: still exit 100, still that phrase, nothing tested.
     csvdt()
         .args(["-H", "-p", "--comment", "\""])
         .write_stdin("a,b\n\"1\",2\n")
@@ -6527,8 +6500,8 @@ fn a_comment_character_that_would_comment_out_written_rows_is_refused() {
     // The same two collisions exist on the way out, and neither is caught by
     // the tally: it inspects the first field, and these lines gain the
     // comment character from the delimiter or quote written in front of it.
-    // `--comment '#' --print-delimiter '#'` wrote the row ,2 as #2 -- a line
-    // that starts with the comment character though no field holds one -- so
+    // `--comment '#' --print-delimiter '#'` wrote the row ,2 as #2 (a line
+    // that starts with the comment character though no field holds one) so
     // the run exited 0, warned about nothing, and reading the output back
     // with the same --comment dropped the row.
     csvdt()
@@ -6594,7 +6567,7 @@ fn the_write_side_refusals_stand_down_under_a_quoting_style_without_the_gap() {
 
     // A field that itself starts with the comment character under 'never' is
     // the tally's case, not a refusal: the run succeeds and warns. The field
-    // reaches first position through -a -- in the input it cannot be first,
+    // reaches first position through -a: in the input it cannot be first,
     // since the reader would take that line for a comment.
     csvdt()
         .args(["-H", "-p", "--single-quote", "--comment", "\"",
@@ -6604,7 +6577,7 @@ fn the_write_side_refusals_stand_down_under_a_quoting_style_without_the_gap() {
         .success()
         .stderr(predicate::str::contains("row(s) begin with"));
 
-    // The read side does not stand down -- --quote shapes only the output,
+    // The read side does not stand down: --quote shapes only the output,
     // and the reader drops these rows no matter how the writer quotes.
     csvdt()
         .args(["-H", "-p", "--comment", ",", "--quote", "always"])
@@ -6638,7 +6611,7 @@ fn a_tab_delimiter_is_still_accepted_since_that_is_how_tsv_is_read() {
 fn a_closed_output_pipe_is_not_an_error() {
     // `csvdt file | head` closes the pipe as soon as it has what it wants.
     // Rust leaves SIGPIPE ignored, so the write comes back as a broken-pipe
-    // error rather than ending the process -- and reporting it put a failure
+    // error rather than ending the process, and reporting it put a failure
     // on the screen, and a non-zero status into any `set -o pipefail` script,
     // for one of the most ordinary things anyone does with a command-line
     // tool.
@@ -6659,7 +6632,7 @@ fn a_closed_output_pipe_is_not_an_error() {
         .unwrap();
 
     // Fed from its own thread: the input is larger than the pipe buffer, so
-    // writing it blocks until csvdt reads -- and csvdt cannot produce the
+    // writing it blocks until csvdt reads, and csvdt cannot produce the
     // output this test then closes until it has been fed. Doing both from
     // here would wait on each other.
     let mut stdin = child.stdin.take().unwrap();
@@ -6705,7 +6678,7 @@ fn widest_reads_a_named_pipe_correctly_rather_than_draining_it() {
     // --flexible=widest reads its input twice. A regular file gives the same
     // thing both times; a fifo does not. Reading one twice drained it on the
     // counting pass and left the real pass with nothing, so the file came back
-    // EMPTY with a success status -- and process substitution, `csvdt -f=widest
+    // EMPTY with a success status, and process substitution, `csvdt -f=widest
     // <(...)`, is a fifo wearing a filename.
     let dir = tempfile_dir().join("widest-fifo");
     std::fs::create_dir_all(&dir).unwrap();
@@ -6899,7 +6872,7 @@ fn widest_says_so_when_every_name_it_could_spool_under_is_taken() {
 fn widest_spool_is_readable_only_by_the_user_who_ran_it() {
     // The spool holds the whole input, in a directory every account on the
     // machine can read. Created with the default permissions it came out
-    // 0644 under the usual umask, which published the input -- often a log --
+    // 0644 under the usual umask, which published the input, often a log,
     // to all of them for as long as the run lasted.
     use std::os::unix::fs::PermissionsExt;
 
@@ -6909,12 +6882,11 @@ fn widest_spool_is_readable_only_by_the_user_who_ran_it() {
     let fifo = dir.join("input.csv");
 
     // Holds the fifo open after writing, so the copy cannot finish and the
-    // spool is still there to be looked at -- until this test has looked,
-    // rather than for a fixed three seconds. Sleeping that long while the
-    // search below is allowed six left a window for a loaded machine to
-    // stall in: the input ended, the run finished, the spool was cleaned up
-    // the ordinary way, and the search found nothing to read a mode from.
-    // The failure was then about permissions, which were never the trouble.
+    // spool is still there to be looked at until this test has looked,
+    // rather than for a fixed time. A fixed sleep shorter than the search
+    // below allows leaves a window for a loaded machine to stall in: the run
+    // finishes, the spool is cleaned up the ordinary way, and the search
+    // finds nothing to read a mode from.
     let (release, released) = std::sync::mpsc::channel::<()>();
     let writer = {
         let fifo = fifo.clone();
@@ -6971,7 +6943,7 @@ fn widest_spool_is_readable_only_by_the_user_who_ran_it() {
 
 #[test]
 fn the_documented_exit_statuses_are_what_a_caller_actually_gets() {
-    // EXIT STATUS in the help is a contract a script keys on -- several of
+    // EXIT STATUS in the help is a contract a script keys on: several of
     // the KNOWN LIMITS turn on it, since a run that converted nothing is
     // told from one that worked by the status alone. Pinned here so the
     // section cannot drift away from what the binary does.
@@ -7113,7 +7085,7 @@ fn a_signal_removes_the_widest_spool_rather_than_leaving_it() {
     );
     // And the run still ends of the signal it was sent rather than of
     // anything the handler decided, so a caller's shell reports it as it
-    // always has -- 130 for Ctrl-C, and a wait status that still says
+    // always has: 130 for Ctrl-C, and a wait status that still says
     // "interrupted" to anything reading one.
     assert_eq!(
         status.signal(),
@@ -7124,18 +7096,16 @@ fn a_signal_removes_the_widest_spool_rather_than_leaving_it() {
 
 #[test]
 fn the_deprecated_zone_names_carry_their_geographic_zone_s_history() {
-    // KNOWN LIMITS described these as a gap: zones holding a modern rule and
-    // no history, answering for dates before that rule began as though it had
-    // always applied. That was true of the data IANA once shipped and is not
-    // true of the release bundled here, where each is a link -- so the
-    // section warned against names that are now exactly the zones it
-    // recommended instead. Nothing had ever checked it.
+    // These names are links to a geographic zone in the release bundled here,
+    // so they carry that zone's history. KNOWN LIMITS must not describe them
+    // as zones holding a modern rule and no history, or warn against names
+    // that are exactly the zones it recommends instead.
     //
     // 1950 is the year to ask about: mid-summer, well before the modern
     // European rules, and a whole number of minutes in every zone here, so
     // the answer is a timestamp rather than the parse_err a fractional offset
-    // would give. Under the old data EET read +03:00 where Athens read
-    // +02:00; under this data they agree, and the test says which.
+    // would give. In the data bundled here EET and Athens agree, and the
+    // test says which.
     for (deprecated, geographic, expected) in [
         ("EET", "Europe/Athens", "1950-07-15T14:00:00+02:00"),
         ("WET", "Europe/Lisbon", "1950-07-15T13:00:00+01:00"),
@@ -7184,7 +7154,7 @@ fn local_refuses_a_tz_that_is_not_a_zone_it_knows() {
             // different too.
             .stderr(predicate::str::contains("tzdata"))
             // And the blame stays with TZ, which really did name this zone.
-            // The other wording -- "this system is configured for" -- belongs
+            // The other wording ("this system is configured for") belongs
             // to the branch where TZ is unset and the platform supplied the
             // name; it cannot be reached from a test, since that needs a host
             // whose configured zone the bundled database does not know, so
@@ -7204,7 +7174,7 @@ fn no_conversion_but_local_reads_the_zone() {
     //
     // Every other TZ test here asks what -l does with a zone. None asked that
     // the rest ignore it, so a conversion that started reading the host's
-    // zone would have broken the promise silently -- and plausibly, since the
+    // zone would have broken the promise silently, and plausibly, since the
     // result would still be a well-formed timestamp with a well-formed
     // offset, the same shape of quiet mistake as a misspelt zone under -l.
     //
@@ -7237,7 +7207,7 @@ fn no_conversion_but_local_reads_the_zone() {
 
     // A timestamp carrying Z, one carrying an offset of its own, one from
     // before any of these zones had their modern rules, one landing in the
-    // hour Europe changes over, and epoch seconds -- which only -r reads.
+    // hour Europe changes over, and epoch seconds, which only -r reads.
     const ONE: [&str; 5] = [
         "ts,b\n2026-07-25T12:00:00Z,x\n",
         "ts,b\n2026-07-25T12:00:00+02:00,x\n",
@@ -7274,7 +7244,7 @@ fn no_conversion_but_local_reads_the_zone() {
     }
 
     // The control, and this test is worth nothing without it: a build that
-    // read TZ nowhere at all -- -l included -- satisfies every assertion
+    // read TZ nowhere at all, -l included, satisfies every assertion
     // above. So -l has to be seen to differ.
     //
     // Not the epoch fixture for this one. -l does not read epoch seconds, it
@@ -7300,15 +7270,14 @@ fn no_conversion_but_local_reads_the_zone() {
 #[test]
 #[cfg(unix)]
 fn local_still_accepts_posix_rules_rather_than_refusing_them() {
-    // Refusing an unknown name must not refuse POSIX rules, which are the
-    // reason -l cannot simply demand a zone from the database -- they are just
-    // as much "not a zone name" as a misspelling is.
+    // A TZ holding POSIX rules rather than a zone name can't be looked up in
+    // the IANA database, so -l defers to chrono's own parsing, and refusing an
+    // unknown name must not refuse rules: they are just as much "not a zone
+    // name" as a misspelling is.
     //
-    // Unix only, for the same reason local_falls_back_to_chrono_for_a_posix_
-    // rule_string is: rules are left to chrono, and chrono reads TZ on Unix but
-    // not on Windows, where the system zone wins instead. Zone *names* are
-    // resolved by csvdt itself and so behave identically everywhere, which is
-    // what the test below covers.
+    // Unix only: chrono reads TZ on Unix but not on Windows, where the system
+    // zone wins instead. Zone *names* are resolved by csvdt itself and so
+    // behave identically everywhere, which is what the test below covers.
     for (tz, expected) in [
         ("EST5EDT,M3.2.0,M11.1.0", "2026-07-25T08:00:00-04:00"),
         ("GMT0BST,M3.5.0/1,M10.5.0", "2026-07-25T13:00:00+01:00"),
@@ -7377,7 +7346,7 @@ fn local_is_only_resolved_when_it_is_asked_for() {
 
 #[test]
 fn a_conversion_that_needs_no_zone_gives_the_same_answer_anywhere() {
-    // The claim the documentation now makes, asserted rather than described:
+    // The claim the documentation makes, asserted rather than described:
     // -u and -o work from the offset the record already carries, so the
     // environment cannot reach them. -l is the one that can differ, which is
     // why the two are documented as answering different questions.
@@ -7410,7 +7379,7 @@ fn a_conversion_that_needs_no_zone_gives_the_same_answer_anywhere() {
 #[test]
 fn local_is_the_conversion_that_does_depend_on_the_environment() {
     // The other half of the same claim. If this ever stopped being true, the
-    // documentation above would be wrong in the more misleading direction --
+    // documentation above would be wrong in the more misleading direction:
     // promising a dependency that had quietly gone away.
     let input = "ts,event\n2026-07-25T12:00:00+02:00,a\n";
     let mut results = Vec::new();
@@ -7452,7 +7421,7 @@ fn known_limits_says_what_local_depends_on() {
 fn local_output_does_not_sort_chronologically_across_a_transition() {
     // Documented in KNOWN LIMITS, and asserted so the documentation cannot
     // drift from it. Sweden's autumn shift repeats an hour, so two different
-    // instants read the same on the clock and differ only in offset -- and
+    // instants read the same on the clock and differ only in offset, and
     // '+01:00' sorts before '+02:00', putting the later event first.
     //
     // The point is not that this is a fault: it is what the clocks did. It is
@@ -7505,8 +7474,8 @@ fn local_output_does_not_sort_chronologically_across_a_transition() {
 
 #[test]
 fn single_quote_output_that_would_misread_is_counted_on_stderr() {
-    // The output of a --single-quote run is ordinary double-quoted CSV --
-    // only reading uses the single quote -- so reading it back with the
+    // The output of a --single-quote run is ordinary double-quoted CSV
+    // (only reading uses the single quote) so reading it back with the
     // same flags misreads every field the writer quoted: the '"' stays in
     // the data and the field splits on any delimiter inside it. The run
     // that wrote such a field has to say so, or the round trip breaks with
@@ -7526,7 +7495,7 @@ fn single_quote_output_that_would_misread_is_counted_on_stderr() {
 #[test]
 fn single_quote_output_that_reads_back_exactly_stays_silent() {
     // The warning is about the output, so an output with nothing quoted
-    // has nothing to warn about -- a run over plain fields must not cry
+    // has nothing to warn about: a run over plain fields must not cry
     // wolf on every --single-quote invocation.
     csvdt()
         .arg("--single-quote")
@@ -7554,7 +7523,7 @@ fn single_quote_lone_empty_row_is_counted_too() {
     // that is a single empty field is written quoted ("") under every
     // style, 'never' included, so the record does not vanish into a blank
     // line. Read back with --single-quote, that "" is a two-character
-    // field like any other quoted one -- but a per-field check cannot see
+    // field like any other quoted one, but a per-field check cannot see
     // a rule the writer applies to the row.
     csvdt()
         .arg("--single-quote")
@@ -7578,7 +7547,7 @@ fn comment_as_the_last_line_needs_no_trailing_newline() {
     // csv-core (0.1.13) mishandles end-of-input inside a comment: its DFA
     // treats it like mid-record and fabricates a record of one empty
     // field. A file whose last line was a comment with no trailing newline
-    // was refused as ragged -- exactly the file a hand-edited comment at
+    // was refused as ragged: exactly the file a hand-edited comment at
     // the bottom produces.
     csvdt()
         .args(["--comment", "#"])
@@ -7602,7 +7571,7 @@ fn widest_counts_the_file_the_way_the_run_reads_it() {
     // --flexible=widest reads the file twice: once to find the widest record,
     // then again to pad everything out to it. The two passes have to read the
     // same file the same way, and the counting pass gets its reader from
-    // configure_reader for exactly that reason -- one builder, used twice.
+    // configure_reader for exactly that reason: one builder, used twice.
     //
     // Nothing said so, and the ways it can come apart do not fail alike.
     // Reading with the wrong delimiter fails loudly, and blames the input for
@@ -7610,7 +7579,7 @@ fn widest_counts_the_file_the_way_the_run_reads_it() {
     // comment character, or the quoting, fails silently: the count comes out
     // too big and every row is padded to a width no record in the file has.
     // The output is rectangular and looks correct, which is the shape of
-    // damage the fill log exists to make visible -- and cannot, here, since
+    // damage the fill log exists to make visible, and cannot, here, since
     // the widening is what both passes agree the file is.
     //
     // Each case below is a file the two readings disagree about, and the
@@ -7636,7 +7605,7 @@ fn widest_counts_the_file_the_way_the_run_reads_it() {
         .stdout("id,note\n1,\"a,b,c\"\n2,\n");
 
     // Semicolons. Read as commas every line is one field, and the writing
-    // pass then finds rows wider than the count it was given -- which it
+    // pass then finds rows wider than the count it was given, which it
     // reports as the input having changed, since that is the only way it
     // can happen when both passes agree.
     csvdt()
@@ -7673,16 +7642,16 @@ fn a_span_across_a_leap_second_is_elapsed_civil_time_not_si_seconds() {
     // What KNOWN LIMITS promises a reader, and the thing they decide by:
     // -d counts ordinary seconds, so the extra second a leap second inserts
     // is not among them. That is elapsed civil time rather than elapsed SI
-    // seconds, and it is how nearly every system keeps time -- Unix time has
-    // no room for the extra second either -- so the answer agrees with what
+    // seconds, and it is how nearly every system keeps time (Unix time has
+    // no room for the extra second either) so the answer agrees with what
     // other tools report for the same two timestamps.
     //
     // The leap-second tests around this one pin individual faults: a sign
     // that lands inside a fraction, a rounding that truncates the wrong way,
     // a :60 folded onto the following minute. Each uses 23:59:60.5Z because half a second is what
     // showed the sign. None of them says what the plain pair measures, so a
-    // build that started accounting the extra second -- the reasonable
-    // change, and the one somebody will propose -- would pass all of them.
+    // build that started accounting the extra second (the reasonable
+    // change, and the one somebody will propose) would pass all of them.
     //
     // Every figure here is one second short of true UTC, deliberately.
     for (input, want) in [
@@ -7710,7 +7679,7 @@ fn a_span_across_a_leap_second_is_elapsed_civil_time_not_si_seconds() {
 fn duration_across_a_leap_second_is_never_negative() {
     // chrono orders timestamps by their clock fields but accounts the leap
     // second's extra time when subtracting, so the low-to-high difference
-    // could still come out negative across 23:59:60 -- and the sign of a
+    // could still come out negative across 23:59:60, and the sign of a
     // sub-second delta landed inside the fraction as a literal '-',
     // making PT0.-5S. Not a duration at all.
     csvdt()
@@ -7749,7 +7718,7 @@ fn a_sixty_second_field_away_from_a_leap_second_is_marked_not_folded() {
     // that follows, so this value and 14:01:00Z arrived as one instant: no
     // conversion could tell them apart, and -d between them was PT0S. A
     // formatter that rounds 59.5 up without carrying writes exactly this,
-    // so a damaged value was being answered rather than marked -- and
+    // so a damaged value was being answered rather than marked, and
     // written back out still wearing a :60 that is not RFC3339 on an
     // ordinary minute, so the output did not read back anywhere else.
     csvdt()
@@ -7777,8 +7746,8 @@ fn a_real_leap_second_is_kept_whatever_offset_the_record_carries() {
     // A leap second is the last second of a UTC month and happens at one
     // instant worldwide, so what decides it is the instant rather than the
     // clock face the record was written on. The first two are the same real
-    // leap second seen from +05:30 -- where it reads on the next day's clock
-    // -- and from -05:00. The third reads 23:59:60 on its own clock but
+    // leap second seen from +05:30 (where it reads on the next day's
+    // clock) and from -05:00. The third reads 23:59:60 on its own clock but
     // lands mid-evening in UTC, and is not one.
     csvdt()
         .arg("-u1")
@@ -7802,7 +7771,7 @@ fn a_leap_second_is_allowed_at_any_month_end_rather_than_a_fixed_list() {
     // it may use any month, and a table of the ones declared so far would
     // refuse every future leap second until the binary was rebuilt. The end
     // of the month is structural and cannot go stale, so it is what the
-    // check asks -- June's month end here, against a mid-month value that
+    // check asks: June's month end here, against a mid-month value that
     // wears the same 23:59:60 and is refused.
     csvdt()
         .arg("-u1")
@@ -7865,7 +7834,7 @@ fn multi_byte_comment_refusal_names_the_comment_option() {
 #[test]
 fn comment_advice_stands_down_when_the_comment_is_the_quote() {
     // The dropped-rows warning usually recommends the quoting styles that
-    // keep such a field quoted -- but with --comment '"' those styles are
+    // keep such a field quoted, but with --comment '"' those styles are
     // refused outright, and recommending them would send the reader in a
     // circle. The single quote shields the '"' from starting a comment on
     // the way in; 'never' writes it bare on the way out.
@@ -7881,9 +7850,9 @@ fn comment_advice_stands_down_when_the_comment_is_the_quote() {
 
 #[test]
 fn widest_spool_failure_names_the_file_and_the_mode() {
-    // A spool that cannot be created reported a bare OS error with no
-    // path -- nothing to say what was attempted or where. Now it names
-    // the mode, the directory it tried, and the way out.
+    // A bare OS error with no path says nothing about what was attempted or
+    // where, so the message names the mode, the directory tried, and the way
+    // out.
     //
     // The way out is not the same everywhere, which is the other half of
     // this: std::env::temp_dir reads TMPDIR on Unix and TMP then TEMP on
@@ -7910,8 +7879,8 @@ fn widest_spool_failure_names_the_file_and_the_mode() {
 
 #[test]
 fn remove_of_every_column_still_counts_the_single_quote_misread() {
-    // A record --remove leaves with no fields at all is written as "" --
-    // the same bytes as a lone empty row, under every quoting style --
+    // A record --remove leaves with no fields at all is written as ""
+    // (the same bytes as a lone empty row, under every quoting style)
     // and misreads on a --single-quote re-read the same way. The warning has
     // to cover it although the empty slice matches neither the lone-empty
     // rule nor any field.
@@ -7939,13 +7908,12 @@ fn known_limits_name_the_cr_only_comment_trap() {
     // csv-core leaves its comment state only on \n, so in a CR-only file
     // (classic Mac line endings) the first comment line runs on through
     // every row that follows, silently. Not fixable outside csv-core's
-    // DFA -- a \r inside a quoted field is data, so a byte-level shim
-    // cannot tell which \r to rewrite -- which makes the promise here
+    // DFA (a \r inside a quoted field is data, so a byte-level shim
+    // cannot tell which \r to rewrite) which makes the promise here
     // documentation: the trap and the way out must be in KNOWN LIMITS.
     // Asked of the help with its whitespace collapsed, so that where the
     // sentence happens to break is not the question. It was asked in two
-    // pieces before, to survive a break falling between them -- which held
-    // until the corpus was refolded and the break moved inside one of them.
+    // pieces, to survive a break falling between them.
     let help = help_words();
     for phrase in [
         "A CR-ONLY FILE LOSES ROWS TO --comment",
@@ -7963,7 +7931,7 @@ fn known_limits_name_the_cr_only_comment_trap() {
 #[test]
 fn posix_tz_rules_this_build_cannot_read_are_refused() {
     // chrono reads the POSIX rule form itself, and falls back to UTC
-    // without a word where it cannot -- a transition time past 24:00 is
+    // without a word where it cannot: a transition time past 24:00 is
     // enough, and real zones publish those: this is Asia/Jerusalem's own
     // tzdata footer. '-l' answered +00:00 for a zone three hours away,
     // exit 0, which is the mistake the unknown-name refusal exists to stop.
@@ -7992,7 +7960,7 @@ fn posix_tz_rules_this_build_can_read_still_work() {
         .stdout("2024-06-15T12:00:00Z,2024-06-15T15:00:00+03:00\n");
 
     // And a southern-hemisphere rule, where January rather than July is the
-    // daylight-saving half -- the check probes both, so neither can hide a
+    // daylight-saving half: the check probes both, so neither can hide a
     // rule that was silently dropped.
     csvdt()
         .args(["-H", "-l0"])
@@ -8037,12 +8005,12 @@ fn an_empty_file_argument_is_refused_rather_than_read_as_stdin() {
 #[test]
 fn known_limits_no_longer_clear_the_linked_aliases() {
     // CET, MET and EST5EDT are links exactly as EET and WET are, so they
-    // carry the same historical gap -- EST5EDT applies today's US daylight
+    // carry the same historical gap: EST5EDT applies today's US daylight
     // saving to years that had none, so the help must not name them as the
     // safe ones.
     // Asked of the words rather than the lines: 'EET, WET, CET, MET, EST5EDT'
-    // sat on one line until a rewrap put a break inside it, and the list was
-    // no less complete for that. A Windows checkout gives the include_str!'d
+    // can sit on one line or have a break put inside it by a rewrap, and the
+    // list is no less complete for that. A Windows checkout gives the include_str!'d
     // help CRLF endings, which this collapses too.
     let help = help_words();
     assert!(
@@ -8060,7 +8028,7 @@ fn known_limits_no_longer_clear_the_linked_aliases() {
 #[test]
 fn the_manual_page_still_lets_its_prose_fill() {
     // The .br treatment is for laid-out blocks, and the tests for it all ask
-    // that a table keeps its lines. Nothing asked the other half -- that
+    // that a table keeps its lines. Nothing asked the other half: that
     // everything else does not. Dropping the 'aligned' condition, or
     // stopping a blank line from ending a run, would put a break between
     // every pair of lines in the file and wreck the page.
@@ -8140,7 +8108,7 @@ fn a_timestamp_padded_with_spaces_converts_without_the_field_being_altered() {
         .stdout("id, ts,<to_utc\n\
                  1, 2024-01-01T00:00:00Z,2024-01-01T00:00:00+00:00\n");
 
-    // Trailing whitespace is the same question from the other side -- a file
+    // Trailing whitespace is the same question from the other side: a file
     // written with " ," separators, or one hand-edited.
     csvdt()
         .args(["-H", "-p", "-u1"])
@@ -8158,7 +8126,7 @@ fn the_column_exactly_past_the_last_field_is_out_of_bound_for_every_action() {
     // catches just as well. Only the column exactly equal to the field count
     // tells the two apart, and it is the one a user actually reaches: on two
     // columns numbered 0 and 1, column 2 is the off-by-one everybody makes.
-    // Loosened, it indexes one field past the end -- a panic in the row path,
+    // Loosened, it indexes one field past the end: a panic in the row path,
     // and in the header path a column name inserted for a column that is not
     // there. Every action carries its own copy of the check, so every action
     // is asked.
@@ -8206,7 +8174,7 @@ fn a_single_quote_misread_is_counted_whatever_made_the_writer_quote() {
     // one row that a '--single-quote' re-read takes apart, and the output is
     // asserted too: it is the output the warning is about.
     for (arguments, input, output) in [
-        // Quoted for the delimiter, but in a later column -- a quoted field
+        // Quoted for the delimiter, but in a later column: a quoted field
         // splits the row wherever it sits, not only at the front.
         (vec![], "a,'x,y'\n", "a,\"x,y\"\n"),
         // Quoted for nothing but the '--comment' character it holds.
@@ -8229,7 +8197,7 @@ fn a_single_quote_misread_is_counted_whatever_made_the_writer_quote() {
 fn a_bare_field_that_begins_with_a_single_quote_is_counted_as_a_misread() {
     // The other half of the question, which the writer's quoting decision
     // cannot answer: ''''  reads as the one-character field ''' , and the
-    // writer leaves it bare -- it holds no delimiter, no '"', no record
+    // writer leaves it bare: it holds no delimiter, no '"', no record
     // boundary. Read back with '--single-quote' that leading ''' opens a
     // quoted field and swallows what follows, so the row is lost though
     // nothing was quoted on the way out.
@@ -8249,8 +8217,8 @@ fn a_bare_field_that_begins_with_a_single_quote_is_counted_as_a_misread() {
 fn a_tz_abbreviation_too_short_for_posix_is_not_read_as_a_rule() {
     // POSIX writes an abbreviation of three or more letters before the
     // offset, and that length is the whole of what separates a rule from a
-    // misspelt zone name. Read with a two-letter minimum, 'CE1T' -- a
-    // plausible slip for CET -- parses as the rule "CE" +1, and the run
+    // misspelt zone name. Read with a two-letter minimum, 'CE1T', a
+    // plausible slip for CET, parses as the rule "CE" +1, and the run
     // answers UTC+1 for a zone nobody named, exit 0.
     csvdt()
         .args(["-H", "-l0"])
@@ -8278,7 +8246,7 @@ fn the_utf16_probe_wants_eight_bytes_before_the_nul_pattern_counts() {
     // signature means nothing until there is a few characters' worth of it.
     // These seven bytes match the pattern exactly and are ordinary UTF-8
     // holding real NULs, which KNOWN LIMITS promises passes through
-    // untouched -- byte for byte, which is what is asserted.
+    // untouched: byte for byte, which is what is asserted.
     let short = b"a\0b\0c\0\n".to_vec();
     let passed = csvdt()
         .write_stdin(short.clone())
@@ -8305,8 +8273,8 @@ fn the_utf16_probe_wants_eight_bytes_before_the_nul_pattern_counts() {
 fn each_byte_order_mark_is_named_as_the_endianness_it_actually_is() {
     // The BOM test above asserts only "looks like UTF-16", so the two
     // branches could name each other's endianness and pass unchanged. The
-    // label is the whole of the advice -- it is what the reader hands iconv
-    // -- and a file converted from the wrong end comes back as mojibake.
+    // label is the whole of the advice (it is what the reader hands
+    // iconv) and a file converted from the wrong end comes back as mojibake.
     for (content, label) in [
         (b"\xff\xfea\0,\0b\0\n\0".to_vec(),
          "UTF-16LE (it starts with a byte-order mark)"),
@@ -8327,7 +8295,7 @@ fn the_final_newline_shim_stays_off_when_no_comment_character_is_set() {
     // The shim exists for csv-core's comment state, and it costs one
     // malformed shape: an input ending inside an unclosed quote takes the
     // fabricated \n into that field as data. That is documented under
-    // '--comment', which is the only place it may happen -- with no comment
+    // '--comment', which is the only place it may happen, with no comment
     // character nothing is appended, and the swallowed field ends exactly
     // where the input did. Asserted as exact bytes, since a fabricated
     // newline inside the field is the whole difference.
@@ -8352,7 +8320,7 @@ fn the_final_newline_shim_stays_off_when_no_comment_character_is_set() {
 #[test]
 fn a_control_character_is_refused_by_name_rather_than_printed_raw() {
     // These refusals are read in a terminal, where a raw tab or newline
-    // printed between quotes says nothing about which character was meant --
+    // printed between quotes says nothing about which character was meant,
     // and a tab is a character '--read-delimiter' is routinely given, so the
     // pairing that collides with it is one a TSV user really reaches.
     csvdt()
@@ -8377,11 +8345,10 @@ fn a_control_character_is_refused_by_name_rather_than_printed_raw() {
 #[test]
 fn every_fatal_message_names_the_program_it_came_from() {
     // Every warning csvdt writes beside a successful run already opens with
-    // "csvdt: ". The three messages that end a run did not, and opened with a
-    // blank line besides -- so the one line a caller keeps, the one explaining
-    // a non-zero status, was the only line that did not say who wrote it.
-    // In a pipeline with stderr in a log that is unattributable: "No space
-    // left on device (os error 28)" could have come from either half.
+    // "csvdt: ". The messages that end a run do too, since the one line a
+    // caller keeps, the one explaining a non-zero status, must say who wrote
+    // it. In a pipeline with stderr in a log, "No space left on device (os
+    // error 28)" could otherwise have come from either half.
     for (arguments, code) in [
         // Refused after the command line parsed: exit 100.
         (vec!["--offset", "0,nonsense"], 100),
@@ -8434,15 +8401,14 @@ fn a_write_that_failed_is_reported_rather_than_discarded() {
         return;
     };
 
-    // --generate-man and --list-options wrote through 'let _ = write_all',
-    // which was meant to let a closed pipe pass and swallowed every other
+    // A write that lets a closed pipe pass must not swallow every other
     // failure with it. A package build runs '--generate-man > csvdt.1' and
-    // reads the status: on a full disk it got 0, and installed the empty
-    // file that was left.
+    // reads the status: on a full disk it must get a failure, not install the
+    // empty file that was left.
     // --help and --version are printed by clap rather than by csvdt, and clap
-    // loses a failed write the same way: those two reported 0 over output
-    // nobody received for as long as they went out through get_matches. They
-    // are here beside the other two because the four are one promise -- what
+    // loses a failed write the same way, so they go through the same writer
+    // instead of get_matches' own printing. They
+    // are here beside the other two because the four are one promise: what
     // csvdt says about itself is written or the status says it was not.
     for arguments in [vec!["--generate-man"], vec!["--list-options"],
                       vec!["--help"], vec!["-h"],
@@ -8492,9 +8458,9 @@ fn a_write_that_failed_is_reported_rather_than_discarded() {
 fn a_reader_that_stops_reading_is_not_a_failed_write() {
     // The other half of the promise above, and the half a too-eager check
     // would break: 'csvdt --help | head -1' is an ordinary thing to do and
-    // nothing has gone wrong. --help and --version now go out through the same
-    // writer as the option list and the page, so they answer to the same rule
-    // -- a closed pipe passes, and only a real failure ends the run at 1.
+    // nothing has gone wrong. --help and --version go out through the same
+    // writer as the option list and the page, so they answer to the same rule:
+    // a closed pipe passes, and only a real failure ends the run at 1.
     let dir = tempfile_dir().join("answer-through-a-closed-pipe");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -8503,26 +8469,11 @@ fn a_reader_that_stops_reading_is_not_a_failed_write() {
                          ("version", "--version"),
                          ("options", "--list-options"),
                          ("page", "--generate-man")] {
-        // csvdt's own status rather than the pipeline's, written down rather
-        // than read from $?, since the shell reports the last command in a
-        // pipe and 'set -o pipefail' is not in every /bin/sh.
-        let status_file = dir.join(name);
-        let script = format!(
-            "{{ '{}' {}; echo $? > '{}'; }} | head -1 > /dev/null",
-            assert_cmd::cargo::cargo_bin("csvdt").display(),
-            flag,
-            status_file.display(),
-        );
-        let output = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&script)
-            .output()
-            .unwrap();
+        let (status, stderr) = status_behind_head(&dir.join(name), flag, 1);
         assert_eq!(
-            std::fs::read_to_string(&status_file).unwrap().trim(),
+            status,
             "0",
-            "{flag} through a closed pipe was reported as a failure: {:?}",
-            String::from_utf8_lossy(&output.stderr),
+            "{flag} through a closed pipe was reported as a failure: {stderr:?}",
         );
     }
 }
@@ -8532,8 +8483,8 @@ fn a_reader_that_stops_reading_is_not_a_failed_write() {
 fn a_standard_output_that_cannot_be_written_is_refused_before_the_work() {
     // std answers Ok to a write on a standard stream that failed with EBADF:
     // a process without usable standard output is one whose output goes
-    // nowhere, deliberately. So 'csvdt in.csv 1<out.csv' -- '<' where '>' was
-    // meant -- read the file, converted every value, wrote none of it, and
+    // nowhere, deliberately. So 'csvdt in.csv 1<out.csv', '<' where '>' was
+    // meant, read the file, converted every value, wrote none of it, and
     // exited 0 with a tally on stderr counting values it said it had written.
     // Nothing later in the run can notice: the flush that should have failed
     // returns Ok too, which is why this is asked once, up front.
@@ -8582,6 +8533,31 @@ fn a_standard_output_that_cannot_be_written_is_refused_before_the_work() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// Runs csvdt with ARGS (already shell-quoted) piped into `head -LINES`, and
+// returns csvdt's own exit status and what the shell said on stderr. The
+// status is written to a file rather than read from $?, since the shell
+// reports the last command in a pipe and 'set -o pipefail' is not in every
+// /bin/sh.
+#[cfg(unix)]
+fn status_behind_head(status_file: &std::path::Path, args: &str, lines: u32) -> (String, String) {
+    let script = format!(
+        "{{ '{}' {}; echo $? > '{}'; }} | head -{} > /dev/null",
+        assert_cmd::cargo::cargo_bin("csvdt").display(),
+        args,
+        status_file.display(),
+        lines,
+    );
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&script)
+        .output()
+        .unwrap();
+    (
+        std::fs::read_to_string(status_file).unwrap().trim().to_string(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
 #[test]
 #[cfg(unix)]
 fn a_reader_that_stops_reading_still_ends_the_run_at_zero() {
@@ -8594,7 +8570,7 @@ fn a_reader_that_stops_reading_still_ends_the_run_at_zero() {
     let input = dir.join("in.csv");
     // Larger than a pipe will hold, so head really does close on csvdt rather
     // than letting a small output through whole. Every value is unconvertible,
-    // so the full run reports 1 -- which is the status the closed pipe cuts
+    // so the full run reports 1, which is the status the closed pipe cuts
     // short, and the reason this is worth its own paragraph in EXIT STATUS.
     let mut rows = String::from("a\n");
     for _ in 0..60_000 {
@@ -8602,27 +8578,12 @@ fn a_reader_that_stops_reading_still_ends_the_run_at_zero() {
     }
     std::fs::write(&input, &rows).unwrap();
 
-    // csvdt's own status rather than the pipeline's, and written down rather
-    // than read from $?, since the shell reports the last command in a pipe
-    // and 'set -o pipefail' is not in every /bin/sh.
-    let status_file = dir.join("status");
-    let script = format!(
-        "{{ '{}' -H --rfc3339 0 '{}'; echo $? > '{}'; }} | head -3 > /dev/null",
-        assert_cmd::cargo::cargo_bin("csvdt").display(),
-        input.display(),
-        status_file.display(),
+    let (status, stderr) = status_behind_head(
+        &dir.join("status"),
+        &format!("-H --rfc3339 0 '{}'", input.display()),
+        3,
     );
-    let output = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(&script)
-        .output()
-        .unwrap();
-    assert_eq!(
-        std::fs::read_to_string(&status_file).unwrap().trim(),
-        "0",
-        "a closed pipe was reported as a failure: {:?}",
-        String::from_utf8_lossy(&output.stderr),
-    );
+    assert_eq!(status, "0", "a closed pipe was reported as a failure: {stderr:?}");
 
     // And the same file read to the end does report the failure, so the test
     // above is measuring the closed pipe rather than a run that never failed.
@@ -8638,11 +8599,11 @@ fn a_reader_that_stops_reading_still_ends_the_run_at_zero() {
 
 #[test]
 fn the_exit_statuses_say_a_closed_pipe_is_the_exception_to_them() {
-    // The section documented 0, 1, 2, 100 and even 128 plus a signal, and
-    // said of the nothing-converted status that "the output is written in
-    // full regardless" -- with nothing anywhere about the one case that
-    // overrides all of it. A caller reading it and then running the tool
-    // under 'head' would have found the contradiction the hard way.
+    // The section documents 0, 1, 2, 100 and 128 plus a signal, and says of
+    // the nothing-converted status that "the output is written in full
+    // regardless", so it must also say what overrides all of that: a closed
+    // pipe. A caller running the tool under 'head' would otherwise find the
+    // contradiction the hard way.
     csvdt()
         .arg("--help")
         .assert()
@@ -8656,8 +8617,8 @@ fn the_exit_statuses_say_a_closed_pipe_is_the_exception_to_them() {
 fn a_standard_input_that_cannot_be_read_is_refused_rather_than_read_as_empty() {
     // The other half of the same gap: std hides EBADF on a read too, and
     // hides it as end of input, which an input is allowed to be. So
-    // 'csvdt -H -r0 0>out.csv' -- '>' where '<' was meant, which has the
-    // shell empty out.csv on the way past -- read nothing, wrote nothing and
+    // 'csvdt -H -r0 0>out.csv' ('>' where '<' was meant, which has the
+    // shell empty out.csv on the way past) read nothing, wrote nothing and
     // exited 0, exactly as a run over an empty file does.
     let dir = tempfile_dir().join("unreadable-stdin");
     let _ = std::fs::remove_dir_all(&dir);
@@ -8684,8 +8645,8 @@ fn a_standard_input_that_cannot_be_read_is_refused_rather_than_read_as_empty() {
         String::from_utf8_lossy(&output.stderr),
     );
 
-    // A genuinely empty input is still the ordinary success it has always
-    // been, so the check is measuring the descriptor rather than the bytes.
+    // An empty input is still the ordinary success,
+    // so the check is measuring the descriptor rather than the bytes.
     csvdt()
         .args(["-H", "--rfc3339", "0"])
         .write_stdin("")
@@ -8702,7 +8663,7 @@ fn a_standard_input_that_cannot_be_read_is_refused_rather_than_read_as_empty() {
 //
 // Through a shell on purpose: the hazard is the shell opening the redirection
 // before csvdt is started, which is what empties the file, and no amount of
-// Command::stdout reproduces that ordering honestly.
+// Command::stdout reproduces that ordering.
 //
 // A batch file on Windows rather than 'cmd /C', whose quoting rules for a
 // command line holding quoted paths are their own subject. Written out and
@@ -8801,8 +8762,8 @@ fn an_input_file_that_is_also_the_output_is_refused() {
     // the same file. Unix only, and not because Windows cannot do it: a
     // symbolic link there wants a privilege a test runner may not have, and
     // a test that skips where it is unprivileged reads as one that passed.
-    // What the identity is made of is asked of the program on both sides --
-    // device and inode here, volume serial and file index there -- and the
+    // What the identity is made of is asked of the program on both sides
+    // (device and inode here, volume serial and file index there) and the
     // redirections above exercise that on either platform.
     #[cfg(unix)]
     {
@@ -8850,8 +8811,8 @@ fn an_input_file_that_is_also_the_output_is_refused() {
 #[test]
 fn the_limits_say_the_input_file_cannot_also_be_the_output() {
     // A refusal a caller meets for the first time in the middle of a job is
-    // worth finding before it: there is no in-place mode, and the help now
-    // says so where the rest of what csvdt will not do is collected.
+    // worth finding before it: there is no in-place mode, and the help says
+    // so where the rest of what csvdt will not do is collected.
     csvdt()
         .arg("--help")
         .assert()
