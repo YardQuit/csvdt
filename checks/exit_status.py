@@ -20,13 +20,11 @@ an empty input is not an error anywhere else in this program.
 
 Also here: the boundary between 1 and 100, which is not about how bad the
 trouble is but about when it was found. 100 is refused before the input is
-opened -- nothing read, nothing written. 1 is found by doing the work, reading
-or writing either one. A bad TZ was documented under 1 and has always exited
-100; it is refused before the file is opened, so 100 is where it belongs and
-the help now says so.
+opened: nothing read, nothing written. 1 is found by doing the work, reading
+or writing either one. A bad TZ is refused before the file is opened, so 100
+is where it belongs and the help says so.
 
-And the writing half of that, which the wording of 1 left out for a long time:
-a run whose output cannot be written reports 1, and so does every answer csvdt
+And the writing half of that: a run whose output cannot be written reports 1, and so does every answer csvdt
 gives about itself. /dev/full is the way to ask, so the section is skipped
 where there is no such device rather than passing on a machine that could not
 have run it.
@@ -68,7 +66,7 @@ def converted(out, before):
 
     The action's column is the one added; everything to its left came from
     the file. BEFORE is how many columns the input had, so the result sits
-    at that index onward -- -s writes two, the rest one.
+    at that index onward: -s writes two, the rest one.
     """
     rows = [r for r in csv.reader(io.StringIO(out, newline="")) if r != []]
     if not rows:
@@ -159,7 +157,7 @@ def main():
 
     # The other way to reach 1, and the one the wording of it left out for a
     # long time: the work was done and could not be written. It holds for what
-    # csvdt says about itself as much as for a conversion -- --help and
+    # csvdt says about itself as much as for a conversion: --help and
     # --version are printed by clap rather than by csvdt, and reported 0 over
     # output nobody received until they were routed through csvdt's own writer.
     unwritable = 0

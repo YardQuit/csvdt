@@ -2,7 +2,7 @@
 
 Two claims in one file, because both are about the writer.
 
-The output is canonical CSV -- parsed and written again, quotes only where
+The output is canonical CSV: parsed and written again, quotes only where
 needed, one line ending. That is a fixed-point claim: feeding the output
 back must give the same bytes. The combinations the help says will differ on
 a second read are left out, since there the second run is meant to.

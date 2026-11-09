@@ -67,7 +67,7 @@ def check_remove():
 
 def check_out_of_bound():
     """"Every column named must exist, or the row is reported as out of
-    bound" -- so none of these may come back a success."""
+    bound", so none of these may come back a success."""
     bad = []
     rows = cells(2, 3)
     for args in (["-a", "3"], ["-a", "0,5"], ["--remove", "3"],
@@ -80,7 +80,7 @@ def check_out_of_bound():
 
 def check_insert():
     """-i places the produced value at a named column, and with no -i it goes
-    right after the action's own column -- or its second, for a two-column
+    right after the action's own column, or its second, for a two-column
     --duration."""
     bad = []
     width = 4

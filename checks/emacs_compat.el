@@ -1,10 +1,9 @@
 ;;; Does csvdt.el keep to the Emacs it says it needs?  -*- lexical-binding: t; -*-
 ;;
-;; The package header declares a minimum, and nothing enforces it: an Emacs
-;; new enough to run the tests is new enough to hide every function added
-;; since. `string-search' reached the file that way and was caught by hand,
-;; after which two names were written into the test suite -- which pins those
-;; two and says nothing about the next one.
+;; The package header declares a minimum, and nothing enforces it: an Emacs new
+;; enough to run the tests is new enough to hide every function added since. A
+;; list of known names pins those names and says nothing about the next one, so
+;; this looks for calls to functions newer than the declared minimum.
 ;;
 ;; This asks Emacs instead. `help-fns--first-release' reports the version a
 ;; symbol was first mentioned in, from the NEWS files Emacs ships, so every
@@ -14,7 +13,7 @@
 ;; direction:
 ;;
 ;;   Too old.  The version is the earliest NEWS mention of the name, and a
-;;   name that reads as an ordinary word matches ordinary prose -- `always'
+;;   name that reads as an ordinary word matches ordinary prose: `always'
 ;;   arrived in 28.1 and is reported as 25.1. So this can miss one.
 ;;
 ;;   Too new.  A NEWS entry about an argument added to an old function

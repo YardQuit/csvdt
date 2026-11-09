@@ -39,7 +39,7 @@ def representable_in_utc(when):
     different format wearing the same shape.
 
     Python's own datetime stops at the same two ends, so it raises here on
-    exactly the values csvdt refuses -- which is what makes it a reference for
+    exactly the values csvdt refuses, which is what makes it a reference for
     this and not merely a coincidence.
     """
     try:

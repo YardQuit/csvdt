@@ -24,7 +24,7 @@
 %global forgeurl https://github.com/YardQuit/csvdt
 
 # emacs-filesystem owns the site-lisp directories but ships no rpm macros
-# naming them -- on Fedora 44 it is five directories and nothing else, so
+# naming them: on Fedora 44 it is five directories and nothing else, so
 # %%{_emacs_sitelispdir} and %%{_emacs_sitestartdir} are undefined in a build
 # root that has only it, and %%files then fails with "File must begin with /"
 # over the unexpanded macro. Defined here only when they are missing, and
@@ -85,7 +85,7 @@ Requires:       %{name} = %{version}-%{release}
 # Unversioned, where an Emacs add-on usually pins %%{_emacs_version}: that
 # pin exists for byte-compiled .elc files, which are tied to the Emacs they
 # were compiled by. This ships csvdt.el as source, so any Emacs that can read
-# it can load it -- the package declares its own floor of 27.1 in the file
+# it can load it: the package declares its own floor of 27.1 in the file
 # and has a check that holds it to it. What it needs from emacs-filesystem is
 # the directories, which do not move with the Emacs version.
 Requires:       emacs-filesystem
@@ -113,7 +113,7 @@ which two set the quote and the delimiter that decide where a record begins.
 %{cargo_vendor_manifest}
 
 # Rendered by the binary just built, from the same option definitions that
-# parse a command line -- so the page describes this build and no other.
+# parse a command line, so the page describes this build and no other.
 #
 # Found rather than named: %%cargo_build builds the 'rpm' profile, which
 # leaves the binary in target/rpm, but a build that passes --target nests
@@ -149,7 +149,7 @@ EOF
 %cargo_test
 
 # Valid roff, not merely bytes. -z produces no output and only diagnostics,
-# -ww asks for all of them, and any diagnostic at all fails the build --
+# -ww asks for all of them, and any diagnostic at all fails the build:
 # groff warns rather than errors on most of what it cannot read, so its
 # silence is the only thing worth accepting.
 groff_says=$(groff -ww -man -Tutf8 -z %{crate}.1 2>&1)

@@ -4,8 +4,8 @@
 each. Two of them promise the output is still the same table: 'always'
 quotes every field, and 'necessary' quotes a field holding the delimiter,
 the quote, a record terminator or the comment character. 'never' promises
-the opposite in as many words -- invalid CSV, if that is what the data
-needs -- so nothing is asked of it here. 'nonnumeric' sits between: it
+the opposite in as many words (invalid CSV, if that is what the data
+needs) so nothing is asked of it here. 'nonnumeric' sits between: it
 quotes every field that is not a number, which is more than is needed, and
 the one thing it consults is that numeric test.
 
@@ -33,7 +33,7 @@ DELIMITERS = [",", ";", "|", "\t", ".", "-", "+", "e"]
 COMMENTS = [None, "#", "%", "@", "!"]
 
 # Values chosen for the hazards: the delimiter and the quote, a record
-# terminator, a leading comment character, the empty field -- and numbers,
+# terminator, a leading comment character, the empty field, and numbers,
 # written bare under 'nonnumeric', in the shapes the numeric test accepts.
 VALUES = ["plain", "x,y", "x;y", "x|y", "x\ty", "a.b", "a-b", "a+b", "hey",
           'q"q', 'a""b', "", " ", "#lead", "%lead", "@lead", "!lead",

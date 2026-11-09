@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Sets csvdt's version everywhere it is written down.
 #
-# The version lives in three places that are checked -- Cargo.toml, the
-# Emacs package's header, and the RPM spec -- and in a handful of README
+# The version lives in three places that are checked (Cargo.toml, the
+# Emacs package's header, and the RPM spec) and in a handful of README
 # lines that are not. Bumping only the first is caught by CI, eventually,
 # on the leg that runs the Emacs suite or builds the RPM; the README lines
 # are caught by nobody and simply go on naming the last release.
@@ -61,7 +61,7 @@ sed -i "1,$((changelog_at - 1)){
 }" packaging/rpm/csvdt.spec
 
 # The prose. Most mentions in these two are an example naming the current
-# release -- a built filename, a --version line, a table row -- so the whole
+# release (a built filename, a --version line, a table row) so the whole
 # file is substituted rather than picked over. Not all of them are: a
 # sentence about what went wrong at an earlier release names that release,
 # and rewriting it moves the blame onto this one. Nothing here can tell the

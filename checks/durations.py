@@ -77,8 +77,8 @@ def duration_field(row):
 def either_order(rng, count):
     """`-d0,1` and `-d1,0` must measure the same span.
 
-    The help says so outright -- "it comes out identical no matter which of
-    the two column numbers you list first" -- because the two-column form is
+    The help says so outright ("it comes out identical no matter which of
+    the two column numbers you list first") because the two-column form is
     an elapsed time and not a signed difference. Nothing checked it, and
     nothing about the code makes it true by construction: each order takes a
     different column as the one to subtract from.
@@ -114,7 +114,7 @@ def carried_forward(rng, count):
     """
     # No blank rows among the junk: the reader skips them by design, so one
     # would produce no output line and shift every comparison after it by
-    # one. That is csv_roundtrip's business, not this check's -- and it is
+    # one. That is csv_roundtrip's business, not this check's, and it is
     # what 455 of these divergences turned out to be the first time round.
     rows = [generate(rng) if rng.random() < 0.7 else
             rng.choice(["junk", "not-a-time", "Jan  1 00:00:00",

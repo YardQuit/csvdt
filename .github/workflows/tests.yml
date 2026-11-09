@@ -1,12 +1,12 @@
 # Runs the test suites on every push and pull request.
 #
 # The monthly build also runs `cargo test`, but only on the first of the month
-# and only for the Rust side -- which is too late to learn that something broke,
+# and only for the Rust side, which is too late to learn that something broke,
 # and says nothing about the Emacs front end. This is the one that gates a
 # change.
 #
 # Rust is tested on all three platforms rather than just Linux: -l/--local
-# reads TZ on Unix and not on Windows, so the two genuinely differ, and a
+# reads TZ on Unix and not on Windows, so the two differ, and a
 # Windows-only failure has slipped through to master before by being noticed
 # only after the merge.
 name: Tests

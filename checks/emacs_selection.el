@@ -6,7 +6,7 @@
 ;; than a restatement: the reference does not share the code under test.
 ;;
 ;; Both shapes of selection are covered.  A region is one stretch, and the
-;; question is whether it reaches out to whole records -- a stretch beginning
+;; question is whether it reaches out to whole records: a stretch beginning
 ;; inside a field that spans lines is the back half of a record, and sending
 ;; it alone converts cleanly into data nobody wrote.  Banked lines are
 ;; several stretches, and the question is the opposite one: two of them

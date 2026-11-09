@@ -5,13 +5,11 @@ need nothing but a pipe can simply be run. That is what this does: parse the
 fenced blocks, find the `$ ` commands, and compare what comes back against
 the lines shown under them.
 
-Four had drifted when this was written. Two showed a message without the
-`csvdt: ` prefix every message carries -- the prefix was added after the
-README was, so both had been right once. One showed a --version string no
-build has ever printed: the program version of the source paired with the
-build metadata of a published binary that reports a different version. The
-Emacs README's two are checked here too, since they are the same kind of
-claim about the same binary.
+Examples drift in ways that are easy to miss: a message shown without the
+`csvdt: ` prefix every message carries, or a --version string pairing the
+program version of the source with the build metadata of a published binary
+that reports a different version. The Emacs README's examples are checked
+here too, since they are the same kind of claim about the same binary.
 
 Examples reading a file the block does not create are skipped and counted,
 rather than passed over quietly: a green line here covers what it ran.
@@ -31,7 +29,7 @@ NEEDS_THE_WORLD = re.compile(r"\b(curl|md5sum|sha256sum|sudo|dnf|cargo|iconv)\b"
 # --version example is a published binary's string, and this is not it.
 NEEDS_THAT_BUILD = re.compile(r"--version")
 # A line of its own saying the README left something out. The lines around it
-# must still appear, in order -- an excerpt is a claim about what is there,
+# must still appear, in order: an excerpt is a claim about what is there,
 # just not about what is not.
 ELISION = "..." 
 
@@ -72,7 +70,7 @@ def examples(path):
 def wanted(shown):
     """The output lines, without the notes the README writes beside them.
 
-    Two or more spaces before a '#' is a margin note -- '3,4' and
+    Two or more spaces before a '#' is a margin note: '3,4' and
     '"#x",2                # quoted, so a second read keeps the row'.
     A single space is not, since a field may end in one.
     """
@@ -100,9 +98,8 @@ def matches(got, expected):
 
 # The transcripts shown without a command in front of them, with what
 # produces each. A message quoted in prose is the same claim as one under a
-# `$ `, and drifts the same way -- all three that had drifted were of this
-# kind, so a check that could only run the commands would have found none of
-# them. Written the long way round on purpose: the README line must still be
+# `$ `, and drifts the same way, so a check that could only run the commands
+# would miss it. Written the long way round on purpose: the README line must still be
 # in the README, and the binary must still produce it.
 MESSAGE_EXAMPLES = [
     # (file, the README's line, argv, stdin, a file to write first)
@@ -194,7 +191,7 @@ def help_examples(temporary):
     that no longer matches is worse than none.
 
     An example is told from the prose around it by its indentation, which is
-    how the help corpus marks a block laid out on purpose everywhere else --
+    how the help corpus marks a block laid out on purpose everywhere else:
     guessing at output by what the lines look like dropped two rows of a
     table on the first try.
     """

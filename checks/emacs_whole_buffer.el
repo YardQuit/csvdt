@@ -1,8 +1,8 @@
 ;;; The front end must give what the binary gives, byte for byte.  -*- lexical-binding: t; -*-
 ;;
 ;; A run from Emacs assembles the text, encodes it, hands it over and decodes
-;; the answer.  Every one of those steps can alter bytes -- a locale's coding
-;; system, a line ending, a buffer without a final newline -- so the check is
+;; the answer.  Every one of those steps can alter bytes (a locale's coding
+;; system, a line ending, a buffer without a final newline) so the check is
 ;; simply that the output buffer holds what the shell would have shown, for
 ;; the same input and the same arguments.
 ;;

@@ -3,7 +3,7 @@
 This list is the contract between csvdt and its Emacs front end, which reads
 it to tell an option's value from a filename and never names an option
 itself. So a 'separator' of 'either' has to mean both spellings really work,
-and 'equals' has to mean the separate spelling really does not -- otherwise
+and 'equals' has to mean the separate spelling really does not: otherwise
 the front end mistakes a value for a file, or refuses a valid run.
 
 Exit status alone cannot answer this: a value left where the filename goes

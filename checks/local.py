@@ -3,7 +3,7 @@
 Every other conversion is held against Python: -r, -u, -o and -s in
 timestamps.py, -d in durations.py. -l appeared only in exit_status.py, which
 asks whether it fails correctly, and in option_matrix.py, which asks whether
-it runs. What it writes had no model behind it -- and it is the conversion the
+it runs. What it writes had no model behind it, and it is the conversion the
 help calls the difficult one, the only one whose answer depends on more than
 the record.
 
@@ -26,28 +26,28 @@ Held where the two databases agree, which is modern dates:
 
   the clock reading matches Python's.  This is the part with a caveat, and the
   caveat is the point of the window.  csvdt carries its own copy of the IANA
-  data -- the help says so, and says why -- and a host carries another.  For
+  data (the help says so, and says why) and a host carries another.  For
   recent decades they agree; before standard time they do not, and not
   narrowly.  Measured here: chrono-tz 2025b has Europe/Amsterdam on +00:17:30
   until 1892 and +00:00 after it, where this host's tzdata has +00:19:32
   through 1937.  A differential run over those years would report twenty
-  minutes of divergence a hundred times over and none of it would be a fault
+  minutes of divergence a hundred times over, and none of it would be a fault
   in csvdt.  So the comparison runs from FIRST_COMPARABLE_YEAR, and the older
-  dates are still exercised -- by the two properties above, which no database
+  dates are still exercised: by the two properties above, which no database
   can disagree with.
 
 Reported rather than held:
 
   which copy of the data answered.  The help promises the rules come "from the
   IANA data compiled into this binary rather than the machine's", and the run
-  above cannot test that -- inside the window the two agree, so a csvdt
-  reading the host's files passes every line of it.  Replacing the named zone
-  with `chrono::Local', which honours TZ and the host's files, was invisible
-  to it.  Europe/Amsterdam in 1900 can tell them apart on this host, and the
+  above cannot test that: inside the window the two agree, so a csvdt
+  reading the host's files passes every line of it, and so would one that
+  swapped the named zone for `chrono::Local', which honours TZ and the host's
+  files.  Europe/Amsterdam in 1900 can tell them apart on this host, and the
   summary says which answered.  It can confirm the binary's own data and never
   quite the opposite: where both copies would refuse the instant, or both give
   the same offset, the answer fits either story.  So it is printed, and a run
-  that used to say "the binary's" and stops saying it is the thing to look at.
+  that stops saying "the binary's" is the thing to look at.
 
 The zones are the ones both sides know, since csvdt refuses a zone its own
 data lacks and Python cannot referee one it lacks either.
@@ -158,8 +158,8 @@ def which_database(bad):
     machine's" is a promise about where an answer comes from, and the run
     above cannot test it: inside the comparison window the two databases
     agree, so a csvdt reading the host's data would pass every line of it.
-    Replacing the named zone with `chrono::Local' -- which honours TZ and the
-    host's files -- was invisible to it.
+    A csvdt that replaced the named zone with `chrono::Local' (which honours
+    TZ and the host's files) would pass it.
 
     Where they disagree, the disagreement is the instrument.  This host's
     tzdata has Europe/Amsterdam on +00:19:32 in 1900; chrono-tz 2025b has it

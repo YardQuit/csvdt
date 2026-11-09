@@ -2,7 +2,7 @@
 
 The shape, not the seconds. How long a machine takes depends on the machine,
 and a check that fails on somebody's laptop for being right is worse than no
-check -- but how the time grows with the input is a property of the program,
+check, but how the time grows with the input is a property of the program,
 and it is the same answer everywhere. Doubling the input should cost about
 twice as long. A return to something worse than that is the regression worth
 catching, and it is invisible to every other check here: output that takes an
@@ -18,7 +18,7 @@ avoid.
 
 Two shapes are asked about, since they cost differently:
 
-  one enormous field, which is what an unclosed quote leaves behind -- the
+  one enormous field, which is what an unclosed quote leaves behind: the
   whole rest of the file arriving as a single value;
 
   the same field made of nothing but quote characters, which is the writer's
@@ -36,7 +36,7 @@ import os, subprocess, sys, tempfile, time
 CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
 MIB = 1 << 20
 
-# The most a doubling may cost. Nothing is asked of the other direction --
+# The most a doubling may cost. Nothing is asked of the other direction:
 # see above.
 SLOWEST = 3.0
 # Below this the numbers are scheduler noise rather than measurement, and a

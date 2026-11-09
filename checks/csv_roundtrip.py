@@ -1,7 +1,7 @@
 """Whatever records another reader finds in the input, csvdt must write back.
 
 The reference is Python's csv module: an implementation written by other
-people from the same specification, which is the point -- a test written
+people from the same specification, which is the point: a test written
 against csvdt's own expectations cannot find a place where those
 expectations are wrong.
 

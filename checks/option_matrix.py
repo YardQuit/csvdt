@@ -2,17 +2,14 @@
 
 Each option is well covered on its own. This asks what happens when they
 meet: nothing may panic, a run that succeeds must write CSV that parses, and
-a filling mode must produce rows that really are rectangular -- header
+a filling mode must produce rows that really are rectangular: header
 included. Deliberately cheap invariants, because the point is breadth.
 
-Not every option, despite what this used to say. The modes that answer and
-exit rather than converting -- --peek, --list-options, --generate-man,
---help, --version -- write something that is not CSV, so the invariants
-below say nothing about them and the groups do not draw them. Each has a
-check of its own: peek.py and list_options.py here, the page in the rpm
-%check and in tests/cli.rs. Said plainly because the old wording claimed
-this file covered them, and --peek went un-checked anywhere for as long as
-that sentence was believed.
+Not every option is drawn. The modes that answer and exit rather than
+converting (--peek, --list-options, --generate-man, --help, --version) write
+something that is not CSV, so the invariants below say nothing about them and
+the groups do not draw them. Each has a check of its own: peek.py and
+list_options.py here, the page in the rpm %check and in tests/cli.rs.
 
 Statuses 0, 1, 2 and 100 are the documented four; anything else is a finding
 in itself. 101 is a Rust panic and never an answer.

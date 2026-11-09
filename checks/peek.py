@@ -1,10 +1,10 @@
 """--peek's numbering against the fields a run actually sees.
 
---peek exists to answer one question -- which number does this column have --
+--peek exists to answer one question (which number does this column have)
 and the whole of its worth is that the answer matches the number an action
 then takes. Nothing checked that. It is the only mode with no differential
-cover at all, which matters more now that these checks stand between a build
-and a release.
+cover at all, which matters because these checks stand between a build and a
+release.
 
 The model is a run of csvdt itself with no action asked for, which writes the
 records back as it read them. That is the field list to beat. --peek shows
@@ -14,7 +14,7 @@ and every way of reading it:
   the numbering covers as many columns as the widest row shown has fields,
   and the rows shown are the rows a run would have worked on.
 
-Field text is compared as well where the generated fields make that sound --
+Field text is compared as well where the generated fields make that sound:
 no spaces to be confused with padding, nothing needing an escape. Where they
 do not, the counts still are, and the awkward fields are the point of
 generating them.
@@ -116,9 +116,8 @@ def main():
         # With -f, because --peek shows uneven records rather than refusing
         # them, "whatever --flexible would have done". A model run without it
         # stops at the first ragged record and exits 1, and comparing that to
-        # a --peek that showed the file is comparing two different questions:
-        # the first draft did, and called 173 of 400 inputs a divergence when
-        # every one of them was the documented behaviour of both.
+        # a --peek that showed the file is comparing two different questions,
+        # and every such input is the documented behaviour of both.
         #
         # -f rather than a filling mode, since that is the one that passes
         # records through as they are and so still reports the field counts
@@ -133,7 +132,7 @@ def main():
             continue
         # Either both read the file or neither does. A --peek that refuses
         # what a run accepts, or accepts what a run refuses, is reading it
-        # differently -- which is the one thing this mode must not do.
+        # differently, which is the one thing this mode must not do.
         if (peeked_status == 0) != (seen_status == 0):
             note("DISAGREED ON THE FILE",
                  f"peek {peeked_status}, run {seen_status}: {text!r}"[:110])
@@ -183,13 +182,13 @@ def main():
                     break
 
     # And the other half of the contract: the options that write have no CSV
-    # here to act on, so each is refused -- with a status, never a panic --
+    # here to act on, so each is refused (with a status, never a panic)
     # while the ones that decide what a record is apply and are welcome.
     #
     # The set is taken from --list-options rather than written out here. A
     # hand-written list covers what somebody remembered: this one covered
     # thirteen invocations of twelve options and left --round-seconds, the
-    # thirteenth in --peek's own conflict list, untried -- which is also the
+    # thirteenth in --peek's own conflict list, untried, which is also the
     # one the help forgot to name. Driven from the binary's account of itself,
     # an option added later is refused by default and has to be argued into
     # WELCOME to pass.
@@ -239,7 +238,7 @@ def main():
             # Only that it is not refused. Whether it then applies is the
             # question the first half of this file answers, by comparing the
             # fields --peek shows against the ones a run sees under each of
-            # these dialects -- which is the harder question and the one worth
+            # these dialects, which is the harder question and the one worth
             # asking, since an option accepted and ignored exits 0 too.
             if status != 0:
                 findings.append(("REFUSED AN OPTION PEEK READS WITH", args, "",

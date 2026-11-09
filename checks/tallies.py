@@ -8,7 +8,7 @@ nothing checked that any of them was right.
 
 These are stronger than the usual differential, because the claim is testable
 rather than merely modellable: the output can be fed back through csvdt and
-the loss counted. So each count is asked twice --
+the loss counted. So each count is asked twice:
 
   once of a model here, which reads the output the way a second read would
   and counts what it loses, without consulting csvdt at all;
@@ -72,8 +72,8 @@ def misread_rows(text):
     Not rows that come out differently on that second read: a field holding
     a newline ends the record early there, so every row after it shifts too,
     and counting those counts the blast radius rather than the hazard. One
-    row holding one such field made four rows differ, and the first draft of
-    this check called that a divergence.
+    row holding one such field can make four rows differ, and that is not a
+    divergence.
     """
     rows = records(text, '"')
     if rows is None:
@@ -81,7 +81,7 @@ def misread_rows(text):
 
     def written_quoted(field, alone):
         # What the writer puts quotes round: a field carrying a delimiter, a
-        # quote or a record terminator -- and an empty field that is the
+        # quote or a record terminator, and an empty field that is the
         # whole record, since bare it would be a blank line and a blank line
         # is skipped. An empty field beside others needs no quotes and gets
         # none, which is why 'a,' warns about nothing and a lone '' warns.
@@ -140,12 +140,10 @@ def main():
         # modelled: every row the first read kept, less what survives.
         #
         # Only where the output is CSV that reads back. '--quote never'
-        # writes a field holding a delimiter bare -- 'x,y' comes out as two
-        # fields on any second read -- which is what that style means and is
+        # writes a field holding a delimiter bare ('x,y' comes out as two
+        # fields on any second read) which is what that style means and is
         # documented as such. Counting rows across that is counting two
-        # different things, and the first draft of this check did: it called
-        # every such run a divergence, 172 of them, with the program right
-        # every time.
+        # different things, so such runs are not compared.
         roundtrips = quoting != "never"
         again_status, again, _ = run(
             ["-H", "-p", "--comment", comment], out)
@@ -166,16 +164,16 @@ def main():
 
         # 3. Values written as parse_err, out of how many. The result column
         # is found by position, which needs the output to have the columns
-        # it was written with -- so the same restriction as above.
+        # it was written with, so the same restriction as above.
         if action and roundtrips:
             body = records(out)
             if body:
                 # Found by its header, not by position. A generated column
-                # lands beside the one it came from -- that is what -i's
-                # default placement means -- so with '-r0' the result sits
+                # lands beside the one it came from (that is what -i's
+                # default placement means) so with '-r0' the result sits
                 # at index 1 and not at the end. Slicing from the input
-                # width read an original column instead, found no parse_err
-                # in it, and called the count wrong 110 times over.
+                # width would read an original column instead and find no
+                # parse_err in it.
                 #
                 # csvdt names such a column with a leading '<', which is the
                 # marker to go by, and which also finds both of -s's two.

@@ -14,7 +14,7 @@ exclude = ["checks/"]
 chrono = "0.4.41"
 clap = { version = "4.5.39", features= ["cargo"] }
 # Already in the tree through clap; direct so --help can be written the
-# way clap writes it -- same stream, same colour rules -- with the trailing
+# way clap writes it (same stream, same colour rules) with the trailing
 # spaces clap leaves on an indented blank line taken off. See
 # 'say_as_clap_would'.
 anstream = "1.0"
@@ -35,7 +35,7 @@ libc = "0.2"
 
 # Already in the tree through clap; direct so the refusal below can be asked
 # on Windows as well as on Unix. 'csvdt in.csv > in.csv' destroys the file on
-# every platform, and the guard that refuses it needs a file's identity --
+# every platform, and the guard that refuses it needs a file's identity,
 # which std exposes as device and inode on Unix and not at all on Windows, so
 # GetFileInformationByHandle is the way to ask.
 [target.'cfg(windows)'.dependencies]

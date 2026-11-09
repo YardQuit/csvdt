@@ -1,7 +1,7 @@
 """What a run costs in memory, against what KNOWN LIMITS promises.
 
 Two claims, and they are of different kinds. That memory grows with the
-widest record and not with the file is a property of the design -- break it
+widest record and not with the file is a property of the design: break it
 and a large file stops working on a small machine, quietly, in the field.
 That one enormous field costs about twice its own size is a measured figure,
 and figures drift.

@@ -64,7 +64,7 @@ since. The trade runs the other way for a machine being set up now: a
 version's own binaries are frozen at release time, so `release` is where the
 current zone rules are.
 
-**Linux is the intended platform.** It is what csvdt is developed and packaged
+Linux is the intended platform. It is what csvdt is developed and packaged
 on, what every differential check runs against before a release, and where any
 behaviour described here is expected to hold. macOS and Windows are supported
 on a best-effort basis: they are built and tested on every commit, and a
@@ -464,8 +464,8 @@ d139f8228105...
 ```
 
 One consequence is worth knowing: because `-l` follows the rules, its offsets
-vary from row to row, and a column holding both `+01:00` and `+02:00` **no longer
-sorts into the order events happened.** Where an autumn shift repeats an hour,
+vary from row to row, and a column holding both `+01:00` and `+02:00` **does not
+sort into the order events happened.** Where an autumn shift repeats an hour,
 two different instants read the same on the clock:
 
 ```bash
@@ -499,8 +499,8 @@ database built into this binary (tzdata 2025b). '--local' would otherwise
 have reported UTC as though it were that zone. ...
 ```
 
-A typo used to fall through to UTC, and nothing in the output showed it: a
-plausible timestamp with a plausible offset. Note this is stricter than `date`,
+A typo does not fall through to UTC, where nothing in the output would show it:
+a plausible timestamp with a plausible offset. This is stricter than `date`,
 which answers in UTC for the same input. The message names the bundled release
 because a zone *newer* than the build is a different problem from a
 misspelling, with a different fix.
@@ -510,9 +510,9 @@ bracketed `<+04>-4` form, and glibc's `TZ=:/usr/share/zoneinfo/...` path. Those
 two are checked rather than trusted, for the same reason: a rule this build
 cannot read (a transition time past 24:00, which zones really do publish, as
 Asia/Jerusalem's own `IST-2IDT,M3.4.4/26,M10.5.0` does) and a path naming no
-file both used to become UTC without a word.
+file would both become UTC without a word if they were not checked.
 
-## Output is canonical CSV, not a copy
+## Canonical output
 
 Records are parsed and written again rather than passed through, so even a run
 that changes nothing about the data normalises how it's written: CRLF becomes
@@ -630,7 +630,7 @@ csvdt: 1 row(s) begin with '#', which '--comment' makes the start of a
 comment. The quoting style asked for leaves the field bare ...
 ```
 
-**The header counts there too, and is the worst of them.** A second read drops
+The header counts there too, and is the worst of them. A second read drops
 the header rather than a row, so `-H` takes the first data row for the column
 names, and that row is then exempt from the conversion rather than missing from
 it. Every column number still lines up, which is what makes it quiet, so that
@@ -770,7 +770,7 @@ version written there was true when it was written.
 What it cannot do is write the spec's `%changelog` entry, which is a sentence
 about what changed. It says so at the end.
 
-**Bump, commit, then tag that commit.** A tag placed before the commit that
+Bump, commit, then tag that commit. A tag placed before the commit that
 set the version produces a binary reporting the previous one, and nothing
 downstream can tell (the tag name and the binary's `--version` simply
 disagree) on a release page that says otherwise.

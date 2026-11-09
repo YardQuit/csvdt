@@ -28,7 +28,7 @@ if [ -z "${CSVDT:-}" ]; then
     # the checks ran against the previous build and said ALL CLEAR, which is
     # the one answer that must never be wrong here. cargo is a no-op when the
     # binary is current, so this costs a second and buys the answer meaning
-    # what it says. CSVDT set by hand is left alone -- that names a binary on
+    # what it says. CSVDT set by hand is left alone: that names a binary on
     # purpose, and may not have a source tree behind it at all.
     echo "== building csvdt"
     (cd "$root" && cargo build --release) || exit 2
