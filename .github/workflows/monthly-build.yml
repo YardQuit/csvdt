@@ -47,7 +47,7 @@ on:
 
 # Read by default, so the build jobs cannot write to the repository. They
 # resolve and compile the newest third-party crates published that day, and
-# a build script runs with whatever the job holds: including, since
+# a build script runs with whatever the job holds, including, since
 # actions/checkout leaves credentials in .git/config, a token that could
 # push. Only publishing needs write, so only the release job is given it.
 permissions:
@@ -72,7 +72,7 @@ jobs:
     name: What this run builds
     runs-on: ubuntu-latest
     # Every job has a timeout, because GitHub's six-hour default would
-    # otherwise apply to all of them: across four platforms, for a workflow
+    # otherwise apply to all of them, across four platforms, for a workflow
     # nobody is watching on the first of the month. Each of these is several
     # times what the job takes and still fails the same day.
     timeout-minutes: 15
