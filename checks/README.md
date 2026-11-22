@@ -7,7 +7,9 @@ behaviour that has been decided, case by case, and they are what a commit has
 to pass. These ask a different question (*is the decided behaviour right?*)
 by putting csvdt beside a second implementation, or beside its own
 documentation, over generated input. They are meant for before a release, or
-after a change to parsing, conversion or the selection logic.
+after a change to parsing, conversion or the selection logic. The monthly
+build runs them, with two seeds, against the Linux binary it is about to
+publish, and stops the release if they find anything.
 
 ```sh
 ./run-checks.sh                  # everything

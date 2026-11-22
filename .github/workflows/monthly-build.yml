@@ -320,9 +320,13 @@ jobs:
 
   # checks/run-checks.sh says in its own header that it is meant to be run
   # before a release rather than on every commit. This job runs it, so the
-  # eleven differential harnesses (a second implementation of the timestamp,
+  # eighteen differential checks (a second implementation of the timestamp,
   # duration and column behaviour, the README's worked examples, and three
   # Emacs ones) are run for every release and not only by hand.
+  #
+  # Against the Linux binary the build job produced, the one that is
+  # published, and not a rebuild of its own: a check that built its
+  # own copy would say nothing about what is released.
   #
   # Between build and release, so a draw that finds something stops the
   # publish rather than being read afterwards. Its own job because it needs
@@ -337,6 +341,15 @@ jobs:
         with:
           ref: ${{ needs.meta.outputs.sha }}
 
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: csvdt-x86_64-unknown-linux-musl
+          path: binary
+
+      # An artifact does not keep the executable bit.
+      - name: Make the binary runnable
+        run: chmod +x binary/csvdt-x86_64-unknown-linux-musl
+
       - name: Install what the checks compare against
         run: sudo apt-get update && sudo apt-get install -y emacs-nox
 
@@ -344,6 +357,8 @@ jobs:
       # failure repeats, which also means one seed is one draw of generated
       # input. Two costs a minute and doubles what the release was shown.
       - name: Run the checks
+        env:
+          CSVDT: ${{ github.workspace }}/binary/csvdt-x86_64-unknown-linux-musl
         run: |
           ./checks/run-checks.sh
           SEED=1 ./checks/run-checks.sh
