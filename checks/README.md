@@ -25,7 +25,8 @@ the path. The whole set takes a minute and a half, most of it in the three
 that build large fixtures on disk: `memory.py`, `timing.py` and
 `canonical.py`.
 
-csvdt is rebuilt on the way in, unless `CSVDT` names a binary. Building only
+csvdt is rebuilt on the way in (`--locked`, from the committed `Cargo.lock`),
+unless `CSVDT` names a binary. Building only
 when missing would let an edited source beside a stale binary be checked as
 the previous build and reported `ALL CLEAR`, the one answer here that must
 never be wrong.

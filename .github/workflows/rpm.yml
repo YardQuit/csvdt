@@ -137,6 +137,15 @@ jobs:
           # version tags and a shallow checkout has none of them.
           fetch-depth: 0
 
+      # The helper scripts, from the workflow's own ref and not from the
+      # commit being packaged: that one may be an old version tag with none.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          path: ci
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
       # What this run packages, decided once so that nothing downstream
       # has to work it out again from the event.
       #
@@ -260,6 +269,7 @@ jobs:
       - name: Assemble the sources the spec asks for
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PUBLISH: ${{ inputs.publish }}
         run: |
           v="${VERSION}"
           rpmdev-setuptree
@@ -268,21 +278,24 @@ jobs:
           # under the same prefix, so what gets packaged is what was pushed
           # rather than what was last released.
           #
-          # Cargo.lock is added to it, which the tag tarball would not carry:
-          # it is not committed. Without it the build root would re-resolve
-          # against the vendor directory and could, in principle, pick a
-          # different set from the one vendored, so the licence summary and
-          # the crate manifest the package ships would describe a build other
-          # than the one it contains.
+          # Cargo.lock is the committed one, so the package is built from the
+          # dependencies the version was released with. A run that publishes
+          # first moves chrono-tz to the newest release, which is the tzdata
+          # the monthly rebuild exists to pick up, and stops if that moves
+          # anything else; a pull request check packages the lock as
+          # proposed. The lock in the tarball is the one vendored from, so
+          # the licence summary and the crate manifest the package ships
+          # describe the build it contains.
+          if [ "${PUBLISH}" = true ]; then
+              python3 ci/.github/scripts/update-tzdata.py
+          fi
           rm -rf stage && mkdir -p "stage/csvdt-$v"
           git archive HEAD | tar -x -C "stage/csvdt-$v"
 
           # A build root has no network, so the dependencies are built in
           # from a vendored tarball, which Fedora allows for a leaf
-          # application. Resolved fresh here, since Cargo.lock is not
-          # committed; that is the same mechanism the monthly build relies on
-          # to pick up a new tzdata.
-          cargo vendor > /dev/null
+          # application. --locked vendors exactly what the lock names.
+          cargo vendor --locked > /dev/null
           cp Cargo.lock "stage/csvdt-$v/Cargo.lock"
 
           tar czf ~/rpmbuild/SOURCES/csvdt-$v.tar.gz -C stage "csvdt-$v"

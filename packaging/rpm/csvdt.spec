@@ -12,7 +12,7 @@
 # Building it:
 #
 #     spectool -g csvdt.spec          # or fetch Source0 by hand
-#     cargo vendor                    # in an unpacked source tree
+#     cargo vendor --locked           # in an unpacked source tree
 #     tar czf csvdt-1.0.0-vendor.tar.gz vendor/
 #     rpmbuild -ba csvdt.spec
 #
@@ -111,7 +111,7 @@ which two set the quote and the delimiter that decide where a record begins.
 %cargo_prep -v vendor
 
 %build
-%cargo_build
+%cargo_build -- --locked
 %{cargo_license_summary}
 %{cargo_license} > LICENSE.dependencies
 %{cargo_vendor_manifest}
@@ -132,7 +132,7 @@ fi
 "$csvdt_built" --generate-man > %{crate}.1
 
 %install
-%cargo_install
+%cargo_install -- --locked
 install -Dpm0644 %{crate}.1 %{buildroot}%{_mandir}/man1/%{crate}.1
 
 install -Dpm0644 emacs/csvdt.el %{buildroot}%{_emacs_sitelispdir}/%{crate}.el
@@ -150,7 +150,7 @@ cat > %{buildroot}%{_emacs_sitestartdir}/%{crate}-init.el <<'EOF'
 EOF
 
 %check
-%cargo_test
+%cargo_test -- --locked
 
 # Valid roff, not merely bytes. -z produces no output and only diagnostics,
 # -ww asks for all of them, and any diagnostic at all fails the build:

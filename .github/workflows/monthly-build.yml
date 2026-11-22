@@ -9,11 +9,13 @@
 # The point of rebuilding a tag that does not move is the IANA time zone
 # database: -l resolves zones against the copy compiled into the binary, so
 # a build only knows the rules that existed when it was made. Cargo.lock is
-# not committed, so each run re-resolves dependencies and picks up whatever
-# chrono-tz (and therefore tzdata) release is current: once, in the meta
-# job, with every leg built --locked against that one resolution. A release
-# cut in April therefore stops carrying April's zone rules the moment IANA
-# publishes new ones, without the released source changing by a byte.
+# committed, so a tag builds the dependencies it was released with, and the
+# one thing this workflow moves is chrono-tz (which carries the tzdata): once,
+# in the meta job, in its own working tree and with nothing committed back,
+# with every leg built --locked against that result. It refuses to publish if
+# the update moved any other package. A release cut in April therefore stops
+# carrying April's zone rules the moment IANA publishes new ones, without the
+# released source changing by a byte.
 #
 # Three kinds of release come out of this, and they answer three different
 # questions:
@@ -90,6 +92,15 @@ jobs:
           # version tags and a shallow checkout has none of them.
           fetch-depth: 0
 
+      # The helper scripts, from the workflow's own ref and not from the
+      # commit being built: that one may be an old version tag with none.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          path: ci
+          sparse-checkout: .github
+          persist-credentials: false
+
       # Highest version, not most recently created: a patch to an older
       # series cut after a newer one shipped is a real tag and is not the
       # newest release.
@@ -144,31 +155,33 @@ jobs:
           echo "built=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
           echo "building $ref at $(git rev-parse --short HEAD)"
 
-      # Resolved here and nowhere else. Four legs each running their own `cargo
-      # update` would be four resolutions of an index that anyone may publish
-      # to mid-run, and when they disagreed the release job would refuse to
-      # publish (correctly, since one lockfile would then be the provenance
-      # record for binaries that did not all match it) and the month's rebuild
-      # would be lost to a re-run. Resolving once removes the race rather than
-      # reporting it, and the legs build --locked against this file, so a leg
-      # cannot quietly resolve anything of its own.
+      # Updated here and nowhere else. Four legs each updating for themselves
+      # would be four looks at an index that anyone may publish to mid-run,
+      # and when they disagreed the release job would refuse to publish
+      # (correctly, since one lockfile would then be the provenance record for
+      # binaries that did not all match it) and the month's rebuild would be
+      # lost to a re-run. Doing it once removes the race rather than reporting
+      # it, and the legs build --locked against the result, so a leg cannot
+      # quietly resolve anything of its own.
+      #
+      # Only chrono-tz moves, which is the tzdata. The script compares the
+      # committed lock with the updated one and stops the run, listing them,
+      # if any other package differs. The working tree is changed and nothing
+      # is committed or pushed.
       #
       # Cargo.lock describes every target's dependencies, not the host's, so
-      # one resolution serves all four.
-      - name: Resolve the dependency set
-        run: cargo update
+      # one update serves all four.
+      - name: Update the time zone database crate
+        run: python3 ci/.github/scripts/update-tzdata.py
 
-      # The set just resolved is the newest of every crate published that day,
-      # so it is checked against the RustSec advisory database before any leg
-      # builds it or anything is published. The tool is installed at a pinned
-      # version (cargo verifies the crate's checksum against the index) and the
-      # database is fetched afresh by every run, since the runner starts empty.
-      # A known vulnerability in the set stops the run; a crate that is merely
-      # unmaintained or yanked is printed and does not.
+      # The lock as it now stands is checked against the RustSec advisory
+      # database before any leg builds it or anything is published. A known
+      # vulnerability stops the run; a crate that is merely unmaintained or
+      # yanked is printed and does not. Advisories judged not to apply are
+      # listed with reasons in .github/audit-ignore. The tool is installed at
+      # a pinned version and the database is fetched afresh by every run.
       - name: Audit the dependency set
-        run: |
-          cargo install cargo-audit --version 0.22.2 --locked
-          cargo audit
+        run: ci/.github/scripts/audit.sh
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -277,11 +290,9 @@ jobs:
           echo "::error::apt could not install musl-tools in two attempts, each command capped at three minutes."
           exit 1
 
-      # Cargo.lock is untracked, and this is where it comes from: the one
-      # meta resolved, for every leg. --locked below then means the newest
-      # in-range dependencies as of a single moment, above all the newest
-      # tzdata, rather than as of whenever each leg happened to reach this
-      # step.
+      # The lock meta updated, for every leg. --locked below then means the
+      # committed dependencies with the newest tzdata as of a single moment,
+      # rather than as of whenever each leg happened to reach this step.
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: dependency-set
@@ -619,7 +630,7 @@ jobs:
           chmod +x ~/.local/bin/csvdt
           \`\`\`
 
-          \`Cargo.lock\` records the exact dependency versions this build resolved, including the chrono-tz release that supplied the time zone database. \`BUILD-INFO\` records the commit, compiler and dependency fingerprint it was produced from, and \`VERSION\` holds the exact string this build's \`--version\` prints. Between them they are enough to stand the build environment up again and compile the same source with the same dependencies. To cite the build behind a particular result, keep the output of \`csvdt --version\` alongside it.
+          \`Cargo.lock\` records the exact dependency versions this build resolved, including the chrono-tz release that supplied the time zone database (the committed lock of that version with only chrono-tz updated). \`BUILD-INFO\` records the commit, compiler and dependency fingerprint it was produced from, and \`VERSION\` holds the exact string this build's \`--version\` prints. Between them they are enough to stand the build environment up again and compile the same source with the same dependencies. To cite the build behind a particular result, keep the output of \`csvdt --version\` alongside it.
 
           A build only gets published when the source, the dependencies or the compiler actually changed, so months in which nothing moved have no release of their own; the preceding one still describes the binary in use.
           EOF
@@ -791,9 +802,9 @@ jobs:
       # above answers that: the rolling pointer is the current build, and an
       # archive entry is one build among many. Somebody reproducing an old
       # result needs the answer, because the binary carries the time zone
-      # database it was compiled with and rebuilding the source tarball today
-      # does not: Cargo.lock is not committed, so a rebuild resolves
-      # today's chrono-tz and therefore today's zone rules.
+      # database it was compiled with and rebuilding the tag does not: the
+      # tag's committed Cargo.lock names the chrono-tz it was released with,
+      # and today's build has moved it on to today's zone rules.
       #
       # Only on a tag push, which is the one moment the answer is being
       # decided. The monthly rebuild refreshes the rolling release on

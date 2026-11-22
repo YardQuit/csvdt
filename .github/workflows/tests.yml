@@ -40,14 +40,11 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      # Cargo.lock is untracked, so this is what the build would resolve
-      # anyway; being explicit means a dependency that breaks us shows up
-      # here rather than in the monthly build.
-      - name: Update dependencies
-        run: cargo update
-
+      # --locked: the build uses exactly the committed Cargo.lock, and fails
+      # if Cargo.toml has moved without it, so a dependency change is made in
+      # the lock where a reviewer sees it.
       - name: Test
-        run: cargo test
+        run: cargo test --locked
 
   emacs:
     name: emacs front end
@@ -60,7 +57,7 @@ jobs:
       # The Emacs tests drive a real csvdt rather than a mock, since the whole
       # point of the package is that it asks the binary what it can do.
       - name: Build csvdt
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Install Emacs
         run: sudo apt-get update && sudo apt-get install -y emacs-nox

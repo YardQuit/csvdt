@@ -26,4 +26,8 @@ if ! grep -qF "text naming $lookalike" README.md; then
     exit 1
 fi
 grep -q '^version = "9.8.7"' Cargo.toml || { echo "FAIL: Cargo.toml" >&2; exit 1; }
+if ! grep -A1 '^name = "csvdt"$' Cargo.lock | grep -q '^version = "9.8.7"'; then
+    echo "FAIL: Cargo.lock still names the old version of csvdt" >&2
+    exit 1
+fi
 echo "set-version: ok"

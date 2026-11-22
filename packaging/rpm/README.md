@@ -98,8 +98,8 @@ then a fact about the packages being archived.
 
 The monthly build writes the same entry for the binaries, so one entry normally
 holds both. Normally, and not always: the packages are compiled inside Fedora
-from their own dependency resolution, and can resolve a different `chrono-tz`
-from the musl binaries built the same night. The tag is derived from each build
+from their own update of `chrono-tz` in the committed lock, and can end up on
+a different release from the musl binaries built the same night. The tag is derived from each build
 separately for exactly that reason: adopting a name that says `tzdata2025b` for
 a package carrying `2025a` is the one confusion the naming exists to prevent.
 When the two disagree the month has two entries, which is precisely the case
@@ -170,8 +170,10 @@ that tag.
 Fedora build roots have no network, so the crates are vendored first:
 
 ```bash
-# From a source tree at the version being packaged
-cargo vendor
+# From a source tree at the version being packaged. --locked vendors the
+# committed Cargo.lock; `cargo update -p chrono-tz` first, if the package
+# should carry the newest time zone database instead of the version's own.
+cargo vendor --locked
 tar czf ~/rpmbuild/SOURCES/csvdt-1.0.0-vendor.tar.gz vendor/
 spectool -g -R packaging/rpm/csvdt.spec     # fetches Source0
 rpmbuild -ba packaging/rpm/csvdt.spec

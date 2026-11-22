@@ -31,7 +31,7 @@ if [ -z "${CSVDT:-}" ]; then
     # what it says. CSVDT set by hand is left alone: that names a binary on
     # purpose, and may not have a source tree behind it at all.
     echo "== building csvdt"
-    (cd "$root" && cargo build --release) || exit 2
+    (cd "$root" && cargo build --release --locked) || exit 2
 fi
 export CSVDT
 [ -x "$CSVDT" ] || { echo "No csvdt at $CSVDT. Set CSVDT." >&2; exit 2; }

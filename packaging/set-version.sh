@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Sets csvdt's version everywhere it is written down.
 #
-# The version lives in three places that are checked (Cargo.toml, the
-# Emacs package's header, and the RPM spec) and in a handful of README
-# lines that are not. Bumping only the first is caught by CI, eventually,
-# on the leg that runs the Emacs suite or builds the RPM; the README lines
-# are caught by nobody and simply go on naming the last release.
+# The version lives in three places that are checked (Cargo.toml, with the
+# entry for the package in Cargo.lock, the Emacs package's header, and the
+# RPM spec) and in a handful of README lines that are not. Bumping only the
+# first is caught by CI, eventually, on the leg that runs the Emacs suite or
+# builds the RPM; the README lines are caught by nobody and simply go on
+# naming the last release.
 #
 #   packaging/set-version.sh 1.3.0
 #
@@ -54,6 +55,10 @@ old_re=$(printf '%s' "$old" | sed 's/[.]/\\./g')
 # cannot be hit by accident.
 sed -i "s/^version = \"$old_re\"/version = \"$new\"/" Cargo.toml
 sed -i "s/^;; Version: .*/;; Version: $new/" emacs/csvdt.el
+# Cargo.lock names the package's own version, and --locked builds refuse a
+# lock that disagrees with Cargo.toml. Offline: only this entry changes.
+cargo update --workspace --offline >/dev/null 2>&1 \
+    || { echo "cargo could not update Cargo.lock for $new" >&2; exit 1; }
 
 # The spec, above its %changelog only. Release goes back to 1: the number
 # counts packagings of one upstream version, so a new version starts over.
