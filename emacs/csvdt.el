@@ -254,7 +254,7 @@ fall back to `--help' instead."
 Matches the short-and-long form (\"  -x, --xxx <VALUE>\") and the
 long-only form (\"      --xxx <VALUE>\").  The layout does not say whether
 an option takes a value, so :value is nil, meaning not known, and
-`csvdt--file-arguments' then declines to guess at filenames."
+`csvdt--positional-arguments' then declines to guess at positionals."
   (let ((records '())
         (case-fold-search nil))
     (with-temp-buffer
@@ -559,41 +559,77 @@ must be attached with \"=\"."
           (setq index (1+ index))))
       expects))))
 
-(defun csvdt--file-arguments (args)
-  "Return the arguments in ARGS that csvdt would read as a file to open.
-Only ones that name a file on disk.  The commands give csvdt the selection
-as a temporary file after these arguments, so a filename among them is a
-second file, and csvdt's refusal of it names the temporary file rather than
-the filename typed.  Nothing is reported when the option table
-cannot say which options take a separate value (the `--help' fallback,
-where :value is nil), since telling a value from a filename needs that."
+(defun csvdt--positional-arguments (args)
+  "Return the arguments in ARGS that clap would read as positional.
+That is every word that is neither an option nor the separate value of
+one, and every word after \"--\".  Each comes as (WORD . BEFORE), BEFORE
+being the argument just before it, or nil for the first.  csvdt takes one
+positional, its input file, and these commands supply that themselves, so
+any word returned here would make a second, and csvdt's refusal of it
+would name the temporary file rather than the word typed.  Nothing is
+returned when the option table cannot say which options take a separate
+value (the `--help' fallback, where :value is nil), since telling a value
+from a positional needs that."
   (unless (seq-some (lambda (record) (plist-get record :value))
                     (csvdt--option-records))
     (setq args nil))
-  (let ((files '())
+  (let ((words '())
         (rest args)
+        (before nil)
         (positional nil))
     (while rest
       (let ((argument (car rest)))
         (cond
          ;; Everything after "--" is positional, whatever it looks like.
          ((and (not positional) (equal argument "--"))
-          (setq positional t rest (cdr rest)))
+          (setq before argument rest (cdr rest)
+                positional t))
          ((and (not positional) (csvdt--expects-a-following-value argument))
-          (setq rest (cddr rest)))
+          (setq before (cadr rest) rest (cddr rest)))
          ((and (not positional)
                (string-prefix-p "-" argument)
                (> (length argument) 1))
-          (setq rest (cdr rest)))
+          (setq before argument rest (cdr rest)))
          (t
-          ;; Not "~" paths: `file-regular-p' expands the tilde and csvdt
-          ;; does not, so csvdt refuses those itself.
-          (when (and (not (string-empty-p argument))
-                     (not (string-prefix-p "~" argument))
-                     (file-regular-p argument))
-            (push argument files))
-          (setq rest (cdr rest))))))
-    (nreverse files)))
+          (push (cons argument before) words)
+          (setq before argument rest (cdr rest))))))
+    (nreverse words)))
+
+(defun csvdt--joined-value-option (argument)
+  "Return the record of the option ARGUMENT ends with, if it needs \"=\".
+That is an option whose value must be joined to it with \"=\".  ARGUMENT
+is a long option, or a short one or a cluster of them, written without a
+value; with \"=\" in it, or ending in no such option, the result is nil."
+  (unless (string-match-p "=" argument)
+    (let ((name (if (string-prefix-p "--" argument)
+                    argument
+                  (car (last (csvdt--short-flags argument))))))
+      (seq-find (lambda (record)
+                  (and name
+                       (member name (list (plist-get record :short)
+                                          (plist-get record :long)))
+                       (equal (plist-get record :separator) "equals")))
+                (csvdt--option-records)))))
+
+(defun csvdt--refuse-positional-arguments (args)
+  "Signal a `user-error' naming the first positional word in ARGS, if any.
+These commands give csvdt its input file, so a word that is neither an
+option nor an option's value has nowhere to go.  When the word follows an
+option whose value must be joined with \"=\", as \"fix\" does in
+\"-f fix\", the message says so and shows the joined form."
+  (let ((first (car (csvdt--positional-arguments args))))
+    (when first
+      (let* ((word (car first))
+             (before (cdr first))
+             (record (and before (csvdt--joined-value-option before))))
+        (user-error
+         "Cannot run: %S is neither an option nor the value of one, and \
+these commands give csvdt its input file themselves%s"
+         word
+         (if record
+             (format "; %s takes its value joined with \"=\": %s=%s"
+                     (plist-get record :long) before word)
+           ""))))))
 
 (defun csvdt--options-part (args)
   "Return the part of ARGS before \"--\", which clap reads as options.
@@ -1322,12 +1358,7 @@ which `csvdt--mid-line-boundary-p' reports before normalising hides it.
 The run happens in the background.  When csvdt is done the result is shown
 in `*csvdt output*' and a summary is given, or the exit status and csvdt's
 own message if it failed.  `csvdt--await' waits for the returned job."
-  (let ((files (csvdt--file-arguments args)))
-    (when files
-      (user-error
-       "Cannot run: %s would be a second file beside the selection; %s"
-       (string-join files ", ")
-       "these commands give csvdt the lines as a file of their own")))
+  (csvdt--refuse-positional-arguments args)
   (csvdt--program)
   (let ((plan (csvdt--plan ranges args snapped)))
     (when (and (csvdt--option-given-p csvdt-comment-options

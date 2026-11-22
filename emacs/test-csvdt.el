@@ -1607,21 +1607,31 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     (csvdt--banked-lines)
                     nil))
 
-;;; A filename among the arguments would replace the selection
+;;; A word that is neither an option nor a value has nowhere to go
 
-;; These commands always give csvdt the lines as a temporary file after the
-;; arguments, so a filename in the argument line is a second file, which csvdt
-;; refuses with a message naming the temporary file rather than the one typed.
+;; These commands give csvdt the lines as its input file, after the
+;; arguments, so any positional word in the argument line is a second one.
+;; csvdt refuses that with a message naming the temporary file rather than
+;; the word typed, so the word is refused here instead, by name.
+(defun test-csvdt-positionals (args)
+  "Return the words in ARGS that `csvdt--positional-arguments' finds."
+  (mapcar #'car (csvdt--positional-arguments args)))
+
+(defun test-csvdt-refusal (args)
+  "Return the message refusing ARGS, or nil if they are not refused."
+  (condition-case error
+      (progn (csvdt--refuse-positional-arguments args) nil)
+    (user-error (error-message-string error))))
+
 (let ((elsewhere (make-temp-file "test-csvdt-other" nil ".csv" "z,z\n9,9\n")))
   (unwind-protect
       (progn
         (test-csvdt-check
          "a real file among the arguments is found"
-         (csvdt--file-arguments (list "-H" "-p" elsewhere))
+         (test-csvdt-positionals (list "-H" "-p" elsewhere))
          (list elsewhere))
 
-        ;; It has to be refused before anything runs, or the wrong contents are
-        ;; displayed as though they were the selection's.
+        ;; It has to be refused before anything runs, and named as typed.
         (with-temp-buffer
           (insert "a,b\n1,2\n")
           (test-csvdt-check
@@ -1631,7 +1641,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                                   (list "-H" "-p" elsewhere))
                       "ran anyway")
              (user-error
-              (and (string-match-p "second file beside the selection"
+              (and (string-match-p (regexp-quote (format "%S" elsewhere))
                                    (error-message-string error))
                    t)))
            t))
@@ -1640,13 +1650,42 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
         ;; like, so a filename there counts too.
         (test-csvdt-check
          "a file after -- counts as well"
-         (csvdt--file-arguments (list "-H" "--" elsewhere))
+         (test-csvdt-positionals (list "-H" "--" elsewhere))
          (list elsewhere)))
     (delete-file elsewhere)))
 
-;; Values that belong to the option before them are not filenames, whether they
-;; are attached, separate, clustered or joined with "=". Getting this wrong the
-;; other way would refuse valid command lines.
+;; Not only a file: whatever the word is, csvdt would take it for a second
+;; input, a lone "-" (standard input to csvdt) and a directory included.
+(test-csvdt-check "a word that names nothing is found too"
+                  (test-csvdt-positionals (list "-H" "-p" "stray"))
+                  '("stray"))
+(test-csvdt-check "a lone - is found"
+                  (test-csvdt-positionals (list "-H" "-"))
+                  '("-"))
+(test-csvdt-check "a directory is found"
+                  (test-csvdt-positionals
+                   (list "-H" "-p" temporary-file-directory))
+                  (list temporary-file-directory))
+(test-csvdt-check "a word after a value-taking option is its value, so no hint"
+                  (test-csvdt-refusal (list "-u" "0" "stray"))
+                  (concat "Cannot run: \"stray\" is neither an option nor the "
+                          "value of one, and these commands give csvdt its "
+                          "input file themselves"))
+(test-csvdt-check "the long form gets the joined long form"
+                  (and (string-match-p "--flexible=fix\\'"
+                                       (test-csvdt-refusal
+                                        (list "--flexible" "fix")))
+                       t)
+                  t)
+(test-csvdt-check "a cluster ending in -f gets the cluster joined"
+                  (and (string-match-p "-Hf=fix\\'"
+                                       (test-csvdt-refusal (list "-Hf" "fix")))
+                       t)
+                  t)
+
+;; Values that belong to the option before them are not positional, whether
+;; they are attached, separate, clustered or joined with "=". Getting this
+;; wrong the other way would refuse valid command lines.
 (dolist (args '(("-H" "-p")
                 ("-H" "-p" "-u0")
                 ("-H" "-p" "-u" "0")
@@ -1657,35 +1696,40 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                 ("-H" "-p" "-a" "1,0")
                 ("-H" "-p" "-o" "0,+01:00")
                 ("-H" "-p" "-f=widest")
-                ("-H" "-")))
-  (test-csvdt-check (format "no filename in %s" (string-join args " "))
-                    (csvdt--file-arguments args)
+                ("-H" "-p" "-f")))
+  (test-csvdt-check (format "nothing positional in %s" (string-join args " "))
+                    (csvdt--positional-arguments args)
                     nil))
 
-;; The same table read the other way round, with a filename after the option:
-;; one carrying its own value leaves the word after it where the filename
+;; The same table read the other way round, with a word after the option:
+;; one carrying its own value leaves the word after it where the input file
 ;; goes, and that word has to still be reported.  Taking every option for one
 ;; that eats the next argument, "-u0 other.csv" stops being flagged, and the
 ;; run fails on a message about a temporary file nobody typed.
-(let ((elsewhere (make-temp-file "test-csvdt-other" nil ".csv" "z,z\n9,9\n")))
-  (unwind-protect
-      (dolist (args (list (list "-u0" elsewhere) (list "-Hu0" elsewhere)))
-        (test-csvdt-check (format "a file after %s is still found" (car args))
-                          (csvdt--file-arguments args)
-                          (list elsewhere)))
-    (delete-file elsewhere)))
+(dolist (args (list (list "-u0" "other.csv") (list "-Hu0" "other.csv")))
+  (test-csvdt-check (format "a word after %s is still found" (car args))
+                    (test-csvdt-positionals args)
+                    (list "other.csv")))
 
-;; The check only reports what csvdt would really open. A word left where the
-;; filename goes that names nothing is left to csvdt to refuse.
-(test-csvdt-check "a word that is not a file is left to csvdt"
-                  (csvdt--file-arguments (list "-H" "-p" "-f" "fix"))
-                  nil)
-
-;; A directory is not something csvdt can read either, and it is not what this
-;; is looking for: only a regular file is a filename argument.
-(test-csvdt-check "a directory is not a filename argument"
-                  (csvdt--file-arguments (list "-H" "-p" temporary-file-directory))
-                  nil)
+;; "-f fix" leaves "fix" where the input file goes, since --flexible's value
+;; has to be joined with "=".  csvdt was left to refuse it, and its message
+;; named the temporary file holding the selection rather than "fix"; the
+;; refusal is made here instead, and shows the joined form.
+(with-temp-buffer
+  (insert "a,b\n1,2\n")
+  (test-csvdt-check
+   "-f fix is refused, naming the word and the joined form"
+   (condition-case error
+       (progn (csvdt--run (list (cons (point-min) (point-max)))
+                          (list "-H" "-p" "-f" "fix"))
+              "ran anyway")
+     (user-error
+      (let ((message (error-message-string error)))
+        (and (string-match-p "\"fix\"" message)
+             (string-match-p "--flexible takes its value joined with \"=\": -f=fix"
+                             message)
+             t))))
+   t))
 
 ;;; The review fixes, each pinned
 
@@ -2167,20 +2211,20 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (test-csvdt-check "-H after -- is positional, not the option"
                   (csvdt--header-requested-p '("--" "-H")) nil)
 
-;; And the filename check agrees: a file really named -H, sitting after
-;; the separator, is exactly what csvdt would open.
+;; And the positional check agrees: a file really named -H, sitting after
+;; the separator, is exactly what csvdt would take for its input.
 (let ((dir (make-temp-file "csvdt-dash" t)))
   (with-temp-file (expand-file-name "-H" dir) (insert "z,z\n"))
   (let ((default-directory (file-name-as-directory dir)))
     (test-csvdt-check "a file named -H after -- is found"
-                      (csvdt--file-arguments '("-p" "--" "-H"))
+                      (test-csvdt-positionals '("-p" "--" "-H"))
                       '("-H")))
   (delete-directory dir t))
 
-;; A "~" path is expanded by `file-regular-p' but not by csvdt, which
-;; answers it with its own loud cannot-read error: the silent replacement
-;; the filename check exists to catch cannot happen, so flagging one
-;; claimed csvdt would read a file it never would.
+;; A "~" path is expanded by `file-regular-p' but not by csvdt.  It is
+;; refused as typed, like any other word, whether or not the file it would
+;; name is there, and the message shows the "~" rather than an expansion
+;; csvdt would never make.
 (let* ((home-file (make-temp-file (expand-file-name "csvdt-tilde-" "~")
                                   nil ".csv" "z,z\n"))
        (tilde (concat "~/" (file-name-nondirectory home-file))))
@@ -2188,15 +2232,15 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
       (progn
         (test-csvdt-check "the ~ path does name a real file"
                           (and (file-regular-p tilde) t) t)
-        (test-csvdt-check "yet is not reported as one csvdt would read"
-                          (csvdt--file-arguments (list "-H" "-p" tilde))
-                          nil))
+        (test-csvdt-check "and is reported as typed"
+                          (test-csvdt-positionals (list "-H" "-p" tilde))
+                          (list tilde)))
     (delete-file home-file)))
 
 ;; When the option data comes from the --help fallback, no option's value
-;; arity is known and the filename check stands down entirely: guessing
+;; arity is known and the positional check stands down entirely: guessing
 ;; scanned an option's separate value as a positional, and refused the run
-;; whenever a file of that name happened to exist.
+;; whenever it took one.
 (let ((stub (make-temp-file "old-csvdt" nil ".sh"))
       (data (make-temp-file "csvdt-value" nil ".csv" "z,z\n9,9\n")))
   (with-temp-file stub
@@ -2213,8 +2257,8 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                       (seq-some (lambda (record) (plist-get record :value))
                                 (csvdt--option-records))
                       nil)
-    (test-csvdt-check "so an option's separate value is not scanned as a file"
-                      (csvdt--file-arguments (list "-u" data))
+    (test-csvdt-check "so an option's separate value is not taken as positional"
+                      (csvdt--positional-arguments (list "-u" data))
                       nil))
   (delete-file stub)
   (delete-file data))
@@ -2939,7 +2983,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   (test-csvdt-check "no docstring shows a stray = where a quote closes"
                     (sort garbled #'string<) nil))
 
-(test-csvdt-check "a refused filename starts its message with a capital"
+(test-csvdt-check "a refused word starts its message with a capital"
                   (let ((file (make-temp-file "csvdt-file")))
                     (unwind-protect
                         (with-temp-buffer

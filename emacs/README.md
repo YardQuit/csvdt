@@ -32,7 +32,7 @@ set against the binary.
 layout doesn't make machine-readable. `--flexible` is the one option whose value
 must be joined with `=`, so `-f=` and `--flexible=` are offered as well as the
 bare forms: `--flexible`'s value is optional, so the bare form is legitimate on
-its own, and only a value written separately would be read as a filename.
+its own, and a value written separately is refused with the joined form shown.
 
 ## Setup
 
@@ -222,32 +222,33 @@ A Windows path typed as a value has to survive as one argument, and there is no
 filename here for shell escaping to be worth more than that; these commands
 give csvdt the selected lines as a file of their own.
 
-A filename in that line is refused, rather than run:
+A word in that line that is neither an option nor an option's value is
+refused, rather than run:
 
 ```
 csvdt arguments: -H -p sales.csv
-Cannot run: sales.csv would be a second file beside the selection; these
-commands give csvdt the lines as a file of their own
+Cannot run: "sales.csv" is neither an option nor the value of one, and these
+commands give csvdt its input file themselves
 ```
 
 These commands always hand csvdt the selected lines as a temporary file after
-your arguments, so a filename among them is a second file. csvdt takes one,
-and its refusal would name the temporary file, which you never typed, rather
-than the filename you did.
+your arguments, and csvdt takes one input file, so any other word left where
+the file goes would be a second. csvdt would refuse it too, but its message
+would name the temporary file, which you never typed, rather than the word you
+did. A file, a word that names nothing, `-` and anything after `--` are all
+refused the same way.
 
-Only a name that really is a file is refused here. Any other word left where
-the filename goes, such as `fix` in `-f fix` (that mode has to be attached with
-`=`), reaches csvdt, which refuses the run the same way, naming the temporary
-file:
+The commonest slip is a value written apart from an option that wants it joined
+with `=`, and the message says so:
 
 ```
-csvdt exited 2: error: unexpected argument '/tmp/csvdt-inputXXXXXX' found
-
-Usage: csvdt [OPTIONS] [FILE]
-...
+csvdt arguments: -H -p -f fix
+Cannot run: "fix" is neither an option nor the value of one, and these
+commands give csvdt its input file themselves; --flexible takes its value
+joined with "=": -f=fix
 ```
 
-Which arguments are values rather than filenames comes from
+Which arguments are values rather than stray words comes from
 `--list-options`, so `-u 0`, `--trim none` and `-o 0,+01:00` are understood as
 option-and-value without this file naming a single csvdt option.
 
@@ -791,6 +792,9 @@ What it checks:
   input file
 - an unavailable `csvdt-output-mode` still shows the output
 - csvdt's own error text surfaces on a failure, with its exit status
+- a word that is neither an option nor an option's value is refused by name,
+  with the joined form when it is a value written apart from `-f` or
+  `--flexible`
 - an `=`-attached argument, built from the offered candidate, actually runs
 - the source buffer is not modified
 - a run returns before it is reported, a text larger than one chunk arrives

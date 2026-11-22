@@ -104,8 +104,11 @@ A name the database added, Factory, is now accepted as a zone.
   Unix.
 - A `TZ` path that exists but is not a regular file, such as `/dev/null`, is
   refused as what it is rather than as a file that does not exist.
-- The Emacs front end, refusing a filename among the arguments, gives the
-  reason that holds now the selection reaches csvdt as a file of its own.
+- The Emacs front end refuses any word in the arguments that is neither an
+  option nor an option's value, by name, since it gives csvdt the input file
+  itself. Only a file was refused before, and anything else reached csvdt,
+  whose message named the temporary file. A value written apart from
+  `--flexible`, as in `-f fix`, is shown joined: `-f=fix`.
 
 ### Building
 
