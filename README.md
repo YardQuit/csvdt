@@ -734,7 +734,9 @@ binary, so the front end needs no change when csvdt gains an option. A test
 holds `--lines` to an option csvdt still reports, and another asserts no
 second name has crept in.
 
-The front end for the Tuatara editor lives with Tuatara's own packages, in
+The front end for the Tuatara editor works the same way, naming only
+`--lines` and needing csvdt 1.2.0 or newer, and lives with Tuatara's own
+packages, in
 [Tuatara-Editor/tuatara-packages](https://github.com/Tuatara-Editor/tuatara-packages):
 
 ```lisp
