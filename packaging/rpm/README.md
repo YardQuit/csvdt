@@ -68,7 +68,7 @@ GitHub designates current.
 
 ### What a version shipped as
 
-The rolling release cannot answer "which packages was 1.1.0 released as" once
+The rolling release cannot answer "which packages was 1.2.0 released as" once
 1.4.0 exists, because it is replaced. So a version tag also attaches its
 packages to its own release, written once and never swept: every real package
 name, the source package, the debug packages, `RPM-BUILD-INFO`, and a
@@ -90,7 +90,7 @@ replaced, and the version's own copy is the release-day build rather than
 whichever monthly rebuild was installed at the time.
 
 So every published build is also attached to an archive release named for what
-it is: `1.1.0-2026.09.abc1234-tzdata2026f`, the version, the month and commit
+it is: `1.2.0-2026.09.abc1234-tzdata2026f`, the version, the month and commit
 it was built from, and the time zone database it carries. That name is read out
 of `RPM-BUILD-INFO`, which records what the installed binary actually answered,
 rather than assembled from the workflow's own variables: every part of it is
@@ -175,7 +175,7 @@ Fedora build roots have no network, so the crates are vendored first:
 # should carry the newest time zone database instead of the version's own,
 # with CSVDT_TZDATA_MOVED set as %check sets it.
 cargo vendor --locked
-tar czf ~/rpmbuild/SOURCES/csvdt-1.1.0-vendor.tar.gz vendor/
+tar czf ~/rpmbuild/SOURCES/csvdt-1.2.0-vendor.tar.gz vendor/
 spectool -g -R packaging/rpm/csvdt.spec     # fetches Source0
 rpmbuild -ba packaging/rpm/csvdt.spec
 ```
@@ -245,15 +245,15 @@ Building it in Fedora found what no amount of parsing would have:
 It builds green on Fedora 44, and the run says so in its own words:
 
 ```
-Wrote: .../csvdt-1.1.0-1.fc44.src.rpm
-Wrote: .../emacs-csvdt-1.1.0-1.fc44.noarch.rpm
-Wrote: .../csvdt-1.1.0-1.fc44.x86_64.rpm
+Wrote: .../csvdt-1.2.0-1.fc44.src.rpm
+Wrote: .../emacs-csvdt-1.2.0-1.fc44.noarch.rpm
+Wrote: .../csvdt-1.2.0-1.fc44.x86_64.rpm
 test result: ok. 251 passed; 0 failed; 1 ignored          # the spec's %check
 /usr/share/man/man1/csvdt.1.gz                            # man -w csvdt
 CSVDT(1)              General Commands Manual              CSVDT(1)
 Loading /usr/share/emacs/site-lisp/site-start.d/csvdt-init.el (source)...
 front end resolves csvdt to: /usr/sbin/csvdt
-and gets: csvdt 1.1.0+2026.08.<commit> (IANA tzdata 2026f)
+and gets: csvdt 1.2.0+2026.08.<commit> (IANA tzdata 2026f)
 ```
 
 `/usr/sbin/csvdt` is `%{_bindir}/csvdt`: Fedora merged `sbin` into `bin`, and
@@ -264,7 +264,7 @@ sets `CSVDT_BUILD_METADATA` before `rpmbuild`, so the packaged binary names
 the month and the commit it was built from: two RPMs of one release differ
 in their time zone database and their Fedora, and without it they said the
 same thing. It is metadata rather than a version: the package's own
-`Version:` stays `1.1.0`, and `rpm -q csvdt` is unchanged.
+`Version:` stays `1.2.0`, and `rpm -q csvdt` is unchanged.
 
 What each run checks is listed under "CI builds it" above. What it does
 **not** check:

@@ -5,7 +5,7 @@
 ;; Author: Michael A Jones <yardquit@pm.me>
 ;; Maintainer: Michael A Jones <yardquit@pm.me>
 ;; URL: https://github.com/YardQuit/csvdt
-;; Version: 1.1.0
+;; Version: 1.2.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 

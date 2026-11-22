@@ -13,7 +13,7 @@
 #
 #     spectool -g csvdt.spec          # or fetch Source0 by hand
 #     cargo vendor --locked           # in an unpacked source tree
-#     tar czf csvdt-1.1.0-vendor.tar.gz vendor/
+#     tar czf csvdt-1.2.0-vendor.tar.gz vendor/
 #     rpmbuild -ba csvdt.spec
 #
 # rust2rpm is the maintained route for getting a Rust package into Fedora
@@ -36,7 +36,7 @@
 %{!?_emacs_sitestartdir: %global _emacs_sitestartdir %{_emacs_sitelispdir}/site-start.d}
 
 Name:           csvdt
-Version:        1.1.0
+Version:        1.2.0
 Release:        1%{?dist}
 Summary:        Parse CSV files and convert the timestamps in them
 
@@ -202,6 +202,13 @@ fi
 %{_emacs_sitestartdir}/%{crate}-init.el
 
 %changelog
+* Sun Nov 22 2026 Michael A Jones <yardquit@pm.me> - 1.2.0-1
+- --lines RANGES converts only the records on the lines named, taking a
+  record that runs over several lines whole.
+- The Emacs front end hands a selection to csvdt with --lines and no
+  longer reads the buffer for quoted fields itself; a run on part of the
+  buffer under --comment now works.
+
 * Sun Nov 22 2026 Michael A Jones <yardquit@pm.me> - 1.1.0-1
 - Zone rules come from jiff and its bundled IANA tzdata 2026f, in place of
   chrono and chrono-tz, which are no longer maintained; 49 zones convert

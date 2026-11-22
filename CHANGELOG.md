@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
 
 `--lines RANGES` converts only the records on the lines named, for example
 `--lines 12-40` or `--lines 3-5,9,20-22`, counting physical lines from 1 as
