@@ -8014,6 +8014,169 @@ fn a_leap_second_is_allowed_at_any_month_end_rather_than_a_fixed_list() {
         );
 }
 
+/// What csvdt writes for one row of input, given its options and TZ.
+fn converted(arguments: &[&str], tz: &str, row: &str) -> String {
+    let output = csvdt().args(arguments).env("TZ", tz).write_stdin(format!("{row}\n")).output().unwrap();
+    String::from_utf8(output.stdout).expect("csvdt should write UTF-8")
+}
+
+#[test]
+fn a_leap_second_is_the_moment_after_its_minute_and_keeps_its_sixty() {
+    // A leap second at a month end is read as the first instant of the next
+    // day for arithmetic, so 23:59:60.25 is a quarter-second past midnight,
+    // and is written back wearing :60 on whatever clock it is converted to.
+    // Mid-month, or on any other minute or hour, the same field is refused.
+    for (arguments, tz, row, want) in [
+        (&["-u0"][..], "UTC", "2016-12-31T23:59:60.5Z", "2016-12-31T23:59:60.500+00:00"),
+        (&["-o0,+05:30"][..], "UTC", "2016-12-31T23:59:60.5Z", "2017-01-01T05:29:60.500+05:30"),
+        (&["-o0,-05:00"][..], "UTC", "2016-12-31T23:59:60.5Z", "2016-12-31T18:59:60.500-05:00"),
+        (&["-l0"][..], "Asia/Kolkata", "2016-12-31T23:59:60Z", "2017-01-01T05:29:60+05:30"),
+        (&["-s0"][..], "UTC", "2017-01-01T05:29:60.25+05:30", "2017-01-01,05:29:60.250 +05:30"),
+        (&["-d0,1"][..], "UTC", "2016-12-31T23:59:60.25Z,2016-12-31T23:59:59Z", "PT1.25S"),
+        (&["-d0,1"][..], "UTC", "2016-12-31T23:59:60.25Z,2017-01-01T00:00:00.75Z", "PT0.5S"),
+        (&["-d0,1"][..], "UTC", "2016-12-31T23:59:60Z,2017-01-01T05:30:00+05:30", "PT0S"),
+        // Any month's last day, February's in a leap year and out of one.
+        (&["-u0"][..], "UTC", "2024-02-29T23:59:60Z", "2024-02-29T23:59:60+00:00"),
+        (&["-u0"][..], "UTC", "2023-02-28T23:59:60Z", "2023-02-28T23:59:60+00:00"),
+        (&["-u0"][..], "UTC", "2024-04-30T23:59:60Z", "2024-04-30T23:59:60+00:00"),
+        (&["-u0"][..], "UTC", "2024-02-28T23:59:60Z", "parse_err"),
+        (&["-u0"][..], "UTC", "2024-04-15T23:59:60Z", "parse_err"),
+        (&["-u0"][..], "UTC", "2024-06-30T23:58:60Z", "parse_err"),
+        (&["-u0"][..], "UTC", "2024-06-30T22:59:60Z", "parse_err"),
+        // The last leap second the format can hold, whose next moment is in
+        // year 10000: it still converts, and still measures.
+        (&["-u0"][..], "UTC", "9999-12-31T23:59:60Z", "9999-12-31T23:59:60+00:00"),
+        (&["-u0"][..], "UTC", "9999-12-31T22:59:60-01:00", "9999-12-31T23:59:60+00:00"),
+        (&["-o0,-01:00"][..], "UTC", "9999-12-31T23:59:60Z", "9999-12-31T22:59:60-01:00"),
+        (&["-d0,1"][..], "UTC", "9999-12-31T23:59:60.5Z,9999-12-31T23:59:59Z", "PT1.5S"),
+        (&["-u0"][..], "UTC", "9999-12-31T23:59:60+01:00", "parse_err"),
+    ] {
+        let line = converted(arguments, tz, row);
+        assert_eq!(line, format!("{row},{want}\n"), "{arguments:?} TZ={tz}");
+    }
+}
+
+#[test]
+fn the_last_nanosecond_of_9999_converts() {
+    // The top of the range RFC3339 can write, reached through every action,
+    // along with its neighbours on the far side of it.
+    for (arguments, tz, row, want) in [
+        (&["-u0"][..], "UTC", "9999-12-31T23:59:59.999999999Z", "9999-12-31T23:59:59.999999999+00:00"),
+        (&["-s0"][..], "UTC", "9999-12-31T23:59:59.999999999Z", "9999-12-31,23:59:59.999999999 +00:00"),
+        (&["-o0,-12:00"][..], "UTC", "9999-12-31T23:59:59.999999999Z", "9999-12-31T11:59:59.999999999-12:00"),
+        (&["-o0,+00:01"][..], "UTC", "9999-12-31T23:59:59.999999999Z", "parse_err"),
+        (&["-u0"][..], "UTC", "9999-12-31T23:59:59.999999999+00:01", "9999-12-31T23:58:59.999999999+00:00"),
+        (&["-u0"][..], "UTC", "9999-12-31T23:59:59.999999999-00:01", "parse_err"),
+        (&["-l0"][..], "UTC", "9999-12-31T23:59:59.999999999Z", "9999-12-31T23:59:59.999999999+00:00"),
+        (&["-l0"][..], "America/New_York", "9999-12-31T23:59:59.999999999Z", "9999-12-31T18:59:59.999999999-05:00"),
+        (&["-l0"][..], "Asia/Tokyo", "9999-12-31T14:59:59Z", "9999-12-31T23:59:59+09:00"),
+        (&["-l0"][..], "Asia/Tokyo", "9999-12-31T15:00:00Z", "parse_err"),
+        (&["-d0,1"][..], "UTC", "9999-12-31T23:59:59.999999999Z,0001-01-01T00:00:00Z", "P3652058DT23H59M59.999999999S"),
+        (&["-d0,1"][..], "UTC", "9999-12-31T23:59:59-05:00,9999-12-31T23:59:59Z", "PT5H"),
+        (&["-r0"][..], "UTC", "253402300799", "9999-12-31T23:59:59+00:00"),
+    ] {
+        assert_eq!(converted(arguments, tz, row), format!("{row},{want}\n"), "{arguments:?} TZ={tz}");
+    }
+}
+
+#[test]
+fn the_last_day_of_9999_converts_hour_by_hour() {
+    // The last 26 hours of the range lie past the point beyond which some
+    // time libraries cannot hold an instant with every offset, 9999-12-30
+    // at 22:00 UTC. csvdt's range is the format's, so each side of that
+    // point converts alike under every action.
+    for (arguments, row, want) in [
+        (&["-r0"][..], "253402207200", "9999-12-30T22:00:00+00:00"),
+        (&["-r0"][..], "253402207201", "9999-12-30T22:00:01+00:00"),
+        (&["-u0"][..], "9999-12-30T22:00:00.999999999Z", "9999-12-30T22:00:00.999999999+00:00"),
+        (&["-u0"][..], "9999-12-30T22:00:01Z", "9999-12-30T22:00:01+00:00"),
+        (&["-u0"][..], "9999-12-30T23:00:00+01:00", "9999-12-30T22:00:00+00:00"),
+        (&["-u0"][..], "9999-12-31T00:00:00+01:59", "9999-12-30T22:01:00+00:00"),
+        (&["-o0,+14:00"][..], "9999-12-31T09:59:59Z", "9999-12-31T23:59:59+14:00"),
+        (&["-d0,1"][..], "9999-12-30T22:00:00.999999999Z,9999-12-30T22:00:01Z", "PT0.000000001S"),
+    ] {
+        assert_eq!(converted(arguments, "UTC", row), format!("{row},{want}\n"), "{arguments:?}");
+    }
+    // -l looks the zone's offset up at an instant in those hours, in zones on
+    // both sides of UTC and at the widest offset in use.
+    for (zone, want) in [
+        ("UTC", "9999-12-31T09:59:59+00:00"),
+        ("Europe/Paris", "9999-12-31T10:59:59+01:00"),
+        ("America/New_York", "9999-12-31T04:59:59-05:00"),
+        ("Pacific/Kiritimati", "9999-12-31T23:59:59+14:00"),
+        ("Etc/GMT+12", "9999-12-30T21:59:59-12:00"),
+    ] {
+        assert_eq!(converted(&["-l0"], zone, "9999-12-31T09:59:59Z"), format!("9999-12-31T09:59:59Z,{want}\n"));
+    }
+}
+
+#[test]
+fn forms_beyond_rfc3339_that_iso_8601_allows_are_refused() {
+    // ISO 8601 and its extensions allow much that RFC3339 does not, and a
+    // general date library may read any of it. Each of these names an
+    // instant to such a reader and is not the format csvdt promises, so each
+    // is marked rather than read.
+    for value in [
+        "2024-06-15T14Z",
+        "2024-06-15T14:00Z",
+        "20240615T140000Z",
+        "2024-06-15T140000Z",
+        "2024-06-15T14:00:00,5Z",
+        "2024-06-15T14:00:00+02",
+        "2024-06-15T14:00:00+02:00:30",
+        "2024-06-15T14:00:00+24:00",
+        "2024-06-15T14:00:00+25:59",
+        "2024-06-15T14:00:00Z[Europe/Paris]",
+        "2024-06-15T14:00:00+02:00[Europe/Paris]",
+        "2024-06-15T14:00:00+02:00[!Europe/Paris]",
+        "2024-06-15T14:00:00[Europe/Paris]",
+        "+002024-06-15T14:00:00Z",
+        "-002024-06-15T14:00:00Z",
+        "002024-06-15T14:00:00Z",
+        "2024-06-15",
+        "2024-06-15T14:00:00",
+        "2024-06-15T24:00:00Z",
+        "2024-W24-6T14:00:00Z",
+        "2024-167T14:00:00Z",
+    ] {
+        for arguments in [&["-u0"][..], &["-s0"][..], &["-d0,1"][..]] {
+            let line = converted(arguments, "UTC", &format!("{value},2024-01-01T00:00:00Z"));
+            assert!(line.contains("parse_err"), "{arguments:?} read {value}: {line}");
+        }
+    }
+    // The leniencies csvdt does document still hold beside them, and so does
+    // the Unicode minus sign a typeset document puts in an offset.
+    for (value, want) in [
+        ("2024-06-15T14:00:00+0200", "2024-06-15T12:00:00+00:00"),
+        ("2024-06-15 14:00:00Z", "2024-06-15T14:00:00+00:00"),
+        ("2024-06-15t14:00:00z", "2024-06-15T14:00:00+00:00"),
+        ("2024-06-15T14:00:00\u{2212}05:00", "2024-06-15T19:00:00+00:00"),
+        ("2024-06-15T14:00:00+23:59", "2024-06-14T14:01:00+00:00"),
+        ("2024-06-15T14:00:00-23:59", "2024-06-16T13:59:00+00:00"),
+    ] {
+        assert_eq!(converted(&["-u0"], "UTC", value), format!("{value},{want}\n"));
+    }
+    // That minus sign is not taken without its colon, as the ASCII one is.
+    assert!(converted(&["-u0"], "UTC", "2024-06-15T14:00:00\u{2212}0500").contains("parse_err"));
+}
+
+#[test]
+fn a_zone_name_in_the_wrong_case_is_refused() {
+    // Zone names are case-sensitive in the database and on every system that
+    // reads TZ, so a name in another case is a misspelling and is refused,
+    // whatever a lookup that folds case would make of it.
+    for tz in ["america/new_york", "AMERICA/NEW_YORK", "europe/London", "utc", "Utc", "est5edt"] {
+        csvdt()
+            .args(["-H", "-l0"])
+            .env("TZ", tz)
+            .write_stdin("ts\n2026-07-25T12:00:00Z\n")
+            .assert()
+            .failure()
+            .code(100)
+            .stderr(predicate::str::contains(tz));
+    }
+}
+
 #[test]
 fn tenth_fractional_digit_is_refused_rather_than_truncated() {
     // chrono reads at most nine fractional digits and silently drops the
