@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+The releases now carry `THIRD-PARTY-LICENSES.txt`, the licence texts of the
+crates compiled into the prebuilt binaries, as those licences require. It
+is one file when every platform uses the same crates and one file per
+platform otherwise.
+
 The front end for the Tuatara editor lives with Tuatara's own packages, in
 [Tuatara-Editor/tuatara-packages](https://github.com/Tuatara-Editor/tuatara-packages),
 loaded with `(load-package "csvdt" :source "tuatara-packages")`: csvdt run

@@ -280,6 +280,17 @@ What each run checks is listed under "CI builds it" above. What it does
   `LICENSE.dependencies` from the vendored set at build time, and nothing
   compares it against the `License:` line.
 
+## Third-party licence texts
+
+`LICENSE.dependencies` is installed under `/usr/share/licenses/csvdt/`. It
+names each crate built into the binary and its licence expression, which is
+what Fedora's guidelines ask of a Rust package; it does not hold the licence
+texts. The texts are in `THIRD-PARTY-LICENSES.txt` on the release page, with
+the prebuilt binaries (see the main README). The RPM does not carry them: the
+vendor tarball holds the crates of every platform, not only those in the
+Linux binary, so adding the texts means filtering it, which cannot be tried
+outside Fedora's build root.
+
 ## RHEL and CentOS
 
 `cargo-rpm-macros` comes from EPEL on RHEL 9 and CentOS Stream 9. RHEL 8 ships

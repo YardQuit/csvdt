@@ -13,7 +13,9 @@ come out as the source had it or be marked as one that could not be converted.
 sudo dnf install https://github.com/YardQuit/csvdt/releases/download/rpm-release/csvdt.x86_64.rpm
 ```
 
-That is the whole install: `/usr/bin/csvdt`, and `man csvdt` works.
+That is the whole install: `/usr/bin/csvdt`, and `man csvdt` works. The
+licence texts of the crates built into the binary are installed with the
+package, in `/usr/share/licenses/csvdt/LICENSE.dependencies`.
 
 The Emacs front end is a separate and optional package, `emacs-csvdt.noarch.rpm`
 from the same release, which autoloads itself rather than costing every
@@ -110,6 +112,12 @@ current build of that same version.
 `/usr/local/bin` and `sudo`. On macOS the checksum tool is `shasum -a 256`
 rather than `sha256sum`. On Windows, rename the download to `csvdt.exe` and
 put it in a directory on `PATH`.
+
+The binaries contain third-party crates whose licences require their notice to
+go with the binary. Their texts are in `THIRD-PARTY-LICENSES.txt` on the same
+release page (one `THIRD-PARTY-LICENSES-<target>.txt` per platform when the
+platforms use different crates, named by the same target triple as the
+binary). Keep the file with the binary if you pass the binary on.
 
 ### The manual page, from any install
 
@@ -238,8 +246,9 @@ kinds of release exist so that something does:
   without following a link. Use one of these to reproduce a result with the
   exact build that produced it, whichever way it was installed.
 
-Every release carries `SHA256SUMS`, `VERSION`, `BUILD-INFO` and the
-`Cargo.lock` the build resolved, and the ones with packages on them add
+Every release carries `SHA256SUMS`, `VERSION`, `BUILD-INFO`, the
+`THIRD-PARTY-LICENSES` text and the `Cargo.lock` the build resolved, and the
+ones with packages on them add
 `RPM-BUILD-INFO` and `SHA256SUMS-rpms`. Between them they are enough to stand
 the build environment up again and compile the same source with the same
 dependencies.
@@ -813,3 +822,13 @@ names the database it was published with.
 ## License
 
 GNU General Public License v3.0 or later. See [LICENSE](LICENSE).
+
+The prebuilt binaries also contain third-party crates under their own licences
+(MIT, Apache-2.0, Unlicense, Boost and others). Their texts are published with
+the binaries as `THIRD-PARTY-LICENSES.txt`, or one file per platform; see
+[Prebuilt binary](#prebuilt-binary-any-linux-macos-windows). The Fedora
+package installs a list of them as `LICENSE.dependencies`. The file is made by
+[`.github/scripts/third-party-licences.py`](.github/scripts/third-party-licences.py)
+from the locked dependency set. To get it for a target yourself, run
+`.github/scripts/third-party-licences.py x86_64-unknown-linux-musl out.txt`
+in a checkout.

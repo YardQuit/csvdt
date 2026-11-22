@@ -445,6 +445,34 @@ jobs:
           chmod +x release/csvdt-x86_64-unknown-linux-musl
           ls -l release
 
+      # The licences of the crates compiled into each binary. MIT, Apache-2.0
+      # and the rest require their notice to travel with the binary, and a
+      # release carries nothing else of them. The crates differ by target
+      # (libc is Unix only, the windows-* ones are Windows only), so the text
+      # is made per target from the lock the legs built with, and one file is
+      # published when every target gives the same text, one per target when
+      # not. cargo needs no toolchain for another target to list its crates,
+      # only to download their sources. A crate with no licence file for a
+      # licence it claims stops the run here, before anything is published.
+      - name: Third-party licence texts
+        run: |
+          cp release/Cargo.lock Cargo.lock
+          mkdir licences
+          for dir in downloaded/csvdt-*/; do
+            target=$(basename "$dir")
+            target="${target#csvdt-}"
+            python3 ci/.github/scripts/third-party-licences.py \
+              "$target" "licences/$target.txt"
+          done
+          if [ "$(sha256sum licences/*.txt | cut -d' ' -f1 | sort -u | wc -l)" -eq 1 ]; then
+            cp "$(ls licences/*.txt | head -1)" release/THIRD-PARTY-LICENSES.txt
+          else
+            for file in licences/*.txt; do
+              cp "$file" "release/THIRD-PARTY-LICENSES-$(basename "$file")"
+            done
+          fi
+          ls -l release
+
       - name: Read version and bundled tzdata
         id: version
         run: |
@@ -630,6 +658,8 @@ jobs:
           | \`csvdt-x86_64-apple-darwin\` | macOS Intel |
           | \`csvdt-x86_64-pc-windows-msvc.exe\` | Windows x86-64 |
 
+          \`THIRD-PARTY-LICENSES.txt\` holds the licence texts of the crates compiled into the binaries, as the licences require (one \`THIRD-PARTY-LICENSES-<target>.txt\` per platform when the platforms use different crates). Keep it with the binary if you pass the binary on.
+
           Verify a download against \`SHA256SUMS\` before use, then install it under the name it is invoked by. The assets carry a target triple because this page holds every platform, but the command is \`csvdt\` -- what the documentation and the Emacs front end both call it:
 
           \`\`\`
@@ -786,7 +816,7 @@ jobs:
             # Binaries first, then the files that describe them, then
             # BUILD-INFO last of all.
             "$CI_SCRIPTS/replace-assets.sh" "$tag" release \
-              $(cd release && ls csvdt-*) Cargo.lock VERSION SHA256SUMS
+              $(cd release && ls csvdt-* THIRD-PARTY-LICENSES*) Cargo.lock VERSION SHA256SUMS
             gh release edit "$tag" \
               --title "csvdt ${VERSION_CSVDT} - tzdata ${VERSION_TZDATA} (current build, ${built})" \
               --notes "$rolling_notes" \
