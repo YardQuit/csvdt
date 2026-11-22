@@ -175,7 +175,7 @@ fn print_header_without_has_header_is_rejected() {
 
 #[test]
 fn reads_from_a_file_argument_instead_of_stdin() {
-    let dir = tempfile_dir();
+    let dir = scratch_dir("reads_from_a_file_argument_instead_of_stdin");
     let path = dir.join("in.csv");
     std::fs::write(&path, "a,b\n1,2\n").unwrap();
 
@@ -186,11 +186,58 @@ fn reads_from_a_file_argument_instead_of_stdin() {
         .stdout("a,b\n1,2\n");
 }
 
-/// A directory of this test run's own under the temporary directory.
+/// A directory of this test run's own under the temporary directory. Tests
+/// do not use it directly but take a directory of their own inside it from
+/// [`scratch_dir`].
 fn tempfile_dir() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("csvdt-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// A directory for the files of the test named TEST, inside this run's
+/// [`tempfile_dir`], created if it is not there yet.
+///
+/// Every test in this file runs in one process, in parallel, and so shares
+/// one run directory. A file name two tests both used there was a race: one
+/// test's input could be another's fill log by the time it was read. Named
+/// for the test that calls it, which
+/// `each_test_writes_its_files_in_a_directory_of_its_own` checks, a directory
+/// is never shared, since no two tests have the same name.
+fn scratch_dir(test: &str) -> std::path::PathBuf {
+    let dir = tempfile_dir().join(test);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn each_test_writes_its_files_in_a_directory_of_its_own() {
+    // Read from this file's source, so a test added later that borrows
+    // another's directory, or writes straight into the shared run directory,
+    // fails here rather than racing now and then. The names are split so
+    // that this test does not find itself.
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cli.rs")).unwrap();
+    let own = concat!("scratch_dir", "(\"");
+    let shared = concat!("tempfile_dir", "()");
+    let mut function = "";
+    let mut wrong = Vec::new();
+    for (number, line) in source.lines().enumerate() {
+        if let Some(rest) = line.trim_start().strip_prefix("fn ") {
+            function = rest.split(['(', '<']).next().unwrap_or("");
+        }
+        if line.contains(shared) && !matches!(function, "tempfile_dir" | "scratch_dir") {
+            wrong.push(format!("line {}: {function} writes in the shared run directory", number + 1));
+        }
+        let mut rest = line;
+        while let Some(start) = rest.find(own) {
+            rest = &rest[start + own.len()..];
+            let name = rest.split('"').next().unwrap_or("");
+            if name != function {
+                wrong.push(format!("line {}: {function} takes the directory named {name:?}", number + 1));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "each test takes scratch_dir with its own name:\n{}", wrong.join("\n"));
 }
 
 /// Point a run's temporary directory at DIR, whichever variable this platform
@@ -221,7 +268,8 @@ fn with_temp_dir(
 #[test]
 fn paths_that_are_not_utf8_are_read_and_written() {
     use std::os::unix::ffi::OsStrExt;
-    let dir = tempfile_dir().join(std::ffi::OsStr::from_bytes(b"not-utf8-\xff"));
+    let dir = scratch_dir("paths_that_are_not_utf8_are_read_and_written")
+        .join(std::ffi::OsStr::from_bytes(b"not-utf8-\xff"));
     if let Err(error) = std::fs::create_dir_all(&dir) {
         if cfg!(target_os = "macos") && error.raw_os_error() == Some(92) {
             return;
@@ -256,7 +304,7 @@ fn paths_that_are_not_utf8_are_read_and_written() {
 /// reads a pipe to its end, not after.
 #[test]
 fn an_unwritable_fill_log_is_reported_before_the_input_is_spooled() {
-    let dir = tempfile_dir().join("fill-log-before-spool");
+    let dir = scratch_dir("an_unwritable_fill_log_is_reported_before_the_input_is_spooled");
     std::fs::create_dir_all(&dir).unwrap();
     with_temp_dir(csvdt(), &dir.join("no-such-directory"))
         .args(["-f=widest", "--fill-log"])
@@ -276,7 +324,7 @@ fn an_unwritable_fill_log_is_reported_before_the_input_is_spooled() {
 #[cfg(unix)]
 #[test]
 fn a_fifo_as_the_fill_log_is_written_without_waiting_on_itself() {
-    let dir = tempfile_dir().join("fill-log-fifo");
+    let dir = scratch_dir("a_fifo_as_the_fill_log_is_written_without_waiting_on_itself");
     std::fs::create_dir_all(&dir).unwrap();
     let fifo = dir.join("log");
     let made = std::process::Command::new("mkfifo").arg(&fifo).status().unwrap();
@@ -328,7 +376,7 @@ fn a_dash_as_the_file_reads_standard_input() {
         .success()
         .stdout("a,\n1,2\n");
 
-    let dir = tempfile_dir().join("dash-file");
+    let dir = scratch_dir("a_dash_as_the_file_reads_standard_input");
     std::fs::create_dir_all(&dir).unwrap();
     let input = dir.join("in.csv");
     std::fs::write(&input, "a,b\n1\n").unwrap();
@@ -1054,7 +1102,7 @@ fn duration_single_value_does_not_swallow_a_following_file_argument() {
     // digit found in string" instead of reading column 1 from somefile.csv.
     // So a bare file argument right after -d's value is never taken as part
     // of -d.
-    let dir = tempfile_dir();
+    let dir = scratch_dir("duration_single_value_does_not_swallow_a_following_file_argument");
     let path = dir.join("duration.csv");
     std::fs::write(&path, "id,ts\n1,2024-01-01T00:00:00Z\n2,2024-01-02T00:00:00Z\n").unwrap();
 
@@ -3244,7 +3292,7 @@ fn what_the_manual_page_says_about_the_environment_is_what_csvdt_does() {
     // than by hand: TMPDIR alone moves nothing on Windows, so the run would
     // spool to the real system directory and succeed, which is exactly the
     // difference this half of the test exists to pin.
-    let temporary = tempfile_dir().join("man-environment");
+    let temporary = scratch_dir("what_the_manual_page_says_about_the_environment_is_what_csvdt_does");
     std::fs::create_dir_all(&temporary).unwrap();
     with_temp_dir(csvdt(), &temporary.join("nowhere-at-all"))
         .args(["-f=widest"])
@@ -3314,7 +3362,7 @@ fn what_the_manual_page_says_about_files_is_what_csvdt_does() {
 
     // And the claim that is behaviour rather than a name: an existing
     // destination is replaced, so a run's log is that run's and no other's.
-    let directory = tempfile_dir().join("man-files");
+    let directory = scratch_dir("what_the_manual_page_says_about_files_is_what_csvdt_does");
     std::fs::create_dir_all(&directory).unwrap();
     let log = directory.join("fill.log");
     std::fs::write(&log, "STALE,FROM,AN,EARLIER,RUN\n").unwrap();
@@ -4467,8 +4515,7 @@ fn flexible_fix_output_is_rectangular() {
 /// Each of these names the destination and reads the file, rather than
 /// asking stderr, because the file is what an analyst is given and the
 /// header line is part of what they are given.
-fn fill_log_of(arguments: &[&str], input: &str, name: &str) -> String {
-    let path = tempfile_dir().join(name);
+fn fill_log_of(arguments: &[&str], input: &str, path: &std::path::Path) -> String {
     let _ = std::fs::remove_file(&path);
     csvdt()
         .args(arguments)
@@ -4498,11 +4545,12 @@ fn the_fill_log_names_every_row_a_filling_mode_padded() {
     let expected = "line,record,fields,width,delta,status\n\
                     2,1,2,4,-2,padded\n\
                     4,3,1,4,-3,padded\n";
-    assert_eq!(fill_log_of(&["-H", "-p", "-f=widest"], input, "widest.csv"), expected);
+    let dir = scratch_dir("the_fill_log_names_every_row_a_filling_mode_padded");
+    assert_eq!(fill_log_of(&["-H", "-p", "-f=widest"], input, &dir.join("widest.log")), expected);
     // fix reaches the same account here, the header being as wide as the
     // widest row. Both are asked, so a change to either mode's bookkeeping
     // cannot hide behind the other's.
-    assert_eq!(fill_log_of(&["-H", "-p", "-f=fix"], input, "fix.csv"), expected);
+    assert_eq!(fill_log_of(&["-H", "-p", "-f=fix"], input, &dir.join("fix.log")), expected);
 }
 
 #[test]
@@ -4521,7 +4569,8 @@ fn the_fill_log_says_needed_where_plain_flexible_changed_nothing() {
     // Were they the same width, dropping the header as the reference would
     // change nothing and the case would prove nothing about which record it
     // used.
-    let log = fill_log_of(&["-H", "-p", "-f"], "a,b,c\n1,2\n3,4,5,6\n7\n", "keep.csv");
+    let dir = scratch_dir("the_fill_log_says_needed_where_plain_flexible_changed_nothing");
+    let log = fill_log_of(&["-H", "-p", "-f"], "a,b,c\n1,2\n3,4,5,6\n7\n", &dir.join("fill.log"));
     assert_eq!(
         log,
         "line,record,fields,width,delta,status\n\
@@ -4536,12 +4585,13 @@ fn the_fill_log_ends_on_the_row_that_ended_the_run() {
     // A row wider than the width stops fix and widest. Written to the log
     // before the error returns, so the log ends on the row the message names
     // rather than stopping one short of the row a reader most wants.
-    let log = fill_log_of(&["-H", "-p", "-f=fix"], "a,b\n1,2\n3,4,5\n", "over.csv");
+    let dir = scratch_dir("the_fill_log_ends_on_the_row_that_ended_the_run");
+    let log = fill_log_of(&["-H", "-p", "-f=fix"], "a,b\n1,2\n3,4,5\n", &dir.join("fill.log"));
     assert_eq!(log, "line,record,fields,width,delta,status\n3,2,3,2,1,over\n");
 
     // And the run still fails, so the log is an account of a failure rather
     // than of a run that quietly went on.
-    let path = tempfile_dir().join("over-status.csv");
+    let path = dir.join("over-status.log");
     csvdt()
         .args(["-H", "-p", "-f=fix"])
         .arg("--fill-log")
@@ -4558,7 +4608,8 @@ fn the_fill_log_counts_the_header_when_widest_pads_it() {
     // whether the source had none or csvdt made one. The header is read
     // before any record, so it has no position of its own: line 1, record 0,
     // which is what the reader would have said had it been asked.
-    let log = fill_log_of(&["-H", "-p", "-f=widest"], "a,b\n1,2\n3,4,5\n", "header.csv");
+    let dir = scratch_dir("the_fill_log_counts_the_header_when_widest_pads_it");
+    let log = fill_log_of(&["-H", "-p", "-f=widest"], "a,b\n1,2\n3,4,5\n", &dir.join("fill.log"));
     assert_eq!(
         log,
         "line,record,fields,width,delta,status\n\
@@ -4579,7 +4630,7 @@ fn the_fill_log_refuses_to_be_the_input_or_the_output() {
     //
     // Asked by identity rather than by path, which is why the symlink case is
     // here: comparing the two strings would have let it straight through.
-    let directory = tempfile_dir();
+    let directory = scratch_dir("the_fill_log_refuses_to_be_the_input_or_the_output");
     let data = "id,when,level\n7,2023-11-14T22:13:20+01:00,info\n8,2023-11-15T09:00:00+01:00\n";
 
     let write = |name: &str| {
@@ -4717,8 +4768,8 @@ fn a_fill_log_that_cannot_be_written_is_reported_before_the_run() {
     //
     // The message names the option and offers '-', since a reader who cannot
     // write a file can still read the log on stderr.
-    let missing = std::env::temp_dir()
-        .join(format!("csvdt-absent-{}", std::process::id()))
+    let missing = scratch_dir("a_fill_log_that_cannot_be_written_is_reported_before_the_run")
+        .join("absent")
         .join("log.csv");
     csvdt()
         .args(["-H", "-p", "-f=widest"])
@@ -4758,8 +4809,8 @@ fn a_filling_mode_that_fails_partway_has_already_written_what_it_wrote() {
 
     // A path that is not there, so the spool cannot be created and the run
     // fails while counting. Nothing is made, so there is nothing to clean up.
-    let missing = std::env::temp_dir()
-        .join(format!("csvdt-absent-{}", std::process::id()));
+    let missing = scratch_dir("a_filling_mode_that_fails_partway_has_already_written_what_it_wrote")
+        .join("absent");
     with_temp_dir(csvdt(), &missing)
         .args(["-f=widest"])
         .write_stdin("a,b,c\n1,2\n")
@@ -4817,7 +4868,7 @@ fn widest_still_pads_a_file_that_holds_still() {
     // The companion to the unit test on the two too-wide messages: the mode's
     // ordinary path is unaffected, and a file whose widest record is not its
     // first is exactly what 'widest' exists for.
-    let dir = tempfile_dir();
+    let dir = scratch_dir("widest_still_pads_a_file_that_holds_still");
     let path = dir.join("widest-steady.csv");
     std::fs::write(&path, "a,b\n0,1\n2,3,4,5\n6,7\n").unwrap();
 
@@ -4871,7 +4922,7 @@ fn flexible_fix_does_not_swallow_a_following_file_argument() {
     // --flexible's mode must be attached with '=' precisely so that a bare -f
     // followed by a path cannot read the path as the mode, the same trap -d
     // avoids.
-    let dir = tempfile_dir();
+    let dir = scratch_dir("flexible_fix_does_not_swallow_a_following_file_argument");
     let path = dir.join("flex.csv");
     std::fs::write(&path, "a,b,c\n0,1\n").unwrap();
 
@@ -4954,7 +5005,7 @@ fn non_utf8_input_is_a_clean_error_naming_where_it_failed() {
     // so the bad byte is at 32, the record starts at 8, and 3 is how far into
     // field 1 the bad byte lies. All three numbers are useful and none of them
     // is the other.
-    let dir = tempfile_dir();
+    let dir = scratch_dir("non_utf8_input_is_a_clean_error_naming_where_it_failed");
     let path = dir.join("latin1.csv");
     let bytes = b"ts,note\n2024-01-01T00:00:00Z,caf\xe9\n";
     std::fs::write(&path, bytes).unwrap();
@@ -4980,7 +5031,7 @@ fn non_utf8_input_is_a_clean_error_naming_where_it_failed() {
 fn nul_bytes_inside_a_field_are_preserved() {
     // A NUL is valid UTF-8 and carries no CSV meaning, so it must survive
     // untouched rather than terminating the field.
-    let dir = tempfile_dir();
+    let dir = scratch_dir("nul_bytes_inside_a_field_are_preserved");
     let path = dir.join("nul.csv");
     std::fs::write(&path, b"a,b\nx\x00y,z\n").unwrap();
 
@@ -4997,7 +5048,7 @@ fn nul_bytes_inside_a_field_are_preserved() {
 
 #[test]
 fn input_without_a_trailing_newline_is_read_fully() {
-    let dir = tempfile_dir();
+    let dir = scratch_dir("input_without_a_trailing_newline_is_read_fully");
     let path = dir.join("nonl.csv");
     std::fs::write(&path, "a,b\n0,1").unwrap();
 
@@ -5072,7 +5123,7 @@ fn utf16_with_a_byte_order_mark_is_named_in_the_error() {
         ("le.csv", b"\xff\xfe".to_vec()),
         ("be.csv", b"\xfe\xff".to_vec()),
     ] {
-        let dir = tempfile_dir();
+        let dir = scratch_dir("utf16_with_a_byte_order_mark_is_named_in_the_error");
         let path = dir.join(name);
         let mut content = bytes;
         content.extend_from_slice(b"t\0s\0\n\0");
@@ -5095,7 +5146,7 @@ fn utf16_without_a_byte_order_mark_is_refused_not_silently_mangled() {
     // UTF-8, so nothing else objects. Read with --flexible it would exit
     // 0 having written NUL-interleaved output, which is the one failure mode
     // this tool must not have. The alternating pattern is the signature.
-    let dir = tempfile_dir();
+    let dir = scratch_dir("utf16_without_a_byte_order_mark_is_refused_not_silently_mangled");
     let path = dir.join("nobom.csv");
     let utf16: Vec<u8> = "ts,name\n2024-01-01T00:00:00Z,bob\n"
         .encode_utf16()
@@ -5122,7 +5173,7 @@ fn the_utf16_check_does_not_catch_fields_that_really_contain_nuls() {
         ("one.csv", b"a,b\nx\0y,z\n".to_vec()),
         ("many.csv", b"a,b\nx\0\0\0\0\0y,z\n".to_vec()),
     ] {
-        let dir = tempfile_dir();
+        let dir = scratch_dir("the_utf16_check_does_not_catch_fields_that_really_contain_nuls");
         let path = dir.join(name);
         std::fs::write(&path, &content).unwrap();
 
@@ -5205,7 +5256,7 @@ fn flexible_widest_works_from_a_pipe_and_from_a_file_alike() {
         .success()
         .stdout(expected);
 
-    let dir = tempfile_dir();
+    let dir = scratch_dir("flexible_widest_works_from_a_pipe_and_from_a_file_alike");
     let path = dir.join("widest.csv");
     std::fs::write(&path, "a,b\n0,1,2,3\n0\n").unwrap();
 
@@ -5254,7 +5305,7 @@ fn flexible_widest_leaves_no_temporary_file_behind() {
             .unwrap_or(0)
     };
 
-    let ok_dir = tempfile_dir().join("tmp-widest-ok");
+    let ok_dir = scratch_dir("flexible_widest_leaves_no_temporary_file_behind").join("tmp-widest-ok");
     std::fs::create_dir_all(&ok_dir).unwrap();
     with_temp_dir(csvdt(), &ok_dir)
         .args(["-H", "-p", "-f=widest"])
@@ -5263,7 +5314,7 @@ fn flexible_widest_leaves_no_temporary_file_behind() {
         .success();
     assert_eq!(count_in(&ok_dir), 0, "temp file left after a successful run");
 
-    let err_dir = tempfile_dir().join("tmp-widest-err");
+    let err_dir = scratch_dir("flexible_widest_leaves_no_temporary_file_behind").join("tmp-widest-err");
     std::fs::create_dir_all(&err_dir).unwrap();
     with_temp_dir(csvdt(), &err_dir)
         .args(["-H", "-p", "-f=widest", "-u9"])
@@ -5277,7 +5328,7 @@ fn flexible_widest_leaves_no_temporary_file_behind() {
 fn flexible_widest_still_refuses_bad_encodings() {
     // The counting pass reads bytes without validating them, so the check has
     // to still happen: it does, when the file is opened for either pass.
-    let dir = tempfile_dir();
+    let dir = scratch_dir("flexible_widest_still_refuses_bad_encodings");
     let path = dir.join("w-latin1.csv");
     std::fs::write(&path, b"a,b\ncaf\xe9\n").unwrap();
 
@@ -6237,7 +6288,7 @@ fn every_timestamp_rfc3339_writes_can_be_read_back() {
 fn an_input_that_cannot_be_read_is_named_in_the_error() {
     // The bare io error said only "No such file or directory (os error 2)". A
     // script handed the wrong path had nothing to tell it which path that was.
-    let dir = tempfile_dir().join("named-input-errors");
+    let dir = scratch_dir("an_input_that_cannot_be_read_is_named_in_the_error");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let missing = dir.join("nope.csv");
@@ -6938,7 +6989,7 @@ fn widest_reads_a_named_pipe_correctly_rather_than_draining_it() {
     // counting pass and left the real pass with nothing, so the file came back
     // EMPTY with a success status, and process substitution, `csvdt -f=widest
     // <(...)`, is a fifo wearing a filename.
-    let dir = tempfile_dir().join("widest-fifo");
+    let dir = scratch_dir("widest_reads_a_named_pipe_correctly_rather_than_draining_it");
     std::fs::create_dir_all(&dir).unwrap();
     let fifo = dir.join("input.csv");
     let _ = std::fs::remove_file(&fifo);
@@ -6969,7 +7020,7 @@ fn widest_reads_a_named_pipe_correctly_rather_than_draining_it() {
 fn widest_does_not_spool_a_file_it_can_simply_read_twice() {
     // The spooling is for inputs that cannot be re-read. A regular file can,
     // and copying it would double the cost of the mode for no reason.
-    let dir = tempfile_dir().join("widest-regular");
+    let dir = scratch_dir("widest_does_not_spool_a_file_it_can_simply_read_twice");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("data.csv");
     std::fs::write(&path, "a,b\n0,1,2,3\n0\n").unwrap();
@@ -7019,7 +7070,7 @@ fn widest_does_not_write_through_a_symlink_left_at_the_name_it_wanted() {
     // remove the symlink behind it, leaving nothing to find. A pid is guessable; here it
     // is exact, because the shell execs csvdt and so hands over the very pid it
     // planted the name under.
-    let dir = tempfile_dir().join("widest-spool-symlink");
+    let dir = scratch_dir("widest_does_not_write_through_a_symlink_left_at_the_name_it_wanted");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
@@ -7088,7 +7139,7 @@ fn widest_cannot_be_locked_out_by_names_planted_for_its_pid() {
     // mode fail. Here the shell execs csvdt, which hands over the very pid
     // the names were planted under; the names now carry a part nobody can
     // predict, so the run still finds one free.
-    let dir = tempfile_dir().join("widest-spool-planted");
+    let dir = scratch_dir("widest_cannot_be_locked_out_by_names_planted_for_its_pid");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let fifo = dir.join("input.csv");
@@ -7123,7 +7174,7 @@ fn widest_spool_is_readable_only_by_the_user_who_ran_it() {
     // to all of them for as long as the run lasted.
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = tempfile_dir().join("widest-spool-mode");
+    let dir = scratch_dir("widest_spool_is_readable_only_by_the_user_who_ran_it");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let fifo = dir.join("input.csv");
@@ -7245,7 +7296,7 @@ fn a_signal_removes_the_widest_spool_rather_than_leaving_it() {
     // when that gap is widened to fifty milliseconds.
     use std::os::unix::process::ExitStatusExt;
 
-    let dir = tempfile_dir().join("widest-spool-signal");
+    let dir = scratch_dir("a_signal_removes_the_widest_spool_rather_than_leaving_it");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let fifo = dir.join("input.csv");
@@ -7596,7 +7647,7 @@ fn local_leaves_the_path_form_of_tz_alone() {
 fn local_refuses_a_tz_path_to_a_file_that_holds_no_zone() {
     // A file that is not a zone file was passed over in silence, and the
     // system's own zone used as though it were the one asked for.
-    let path = tempfile_dir().join("not-a-zone");
+    let path = scratch_dir("local_refuses_a_tz_path_to_a_file_that_holds_no_zone").join("not-a-zone");
     std::fs::write(&path, "not a zone\n").unwrap();
     csvdt()
         .args(["-H", "-l0"])
@@ -8300,7 +8351,7 @@ fn widest_spool_failure_names_the_file_and_the_mode() {
     // something nothing reads. The message names whichever this platform
     // actually consults, and this runs everywhere so that both spellings
     // are exercised rather than only the one the author happened to be on.
-    let missing = tempfile_dir().join("no-such-directory-for-a-spool");
+    let missing = scratch_dir("widest_spool_failure_names_the_file_and_the_mode").join("no-such-directory-for-a-spool");
     let variable = if cfg!(windows) { "Set TMP or TEMP" } else { "Set TMPDIR" };
 
     with_temp_dir(csvdt(), &missing)
@@ -8954,7 +9005,7 @@ fn a_reader_that_stops_reading_is_not_a_failed_write() {
     // nothing has gone wrong. --help and --version go out through the same
     // writer as the option list and the page, so they answer to the same rule:
     // a closed pipe passes, and only a real failure ends the run at 1.
-    let dir = tempfile_dir().join("answer-through-a-closed-pipe");
+    let dir = scratch_dir("a_reader_that_stops_reading_is_not_a_failed_write");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
@@ -8981,7 +9032,7 @@ fn a_standard_output_that_cannot_be_written_is_refused_before_the_work() {
     // exited 0 with a tally on stderr counting values it said it had written.
     // Nothing later in the run can notice: the flush that should have failed
     // returns Ok too, which is why this is asked once, up front.
-    let dir = tempfile_dir().join("unwritable-stdout");
+    let dir = scratch_dir("a_standard_output_that_cannot_be_written_is_refused_before_the_work");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let input = dir.join("in.csv");
@@ -9057,7 +9108,7 @@ fn a_reader_that_stops_reading_still_ends_the_run_at_zero() {
     // The check above must not have made an ordinary pipeline into a failure:
     // a closed pipe is the one thing that ends a run at 0 regardless, and it
     // is the most ordinary thing anyone does with a command-line tool.
-    let dir = tempfile_dir().join("closed-pipe");
+    let dir = scratch_dir("a_reader_that_stops_reading_still_ends_the_run_at_zero");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let input = dir.join("in.csv");
@@ -9113,7 +9164,7 @@ fn a_standard_input_that_cannot_be_read_is_refused_rather_than_read_as_empty() {
     // 'csvdt -H -r0 0>out.csv' ('>' where '<' was meant, which has the
     // shell empty out.csv on the way past) read nothing, wrote nothing and
     // exited 0, exactly as a run over an empty file does.
-    let dir = tempfile_dir().join("unreadable-stdin");
+    let dir = scratch_dir("a_standard_input_that_cannot_be_read_is_refused_rather_than_read_as_empty");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let sink = dir.join("out.csv");
@@ -9208,7 +9259,7 @@ fn an_input_file_that_is_also_the_output_is_refused() {
     // 'csvdt in.csv >> in.csv' is the other half, and there the file is still
     // whole, and left to run it would come out as the input followed by a
     // conversion of the input, also at 0.
-    let dir = tempfile_dir().join("input-is-output");
+    let dir = scratch_dir("an_input_file_that_is_also_the_output_is_refused");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let binary = assert_cmd::cargo::cargo_bin("csvdt");
