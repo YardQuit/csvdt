@@ -26,13 +26,11 @@
 ;; therefore usable from Emacs immediately, with no change to this file,
 ;; which is the whole point of doing it this way.
 ;;
-;; Three options are named, in defcustoms, and only because a region run
-;; cannot be worked out without them: which flag says the first record is a
-;; header, and which two set the quote and the delimiter, since where a
-;; record begins depends on both.  A test asserts that each is an option
-;; csvdt still reports, and another asserts that no other option name
-;; appears in this file at all, so neither the three nor the silence around
-;; them can go stale unnoticed.
+;; Three options are named, in defcustoms, because a region run cannot be
+;; worked out without them: which flag says the first record is a header,
+;; and which two set the quote and the delimiter, since where a record
+;; begins depends on both.  The tests check that each is an option csvdt
+;; still reports and that no other option name appears in this file.
 ;;
 ;; A csvdt too old to know `--list-options', or one printing a format version
 ;; this file does not read, falls back to parsing the option names out of
@@ -57,134 +55,102 @@
 
 (defcustom csvdt-default-arguments "-H -p"
   "Arguments prefilled when reading a csvdt command line.
-The default assumes a file with a header row, as buffers visited with
-`csv-mode' usually have, and asks for the header to be printed.
+The default assumes a file with a header row and asks for the header to
+be printed.
 
-It is prefilled *selected*, so typing replaces it rather than adding to
-it, and it takes a deliberate keystroke to keep.  That matters because
-the two possible mistakes are not symmetric: passing the header option to
-a file that has no header is quiet (the first row is taken as a header
-and, depending on the insert position, either goes through unconverted or
-is replaced by the generated header name and lost) while leaving it off
-a file that does have one is loud, the header coming back as a parse
-error marker.  A prefill that had to be noticed and deleted pointed at
-the quiet mistake; one that has to be kept does not."
+The text is prefilled selected, so typing replaces it and a deliberate
+keystroke keeps it.  Passing the header option to a file without a header
+fails quietly (the first row is taken as the header and may be lost),
+while leaving it off a file that has one fails loudly, so keeping the
+option has to be a choice."
   :type 'string
   :group 'csvdt)
 
 (defcustom csvdt-region-carries-header t
   "Whether a region run is given the buffer's header line.
-A region selected below the header has no header of its own, so csvdt
-would take its first row as one, and quietly, since a header is exempt
-from whatever conversion is being applied: the row is either passed
-through unconverted or, where the action replaces its column, lost
-altogether.  With this on, the buffer's real header line is put in front
-of the region, so the whole selection is data and the output is named
-after the columns it actually came from.
+A region below the header has no header of its own, so csvdt would take
+its first row as one and pass it through unconverted, or lose it.  With
+this on, the buffer's header record is put in front of the region, so the
+whole selection is data and the output is named after the right columns.
 
-Only when the arguments ask for a header, and only when the region starts
-below it.  See `csvdt-header-options'."
+Only when the arguments ask for a header and the region starts below it.
+See `csvdt-header-options'."
   :type 'boolean
   :group 'csvdt)
 
 (defcustom csvdt-header-options '("-H" "--has-header")
   "The csvdt options that say the first record is a header.
-Named because `csvdt-region-carries-header' cannot work without knowing
-which they are.  Everything else is discovered from the binary.
-
-A test asserts that every form here is an option csvdt actually reports,
-so this cannot quietly go stale: if it were ever renamed, the check fails
-rather than the feature silently doing nothing."
+`csvdt-region-carries-header' needs to know which they are; every other
+option is discovered from the binary.  The tests check that each form here
+is an option csvdt reports."
   :type '(repeat string)
   :group 'csvdt)
 
 (defcustom csvdt-single-quote-options '("--single-quote")
   "The csvdt options that make the quote character the single one.
-Named for the same reason as `csvdt-header-options': finding where a
-record begins means knowing which character quotes a field, and a run
-told to read single quotes has its records in different places.
-
-Covered by the same test, so a rename cannot leave it silently wrong."
+Finding where a record begins means knowing which character quotes a
+field.  The tests check each form against the options csvdt reports."
   :type '(repeat string)
   :group 'csvdt)
 
 (defcustom csvdt-read-delimiter-options '("--read-delimiter")
   "The csvdt options that set the field delimiter for reading.
-Named for the same reason as `csvdt-single-quote-options': a quote only
-opens a field where a field begins, and where a field begins depends on
-the delimiter.
-
-Covered by the same test, so a rename cannot leave it silently wrong."
+A quote opens a field only where a field begins, which depends on the
+delimiter.  The tests check each form against the options csvdt reports."
   :type '(repeat string)
   :group 'csvdt)
 
 (defcustom csvdt-banked-lines-function nil
   "Where banked lines come from, when something banks them.
-Banking (picking out lines here and there and working on those, rather
-than on one stretch) is not this package's to provide, and packages that
-do it already exist.  This is how one is plugged in.
+Banking means picking out lines here and there and working on those
+rather than on one stretch.  Other packages provide it; this is how one
+is plugged in.
 
 The value is a function of no arguments, called in the buffer being
-processed, returning either a list of (BEG . END) positions, integers
-or markers, or a list of overlays.  Ranges are put in buffer order and
-widened to whole lines (and out to whole records, where a quoted field
-spans several) before use, so an implementation need not do either.
+processed, returning a list of (BEG . END) positions (integers or
+markers) or a list of overlays.  Ranges are put in buffer order and
+widened to whole lines, and out to whole records where a quoted field
+spans several, so an implementation need not do either.
 
-nil, the default, means nothing is banked and the region or the buffer is
-used as before."
+nil, the default, means nothing is banked."
   :type '(choice (const :tag "Nothing banks lines" nil) function)
   :group 'csvdt)
 
 (defcustom csvdt-output-mode
   (if (fboundp 'csv-mode) 'csv-mode 'fundamental-mode)
   "Major mode for the buffer csvdt output is written to.
-A mode that is not available leaves the buffer in Fundamental mode rather
-than losing the run it was already produced by."
+A mode that is not available leaves the buffer in Fundamental mode."
   :type 'function
   :group 'csvdt)
 
 (defconst csvdt--option-list-format 1
   "Version of csvdt's `--list-options' format this file knows how to read.
-csvdt prints it on the first line.  An unrecognised version means the
-fields may no longer mean what is assumed below, so the output is
-declined rather than misread.")
+csvdt prints it on the first line.  Output in another version is declined,
+since its fields may mean something else.")
 
 (defvar csvdt--options-cache nil
   "List of (PROGRAM MTIME VERSION . RECORDS) from the last option discovery.
-Keyed on the program's path and modification time, so a csvdt upgrade
-invalidates it by itself without a subprocess being spawned to ask: the
-cache used to be checked against `csvdt --version', which meant one run
-of the binary per lookup, and a single command looks options up once
-per argument, so a run with four arguments forked csvdt several times to
-learn nothing had changed.  VERSION is kept for anything that wants to
-say which csvdt the records came from.")
+Keyed on the program's path and modification time, so an upgraded csvdt
+invalidates it without running anything to ask.  VERSION is the version
+line of the csvdt the records came from.")
 
 ;;; Talking to the binary
 
 (defun csvdt--program ()
   "Return the csvdt executable, or signal if it cannot be found."
-  ;; A name carrying a directory part means that file, never a PATH
-  ;; search, execvp's rule, and the shell's.  executable-find does not
-  ;; hold to it: handed "./csvdt", it joins the name onto every
-  ;; `exec-path' entry, so a same-named binary installed anywhere on
-  ;; PATH silently won over the file actually named.  Only a
-  ;; bare name is PATH-searched now; anything with a slash is taken as
-  ;; the file it names.
+  ;; A name with a directory part means that file and is never searched
+  ;; for on PATH (the rule execvp and shells follow); `executable-find'
+  ;; would join "./csvdt" onto every `exec-path' entry.
   (or (if (file-name-directory csvdt-executable)
-          ;; Not a directory, which file-executable-p is also true of: a
-          ;; path mis-set to one would otherwise come back as the program
-          ;; and fail later, in call-process's words rather than this
-          ;; one's.  Expanded before it is returned, so call-process and
-          ;; the option cache's mtime key mean one file, rather than
-          ;; whichever one the current directory makes of a relative
-          ;; name.
+          ;; A directory also passes `file-executable-p'.  The name is
+          ;; expanded so the process and the option cache's mtime key
+          ;; name the same file whatever the current directory is.
           (and (file-executable-p csvdt-executable)
                (not (file-directory-p csvdt-executable))
                (expand-file-name csvdt-executable))
         (executable-find csvdt-executable))
-      ;; Named for what is actually the matter. "Cannot find" would be the
-      ;; one thing a file sitting right there at that path is not: the reader
-      ;; checks with ls, sees it, and goes looking for the wrong problem.
+      ;; Each message names what is wrong: "cannot find" would be false
+      ;; for a file that is there but is a directory or not executable.
       (cond
        ((and (file-name-directory csvdt-executable)
              (file-directory-p csvdt-executable))
@@ -198,10 +164,9 @@ Set `csvdt-executable' to the program itself" csvdt-executable))
         (user-error "Cannot find `%s'.  Set `csvdt-executable'"
                     csvdt-executable))
        (t
-        ;; A bare name is looked for along `exec-path', which is not the
-        ;; PATH of the shell that started Emacs unless something arranged
-        ;; for it to be, which is the usual reason a program on the terminal's
-        ;; PATH is not found here.
+        ;; `exec-path' need not match the PATH of the shell that started
+        ;; Emacs, the usual reason a program found in a terminal is not
+        ;; found here.
         (user-error "Cannot find `%s' on `exec-path'.  Set \
 `csvdt-executable' to its full path" csvdt-executable)))))
 
@@ -210,13 +175,8 @@ Set `csvdt-executable' to the program itself" csvdt-executable))
 Returns nil when csvdt exits non-zero, so callers can degrade rather than
 break if a future version declines the arguments."
   (with-temp-buffer
-    ;; The same commitment csvdt--run makes: csvdt speaks UTF-8 in both
-    ;; directions.  The help corpus is ASCII, and the manual page rendered
-    ;; from it has to be, so nothing in it is misread today.  This stays
-    ;; because the commitment is to the encoding csvdt writes rather than to
-    ;; what it currently happens to say: leaving the decoding to the locale
-    ;; would turn any non-ASCII text in --help or --list-options into
-    ;; mojibake wherever the locale is not UTF-8.
+    ;; csvdt speaks UTF-8 in both directions; a locale decoding would
+    ;; garble any non-ASCII text in its output.
     (let* ((coding-system-for-read 'utf-8-unix)
            (coding-system-for-write 'utf-8-unix)
            (status (apply #'call-process (csvdt--program) nil
@@ -275,12 +235,10 @@ fall back to `--help' instead."
 
 (defun csvdt--parse-options (help)
   "Return option records for what clap lists in HELP.
-Matches both the short-and-long form (\"  -x, --xxx <VALUE>\") and the
-long-only form (\"      --xxx <VALUE>\"), so no option name appears in this
-file at all.  A help layout does not say whether an option takes a value
-in any way worth parsing, so :value is left nil, meaning not known,
-and `csvdt--file-arguments' declines to guess at filenames without that
-knowledge, rather than mistaking an option's value for one."
+Matches the short-and-long form (\"  -x, --xxx <VALUE>\") and the
+long-only form (\"      --xxx <VALUE>\").  The layout does not say whether
+an option takes a value, so :value is nil, meaning not known, and
+`csvdt--file-arguments' then declines to guess at filenames."
   (let ((records '())
         (case-fold-search nil))
     (with-temp-buffer
@@ -290,10 +248,8 @@ knowledge, rather than mistaking an option's value for one."
               "^[ \t]+\\(?:-\\([A-Za-z]\\), \\)?--\\([A-Za-z][A-Za-z0-9-]*\\)"
               nil t)
         (let ((long (concat "--" (match-string 2))))
-          ;; csvdt's own help text names options in its prose, and a wrapped
-          ;; line can start with one, so the same option is matched more than
-          ;; once.  First match wins: that is the entry in the options list,
-          ;; the later ones being descriptions of it.
+          ;; The help prose names options too, so one can match twice.  The
+          ;; first match is the entry in the options list.
           (unless (seq-find (lambda (record) (equal (plist-get record :long) long))
                             records)
             (push (list :short (if (match-string 1)
@@ -308,16 +264,11 @@ knowledge, rather than mistaking an option's value for one."
 (defun csvdt--option-records ()
   "Return csvdt's options as records, cached per binary.
 Asks for the machine-readable list first and reads `--help' only if that
-is unavailable, so an older csvdt still works.
-
-The cache is validated against the program's path and modification time,
-which a lookup can check without running anything.  A rebuilt csvdt gets
-a fresh mtime and so a fresh read; the version string is fetched once at
-that point and stored alongside, not consulted per call."
+is unavailable, so an older csvdt still works.  The cache is checked
+against the program's path and modification time; the version string is
+fetched when the records are."
   (let* ((program
-          ;; The real file, not a symlink to it: `file-attributes' describes
-          ;; the link itself, whose mtime never moves, so a csvdt rebuilt
-          ;; behind a stable ~/bin symlink would never invalidate the cache.
+          ;; The real file: a symlink's own mtime never moves.
           (file-truename (csvdt--program)))
          (mtime (file-attribute-modification-time (file-attributes program))))
     (if (and (equal (nth 0 csvdt--options-cache) program)
@@ -332,11 +283,7 @@ that point and stored alongside, not consulted per call."
 
 (defun csvdt--cached-version ()
   "Return csvdt's version line without spawning it when the cache is warm.
-The prompt shows the version on every command, and reading it live undid
-half of what the mtime-keyed cache saved: one spawn per command, for a
-string that only changes when the binary does: exactly what the cache
-already tracks.  `csvdt-version-string' stays live for the command that
-exists to ask."
+`csvdt-version-string' always asks the binary."
   (csvdt--option-records)
   (nth 2 csvdt--options-cache))
 
@@ -355,22 +302,18 @@ an argument built without it would be read as a filename instead."
 
 ;;; Reading a command line
 
-;; The line is read whole and split the way a shell would, NOT as a
-;; comma-separated list of arguments.  A comma is csvdt's own separator inside
-;; a value, a column list, a column-and-position pair, a column-and-offset
-;; pair, so splitting the line on commas tears those arguments in half and
-;; hands csvdt nonsense.  Completion is therefore per token rather than over
-;; the whole line, which is what TAB in the minibuffer does below.
+;; The line is split the way a shell would, not on commas: a comma is
+;; csvdt's own separator inside a value, a column list or a column-and-offset
+;; pair.  Completion is therefore per token, not over the whole line.
 
 (defvar csvdt--arguments-history nil
   "Minibuffer history of csvdt command lines.")
 
 (defun csvdt--keep-prefill (n)
   "Keep the selected prefilled arguments and move past them.
-With nothing selected this is an ordinary `forward-char' of N, so the key goes
-back to behaving as it always does once the prefill has been dealt with.
-Bound rather than left to plain motion because point already sits at the
-end of the prefill, where moving forward would only ring the bell."
+With nothing selected this is an ordinary `forward-char' of N.  It is bound
+because point already sits at the end of the prefill, where plain motion
+would only ring the bell."
   (interactive "p")
   (if (use-region-p)
       (progn (deactivate-mark) (goto-char (point-max)))
@@ -395,10 +338,7 @@ An entry for `completion-at-point-functions' while a command line is
 being read."
   (let ((end (point))
         (beg (save-excursion
-               ;; The same separator set `csvdt--split-arguments' honors,
-               ;; newline and its siblings included: skipping over only
-               ;; space and tab made a pasted "-H\n--arr" one completion
-               ;; token, where RET would have split it in two.
+               ;; The separator set `csvdt--split-arguments' uses.
                (skip-chars-backward "^ \t\n\r\f\v" (minibuffer-prompt-end))
                (point))))
     (list beg end (ignore-errors (csvdt-options)) :exclusive 'no)))
@@ -406,9 +346,7 @@ being read."
 (defun csvdt--closing-quote (line start quote)
   "Index in LINE of the QUOTE closing a run that opened before START, or nil.
 Inside a double-quoted run a backslash escapes the next character, so an
-escaped quote does not close it.  A single-quoted run has no escapes at
-all, which is what a shell does with them and what lets one hold a
-backslash as itself."
+escaped quote does not close it.  A single-quoted run has no escapes."
   (let ((index start)
         (length (length line))
         (found nil))
@@ -425,25 +363,16 @@ backslash as itself."
 (defun csvdt--split-arguments (line)
   "Split LINE into arguments the way a shell would.
 A quoted argument may hold a space; an unquoted one may hold a comma,
-which is what csvdt's own value lists need.
+which csvdt's value lists need.  Both quote characters are understood.
 
-Both quote characters, because the examples people paste come from a
-shell and a shell takes either.  Only the double one used to be
-understood, so a pasted \\='#\\=' arrived as three characters and csvdt
-refused it: clearly, but for a reason that was about this prompt rather
-than about the option.
+A double-quoted run honours the backslash escapes \\t \\n \\r \\\\ \\\"
+and no others, so \\=\"\\t\" is a tab and \\=\"C:\\data\" is refused.  A
+single-quoted run is literal throughout, so a value that must keep its
+backslashes belongs in single quotes, and a lone quote character is
+written by wrapping it in the other kind.
 
-A double-quoted run honours the shell-familiar backslash escapes
-\\t \\n \\r \\\\ \\\" and no others, so \\=\"\\t\" is a tab and
-\\=\"C:\\data\" is refused rather than read as Lisp's DEL escape,
-while a single-quoted one is literal throughout.  So a lone quote
-character is written by wrapping it in the other kind, and a value that
-must keep its backslashes belongs in single quotes.
-
-Outside quotes a backslash is left as itself, which is not the shell's
-rule but is the one this prompt has always had: a Windows path typed
-as a value has to survive, and there is no filename here for a shell's
-escaping to be worth more than that."
+Outside quotes a backslash is left as itself, so a Windows path typed as
+a value survives."
   (let ((index 0)
         (length (length line))
         (args '())
@@ -452,12 +381,7 @@ escaping to be worth more than that."
       (let ((char (aref line index)))
         (cond
          ;; Whitespace outside quotes ends the argument being gathered.
-         ;; Newlines included: a line pasted with its trailing newline used
-         ;; to fold it into the last argument, which csvdt then refused.
-         ;; `split-string-and-unquote' split on them, and this must too.
-         ;; Formfeed and vertical tab likewise: that function split on
-         ;; them, and dropping them from the set would fold one into an
-         ;; argument where it never was before.
+         ;; The set is the one `split-string-and-unquote' uses.
          ((memq char '(?\s ?\t ?\n ?\r ?\f ?\v))
           (when current (push current args) (setq current nil))
           (setq index (1+ index)))
@@ -468,16 +392,9 @@ escaping to be worth more than that."
                   (concat (or current "")
                           (if (eq char ?')
                               (substring line (1+ index) end)
-                            ;; Only the shell-familiar escapes reach the
-                            ;; reader.  It knows more of them: \d is DEL and
-                            ;; \a is a bell, so "C:\data" read raw would
-                            ;; become C-followed-by-DEL-ata with no error,
-                            ;; while "C:\Users" would trip over \U and be
-                            ;; refused: the same path corrupted or caught by
-                            ;; the letter after the backslash.  Every
-                            ;; sequence outside the familiar set is answered
-                            ;; the same way, with the way out: single quotes
-                            ;; take backslashes literally.
+                            ;; Only the familiar escapes reach the Lisp
+                            ;; reader, which knows more (\d is DEL), so a
+                            ;; path like "C:\data" is refused, not mangled.
                             (let ((run (substring line (1+ index) end))
                                   (scan 0))
                               (while (< scan (length run))
@@ -548,12 +465,8 @@ replaces it and \\<csvdt--arguments-map>\\[csvdt--keep-prefill] keeps it."
 
 (defun csvdt--apply-output-mode ()
   "Put the current buffer in `csvdt-output-mode'.
-A mode that turns out not to be available leaves the buffer plain rather
-than aborting a run csvdt has already done the work for."
-  ;; A mode that exists and then signals costs the same run as one that
-  ;; does not exist.  An error escaping here would skip the line count, the
-  ;; stderr notes and the window, leaving the result in a buffer nobody was
-  ;; shown.
+A mode that is missing or signals leaves the buffer plain, so the run's
+result is still shown."
   (if (fboundp csvdt-output-mode)
       (condition-case nil
           (funcall csvdt-output-mode)
@@ -563,22 +476,15 @@ than aborting a run csvdt has already done the work for."
 (defun csvdt--short-flags (argument)
   "Return the short flags clustered in ARGUMENT, or nil if it is not a cluster.
 clap lets flags be written together, so \"-Hp\" is two of them.  A short
-option whose value can be attached consumes the rest of the argument, so
-scanning stops at the first of those, which is what makes
-\"-i0,replace\" one option and its value rather than a run of flags.
-A short whose value must be attached with \"=\" does not: nothing after
-it in a cluster can be its value, so to clap it is just another flag and
-scanning walks over it: \"-fH\" is two flags, and treating it as \"-f
-plus a value\" hid the \"-H\" from `csvdt--header-requested-p'.  Which
-options are which comes from csvdt itself; when it does not say, none
-are assumed and only whole arguments match."
+option that can take an attached value consumes the rest of the argument,
+so \"-i0,replace\" is one option and its value.  A short whose value must
+be attached with \"=\" is just another flag in a cluster: \"-fH\" is two.
+Which options are which comes from csvdt; when it does not say, only
+whole arguments match."
   (when (and (string-prefix-p "-" argument)
              (not (string-prefix-p "--" argument))
-             ;; An '=' anywhere means option=value to clap: "-f=keep" is
-             ;; -f with an attached mode, never a cluster. Scanned as one it
-             ;; yielded junk flags ("-=" "-k" ...), harmless under the
-             ;; default `csvdt-header-options' but a false header-carry
-             ;; the moment that defcustom names a letter the value holds.
+             ;; An "=" means option=value to clap: "-f=keep" is -f with an
+             ;; attached value, never a cluster.
              (not (string-match-p "=" argument))
              (> (length argument) 1))
     (let ((valued (csvdt--shorts-taking-a-separate-value))
@@ -595,9 +501,7 @@ are assumed and only whole arguments match."
 
 (defun csvdt--shorts-taking-a-separate-value ()
   "Return the short options whose value may be the next argument.
-An option whose value must be attached with \"=\" takes no separate one, so
-writing it apart leaves that word sitting where the filename goes.  That is
-the case this exists to notice rather than to allow for."
+An option whose value must be attached with \"=\" takes no separate one."
   (let ((shorts '()))
     (dolist (record (csvdt--option-records))
       (let ((short (plist-get record :short)))
@@ -636,21 +540,11 @@ must be attached with \"=\"."
 
 (defun csvdt--file-arguments (args)
   "Return the arguments in ARGS that csvdt would read as a file to open.
-Only ones that name something on disk: an argument left where the filename
-goes is worth reporting when csvdt would silently read it, and when it
-would not, csvdt's own error says so better than a guess from here could.
-That matters because these commands always send the input on standard
-input, so a filename does not add a second input: it replaces the
-selection, and the result looks exactly like a successful run on it.
-
-Nothing is reported at all when the option table cannot say which
-options take a separate value: the `--help' fallback's records, where
-:value is nil throughout.  Telling a value from a positional then needs
-exactly the knowledge that is missing, and guessing refused valid runs:
-an option's separate value was scanned as a filename, and refused
-whenever a file of that name happened to exist.  A missed warning only
-returns csvdt to what every run before this check was; a false refusal
-stops a correct one."
+Only ones that name a file on disk.  The commands send the selection on
+standard input, so a filename replaces it and the result looks like a
+successful run on the file.  Nothing is reported when the option table
+cannot say which options take a separate value (the `--help' fallback,
+where :value is nil), since telling a value from a filename needs that."
   (unless (seq-some (lambda (record) (plist-get record :value))
                     (csvdt--option-records))
     (setq args nil))
@@ -670,11 +564,8 @@ stops a correct one."
                (> (length argument) 1))
           (setq rest (cdr rest)))
          (t
-          ;; Not "~" paths, though: `file-regular-p' expands the tilde and
-          ;; csvdt does not, so csvdt answers such an argument with its own
-          ;; loud cannot-read error, so the silent replacement this check
-          ;; exists to catch cannot happen, and flagging it here claimed
-          ;; csvdt would read a file it never would.
+          ;; Not "~" paths: `file-regular-p' expands the tilde and csvdt
+          ;; does not, so csvdt refuses those itself.
           (when (and (not (string-empty-p argument))
                      (not (string-prefix-p "~" argument))
                      (file-regular-p argument))
@@ -684,8 +575,7 @@ stops a correct one."
 
 (defun csvdt--header-requested-p (args)
   "Non-nil when ARGS ask csvdt to treat the first record as a header.
-Only up to \"--\": past it everything is positional to clap, so an
-argument spelled -H there is a filename, not the option."
+Only up to \"--\": past it, to clap, everything is positional."
   (seq-some
    (lambda (argument)
      (or (member argument csvdt-header-options)
