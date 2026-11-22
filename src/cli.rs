@@ -1,7 +1,7 @@
 //! The command line: the options, their help, and the flags a run is given.
 
 use std::error::Error;
-use chrono::FixedOffset;
+use jiff::tz::Offset;
 use clap::builder::PossibleValue;
 use clap::crate_version;
 use crate::man::without_marks;
@@ -69,7 +69,7 @@ pub(crate) enum Action {
     /// chrono, which reads a POSIX rule in TZ itself.
     ToLocal(Option<chrono_tz::Tz>),
     /// -o/--offset, to the offset given.
-    ToOffset(FixedOffset),
+    ToOffset(Offset),
     /// -d/--duration: from the previous row's timestamp, or, with a second
     /// column, between the two columns of the same row.
     Duration {
@@ -337,14 +337,14 @@ pub(crate) const MAX_TARGET_OFFSET_SECONDS: i32 = 14 * 3600;
 /// glued onto a timestamp and parsed with it, which let ".5Z" through as a
 /// fraction of a second followed by Z.
 ///
-/// Offsets outside the range real places use are rejected. chrono itself
-/// accepts anything up to +/-23:59, so without this a typo like "+15:00" for
+/// Offsets outside the range real places use are rejected. A timestamp may
+/// carry anything up to +/-23:59, so without this a typo like "+15:00" for
 /// "+05:00" would be honoured and produce a plausible-looking timestamp
 /// carrying an offset that cannot exist, exactly the sort of quiet error
 /// this tool otherwise goes out of its way not to make. Only the target
 /// that was asked for is checked; offsets found in the data are left alone, since
 /// those are the input's business rather than a mistake in the command.
-pub(crate) fn parse_offset(value: &str) -> Result<FixedOffset, Box<dyn Error>> {
+pub(crate) fn parse_offset(value: &str) -> Result<Offset, Box<dyn Error>> {
     let malformed = || -> Box<dyn Error> {
         Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -385,7 +385,7 @@ pub(crate) fn parse_offset(value: &str) -> Result<FixedOffset, Box<dyn Error>> {
                      they run from -12:00 to +14:00", value))));
     }
 
-    FixedOffset::east_opt(seconds).ok_or_else(malformed)
+    Offset::from_seconds(seconds).map_err(|_| malformed())
 }
 
 /// Reads the position word from -i's second value, which may be abbreviated.

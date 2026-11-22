@@ -11,6 +11,9 @@ license = "GPL-3.0-or-later"
 exclude = ["checks/"]
 
 [dependencies]
+# Dates, times and offsets. Default features off so that nothing is read from
+# the host's own zone files unless csvdt asks for it.
+jiff = { version = "1.0.2", default-features = false, features = ["std"] }
 chrono = "0.4.41"
 clap = { version = "4.5.39", features= ["cargo"] }
 # Already in the tree through clap; direct so --help can be written the

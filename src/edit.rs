@@ -1,7 +1,6 @@
 //! What an action makes of each row, and of the header.
 
 use std::error::Error;
-use chrono::{DateTime, FixedOffset};
 use crate::cli::*;
 use crate::timestamp::*;
 
@@ -243,7 +242,7 @@ pub(crate) fn insert_target(args: &ArgumentFlags, len: usize) -> usize {
 
 /// An edit for one row, and the timestamp the row-over-row --duration carries
 /// into the next.
-pub(crate) type PlannedEdit = (RowEdit, Option<DateTime<FixedOffset>>);
+pub(crate) type PlannedEdit = (RowEdit, Option<Stamp>);
 
 /// Parses the row and works out what to write, without touching the field
 /// list. Returns the edit plus the row-over-row duration cache to carry into
@@ -251,7 +250,7 @@ pub(crate) type PlannedEdit = (RowEdit, Option<DateTime<FixedOffset>>);
 pub(crate) fn plan_row_edit(
     record: &csv::StringRecord,
     args: &ArgumentFlags,
-    dt_cache: Option<DateTime<FixedOffset>>,
+    dt_cache: Option<Stamp>,
 ) -> Result<PlannedEdit, Box<dyn Error>> {
     check_bounds(args, record.len())?;
     let target = insert_target(args, record.len());
@@ -264,63 +263,49 @@ pub(crate) fn plan_row_edit(
         Action::Remove(_) => RowEdit::Remove,
         Action::Arrange { .. } => RowEdit::Arrange,
         Action::Split => {
+            // The time keeps a fraction the source carried and writes
+            // nothing when there is none, as RFC3339 output does. Whole
+            // seconds would drop it silently, which no other conversion here
+            // does: -d keeps it unless --round-seconds asks otherwise, and
+            // -u/-l/-o write back whatever came in.
             let (first, second) = match timestamp() {
-                Ok(datetime) => (
-                    format!("{}", datetime.date_naive()),
-                    // %.f keeps a fraction the source carried and prints
-                    // nothing when there is none, as RFC3339 output does.
-                    // Whole seconds would drop it silently, which no other
-                    // conversion here does: -d keeps it unless
-                    // --round-seconds asks otherwise, and -u/-l/-o write
-                    // back whatever came in.
-                    format!("{}", datetime.format("%H:%M:%S%.f %Z")),
-                ),
+                Ok(stamp) => stamp.split(),
                 Err(_) => (parse_err(), parse_err()),
             };
             RowEdit::Pair { target, first, second }
         },
         // Trimmed for the same reason parse_rfc3339_lenient is.
         Action::ToRfc3339 => single(match record[args.selected_column].trim().parse::<i64>() {
-            Ok(timestamp) => match chrono::DateTime::from_timestamp(timestamp, 0) {
-                // chrono reaches far further than RFC3339 does, and formats a
-                // year outside four digits in ISO 8601's expanded form
-                // ("+57534-06-16T...", "-0001-12-31T..."). That is not
-                // RFC3339, which this option promises: csvdt cannot read it
-                // back, and nor can anything else expecting the format. Epoch
-                // milliseconds handed to an option expecting seconds land
-                // here, which is a mistake worth reporting rather than
-                // answering with a timestamp no one can use.
-                Some(datetime) if is_rfc3339_year(&datetime) => datetime.to_rfc3339(),
-                _ => parse_err(),
-            },
+            // A year outside four digits would be ISO 8601's expanded form
+            // ("+57534-06-16T...", "-0001-12-31T..."). That is not RFC3339,
+            // which this option promises: csvdt cannot read it back, and nor
+            // can anything else expecting the format. Epoch milliseconds
+            // handed to an option expecting seconds land there, which is a
+            // mistake worth reporting rather than answering with a timestamp
+            // no one can use.
+            Ok(seconds) => to_rfc3339_in_range(Stamp::from_epoch_seconds(seconds)),
             Err(_) => parse_err(),
         }),
         Action::ToUtc => single(match timestamp() {
-            Ok(datetime) => to_rfc3339_in_range(datetime.with_timezone(&chrono::Utc)),
+            Ok(stamp) => to_rfc3339_in_range(stamp.on_offset(jiff::tz::Offset::UTC)),
             Err(_) => parse_err(),
         }),
-        Action::ToLocal(zone) => single(match (timestamp(), zone) {
-            (Ok(datetime), Some(zone)) => to_rfc3339_in_range(datetime.with_timezone(zone)),
-            // TZ held a POSIX rule string rather than a zone name; let
-            // chrono parse it the way it always has.
-            (Ok(datetime), None) => to_rfc3339_in_range(datetime.with_timezone(&chrono::Local)),
-            (Err(_), _) => parse_err(),
+        Action::ToLocal(zone) => single(match timestamp() {
+            Ok(stamp) => to_rfc3339_in_range(stamp.on_offset(zone_offset(zone, stamp.instant_for_rules()))),
+            Err(_) => parse_err(),
         }),
         Action::ToOffset(offset) => single(match timestamp() {
-            Ok(datetime) => to_rfc3339_in_range(datetime.with_timezone(offset)),
+            Ok(stamp) => to_rfc3339_in_range(stamp.on_offset(*offset)),
             Err(_) => parse_err(),
         }),
         Action::Duration { second: Some(second) } => {
             single(match (timestamp(), parse_rfc3339_lenient(&record[*second])) {
-                (Ok(first), Ok(second)) => {
-                    let duration = if first > second { first - second } else { second - first };
-                    format_iso8601_duration(duration, args.round_seconds)
-                },
+                (Ok(first), Ok(second)) => format_iso8601_duration(second.since(&first), args.round_seconds),
                 _ => parse_err(),
             })
         },
         Action::Duration { second: None } => match timestamp() {
-            Ok(datetime) => {
+            Ok(stamp) => {
                 // No previous row yet (first row, or every row so far failed
                 // to parse) means there's nothing to measure against, so the
                 // duration is zero. Tracked with None rather than a sentinel
@@ -328,10 +313,9 @@ pub(crate) fn plan_row_edit(
                 // exact instant (e.g. the Unix epoch, which is how a lot of
                 // exports write a null date) look like "no previous row" and
                 // silently report PT0S.
-                let previous = dt_cache.unwrap_or(datetime);
-                let duration = if datetime > previous { datetime - previous } else { previous - datetime };
-                let value = format_iso8601_duration(duration, args.round_seconds);
-                return Ok((single(value), Some(datetime)));
+                let previous = dt_cache.unwrap_or(stamp);
+                let value = format_iso8601_duration(stamp.since(&previous), args.round_seconds);
+                return Ok((single(value), Some(stamp)));
             },
             // A row we can't parse leaves the cache untouched, so the next
             // parseable row still measures against the last real timestamp.
@@ -339,6 +323,18 @@ pub(crate) fn plan_row_edit(
         },
     };
     Ok((edit, dt_cache))
+}
+
+/// The offset ZONE has at INSTANT, from the bundled database, or where ZONE
+/// is None from chrono's reading of TZ, which is how POSIX rules are read.
+pub(crate) fn zone_offset(zone: &Option<chrono_tz::Tz>, instant: jiff::Timestamp) -> jiff::tz::Offset {
+    use chrono::{Offset, TimeZone};
+    let utc = chrono::DateTime::from_timestamp(instant.as_second(), 0).unwrap_or_default().naive_utc();
+    let seconds = match zone {
+        Some(zone) => zone.offset_from_utc_datetime(&utc).fix().local_minus_utc(),
+        None => chrono::Local.offset_from_utc_datetime(&utc).fix().local_minus_utc(),
+    };
+    jiff::tz::Offset::from_seconds(seconds).unwrap_or(jiff::tz::Offset::UTC)
 }
 
 /// Fills `fields` with the row's final contents: the record's own fields,

@@ -17,7 +17,6 @@ mod zone;
 mod tests;
 
 use std::error::Error;
-use chrono::{DateTime, FixedOffset};
 use cli::*;
 use spool::*;
 use input::*;
@@ -25,6 +24,7 @@ use peek::*;
 use fill_log::*;
 use edit::*;
 use report::*;
+use timestamp::Stamp;
 
 /// Writes one line to stderr, accepting that it may not arrive. Everything
 /// said on stderr is commentary on a result that already stands: a warning
@@ -343,7 +343,7 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
     mut fill_log: Option<&mut FillLog>,
 ) -> Result<Tally, Box<dyn Error>> {
     let mut tally = Tally::default();
-    let mut dt_cache: Option<DateTime<FixedOffset>> = None;
+    let mut dt_cache: Option<Stamp> = None;
     // Where a record is, as the fill log and the out-of-bound message give
     // it: the physical line it starts on, and its number among the records.
     let at = |position: Option<&csv::Position>| {

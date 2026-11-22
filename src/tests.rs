@@ -1,7 +1,20 @@
 //! Unit tests for what the command-line tests in tests/cli.rs cannot reach.
 
 use clap::builder::PossibleValue;
+use jiff::SignedDuration;
+use jiff::civil::DateTime;
+use jiff::tz::Offset;
 use crate::{cli::*, edit::*, input::*, report::*, timestamp::*, zone::*};
+
+/// VALUE read as a timestamp, which it must be.
+fn stamp(value: &str) -> Stamp {
+    parse_rfc3339_lenient(value).unwrap()
+}
+
+/// The offset SECONDS east of UTC.
+fn offset(seconds: i32) -> Offset {
+    Offset::from_seconds(seconds).unwrap()
+}
 
 /// A paragraph ends at a blank line, and a blank line is not always
 /// "\n\n". git hands a Windows checkout the corpus with CRLF endings,
@@ -229,7 +242,7 @@ fn duration(args: &mut ArgumentFlags) {
 
 /// Asks for -o to -06:00.
 fn to_offset(args: &mut ArgumentFlags) {
-    args.action = Action::ToOffset(FixedOffset::west_opt(6 * 3600).unwrap());
+    args.action = Action::ToOffset(offset(-6 * 3600));
 }
 
 /// One case: its label, the options, the row read and the row written, or
@@ -440,7 +453,7 @@ fn process_headers_names_what_each_action_adds() {
 }
 
 /// A row as written, and the timestamp carried into the next.
-type ProcessedRecord = (csv::StringRecord, Option<DateTime<FixedOffset>>);
+type ProcessedRecord = (csv::StringRecord, Option<Stamp>);
 
 /// Convenience wrapper for the cases below, which assert on a whole
 /// StringRecord. The streaming path writes the borrowed field list
@@ -448,7 +461,7 @@ type ProcessedRecord = (csv::StringRecord, Option<DateTime<FixedOffset>>);
 fn process_record(
     record: &csv::StringRecord,
     args: &ArgumentFlags,
-    dt_cache: Option<DateTime<FixedOffset>>,
+    dt_cache: Option<Stamp>,
 ) -> Result<ProcessedRecord, Box<dyn Error>> {
     let (edit, cache) = plan_row_edit(record, args, dt_cache)?;
     let mut fields: Vec<&str> = Vec::with_capacity(record.len() + 2);
@@ -562,7 +575,7 @@ fn process_record_writes_what_each_action_makes_of_a_row() {
             Some(vec!["1", "parse_err", "x"]),
         ),
         (
-            "rfc3339, epoch chrono cannot represent",
+            "rfc3339, epoch past the four-digit years",
             converting(rfc3339, Replace),
             vec!["1", &huge, "x"],
             Some(vec!["1", "parse_err", "x"]),
@@ -706,7 +719,7 @@ fn insert_offset_colon_leaves_already_valid_forms_alone() {
 fn parse_rfc3339_lenient_accepts_missing_colon_offset() {
     assert_eq!(
         parse_rfc3339_lenient("2024-01-15T10:30:00+0000").unwrap(),
-        chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00+00:00").unwrap()
+        stamp("2024-01-15T10:30:00+00:00")
     );
 }
 
@@ -768,7 +781,7 @@ fn record_to_local_produces_the_same_instant_as_utc() {
     args.action = Action::ToLocal(None);
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
     let (result, _) = process_record(
         &record(&["1", "2024-06-01T10:00:00+05:00", "x"]),
         &args,
@@ -776,9 +789,9 @@ fn record_to_local_produces_the_same_instant_as_utc() {
     )
     .unwrap();
     let produced = as_vec(&result)[1].to_string();
-    let parsed = chrono::DateTime::parse_from_rfc3339(&produced).unwrap();
-    let original = chrono::DateTime::parse_from_rfc3339("2024-06-01T10:00:00+05:00").unwrap();
-    assert_eq!(parsed, original, "local conversion must preserve the instant");
+    let parsed = stamp(&produced);
+    let original = stamp("2024-06-01T10:00:00+05:00");
+    assert_eq!(parsed.since(&original), SignedDuration::ZERO, "local conversion must preserve the instant");
 }
 
 #[test]
@@ -787,7 +800,7 @@ fn record_to_local_accepts_offset_missing_a_colon() {
     args.action = Action::ToLocal(None);
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
     let (result, _) = process_record(
         &record(&["1", "2024-06-01T10:00:00+0500", "x"]),
         &args,
@@ -795,23 +808,23 @@ fn record_to_local_accepts_offset_missing_a_colon() {
     )
     .unwrap();
     let produced = as_vec(&result)[1].to_string();
-    let parsed = chrono::DateTime::parse_from_rfc3339(&produced).unwrap();
-    let original = chrono::DateTime::parse_from_rfc3339("2024-06-01T10:00:00+05:00").unwrap();
-    assert_eq!(parsed, original, "local conversion must preserve the instant");
+    let parsed = stamp(&produced);
+    let original = stamp("2024-06-01T10:00:00+05:00");
+    assert_eq!(parsed.since(&original), SignedDuration::ZERO, "local conversion must preserve the instant");
 }
 
 // ---- parse_offset -------------------------------------------------------
 
 #[test]
 fn parse_offset_accepts_colon_no_colon_and_z() {
-    let texas = FixedOffset::west_opt(6 * 3600).unwrap();
+    let texas = offset(-6 * 3600);
     assert_eq!(parse_offset("-06:00").unwrap(), texas);
     assert_eq!(parse_offset("-0600").unwrap(), texas);
-    assert_eq!(parse_offset("z").unwrap(), FixedOffset::east_opt(0).unwrap());
-    assert_eq!(parse_offset("Z").unwrap(), FixedOffset::east_opt(0).unwrap());
+    assert_eq!(parse_offset("z").unwrap(), Offset::UTC);
+    assert_eq!(parse_offset("Z").unwrap(), Offset::UTC);
     assert_eq!(
         parse_offset("+0200").unwrap(),
-        FixedOffset::east_opt(2 * 3600).unwrap()
+        offset(2 * 3600)
     );
 }
 
@@ -832,35 +845,34 @@ fn parse_offset_takes_nothing_but_an_offset() {
     ] {
         assert!(parse_offset(given).is_err(), "{given:?} was accepted");
     }
-    assert_eq!(parse_offset("-00:00").unwrap(), FixedOffset::east_opt(0).unwrap());
-    assert_eq!(parse_offset("+05:45").unwrap(), FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
+    assert_eq!(parse_offset("-00:00").unwrap(), Offset::UTC);
+    assert_eq!(parse_offset("+05:45").unwrap(), offset(5 * 3600 + 45 * 60));
 }
 
 // ---- format_iso8601_duration ---------------------------------------------
 
 #[test]
 fn format_iso8601_duration_omits_zero_components() {
-    use chrono::TimeDelta;
-    assert_eq!(format_iso8601_duration(TimeDelta::zero(), false), "PT0S");
-    assert_eq!(format_iso8601_duration(TimeDelta::seconds(5), false), "PT5S");
+    assert_eq!(format_iso8601_duration(SignedDuration::ZERO, false), "PT0S");
+    assert_eq!(format_iso8601_duration(SignedDuration::from_secs(5), false), "PT5S");
     assert_eq!(
-        format_iso8601_duration(TimeDelta::minutes(1) + TimeDelta::seconds(30), false),
+        format_iso8601_duration(SignedDuration::from_mins(1) + SignedDuration::from_secs(30), false),
         "PT1M30S"
     );
-    assert_eq!(format_iso8601_duration(TimeDelta::hours(1), false), "PT1H");
+    assert_eq!(format_iso8601_duration(SignedDuration::from_hours(1), false), "PT1H");
     assert_eq!(
-        format_iso8601_duration(TimeDelta::days(1), false),
+        format_iso8601_duration(SignedDuration::from_hours(24), false),
         "P1D",
         "a whole day with no time component must omit the T entirely"
     );
     assert_eq!(
         format_iso8601_duration(
-            TimeDelta::days(1) + TimeDelta::hours(6) + TimeDelta::minutes(30)
+            SignedDuration::from_hours(24) + SignedDuration::from_hours(6) + SignedDuration::from_mins(30)
         , false),
         "P1DT6H30M"
     );
     assert_eq!(
-        format_iso8601_duration(TimeDelta::days(3653), false),
+        format_iso8601_duration(SignedDuration::from_hours(3653 * 24), false),
         "P3653D",
         "large day counts stay a plain day component, not years/months"
     );
@@ -868,24 +880,23 @@ fn format_iso8601_duration_omits_zero_components() {
 
 #[test]
 fn format_iso8601_duration_keeps_sub_second_precision() {
-    use chrono::TimeDelta;
     assert_eq!(
-        format_iso8601_duration(TimeDelta::milliseconds(999), false),
+        format_iso8601_duration(SignedDuration::from_millis(999), false),
         "PT0.999S"
     );
     assert_eq!(
-        format_iso8601_duration(TimeDelta::milliseconds(1500), false),
+        format_iso8601_duration(SignedDuration::from_millis(1500), false),
         "PT1.5S"
     );
     // Trailing zeros are trimmed, so half a second is ".5" not
     // ".500000000".
     assert_eq!(
-        format_iso8601_duration(TimeDelta::nanoseconds(1), false),
+        format_iso8601_duration(SignedDuration::from_nanos(1), false),
         "PT0.000000001S"
     );
     assert_eq!(
         format_iso8601_duration(
-            TimeDelta::days(1) + TimeDelta::hours(3) + TimeDelta::milliseconds(250),
+            SignedDuration::from_hours(24) + SignedDuration::from_hours(3) + SignedDuration::from_millis(250),
             false
         ),
         "P1DT3H0.25S"
@@ -894,18 +905,17 @@ fn format_iso8601_duration_keeps_sub_second_precision() {
 
 #[test]
 fn format_iso8601_duration_round_seconds_is_half_up_and_carries() {
-    use chrono::TimeDelta;
-    assert_eq!(format_iso8601_duration(TimeDelta::milliseconds(400), true), "PT0S");
-    assert_eq!(format_iso8601_duration(TimeDelta::milliseconds(500), true), "PT1S");
-    assert_eq!(format_iso8601_duration(TimeDelta::milliseconds(999), true), "PT1S");
+    assert_eq!(format_iso8601_duration(SignedDuration::from_millis(400), true), "PT0S");
+    assert_eq!(format_iso8601_duration(SignedDuration::from_millis(500), true), "PT1S");
+    assert_eq!(format_iso8601_duration(SignedDuration::from_millis(999), true), "PT1S");
     // Rounding up must carry into the larger units, not produce "PT60S".
     assert_eq!(
-        format_iso8601_duration(TimeDelta::milliseconds(59_600), true),
+        format_iso8601_duration(SignedDuration::from_millis(59_600), true),
         "PT1M"
     );
     assert_eq!(
         format_iso8601_duration(
-            TimeDelta::hours(23) + TimeDelta::minutes(59) + TimeDelta::milliseconds(59_800),
+            SignedDuration::from_hours(23) + SignedDuration::from_mins(59) + SignedDuration::from_millis(59_800),
             true
         ),
         "P1D"
@@ -914,11 +924,10 @@ fn format_iso8601_duration_round_seconds_is_half_up_and_carries() {
 
 #[test]
 fn format_iso8601_duration_whole_seconds_unaffected_by_rounding() {
-    use chrono::TimeDelta;
     for round in [false, true] {
-        assert_eq!(format_iso8601_duration(TimeDelta::zero(), round), "PT0S");
+        assert_eq!(format_iso8601_duration(SignedDuration::ZERO, round), "PT0S");
         assert_eq!(
-            format_iso8601_duration(TimeDelta::days(1) + TimeDelta::hours(12), round),
+            format_iso8601_duration(SignedDuration::from_hours(24) + SignedDuration::from_hours(12), round),
             "P1DT12H"
         );
     }
@@ -932,7 +941,7 @@ fn record_duration_first_row_is_zero_and_seeds_cache() {
     args.action = Action::Duration { second: None };
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
     let (result, new_cache) = process_record(
         &record(&["1", "2024-01-01T00:00:00Z"]),
         &args,
@@ -942,7 +951,7 @@ fn record_duration_first_row_is_zero_and_seeds_cache() {
     assert_eq!(as_vec(&result), vec!["1", "PT0S"]);
     assert_eq!(
         new_cache,
-        Some(chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap())
+        Some(stamp("2024-01-01T00:00:00Z"))
     );
 }
 
@@ -952,7 +961,7 @@ fn record_duration_accepts_offset_missing_a_colon() {
     args.action = Action::Duration { second: None };
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
     let (result, new_cache) = process_record(
         &record(&["1", "2024-01-01T00:00:00+0000"]),
         &args,
@@ -962,7 +971,7 @@ fn record_duration_accepts_offset_missing_a_colon() {
     assert_eq!(as_vec(&result), vec!["1", "PT0S"]);
     assert_eq!(
         new_cache,
-        Some(chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").unwrap())
+        Some(stamp("2024-01-01T00:00:00+00:00"))
     );
 }
 
@@ -973,7 +982,7 @@ fn record_duration_accumulates_row_over_row_even_when_unsorted() {
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
 
-    let mut cache: Option<DateTime<FixedOffset>> = None;
+    let mut cache: Option<Stamp> = None;
 
     let (r1, c1) =
         process_record(&record(&["1", "2024-01-01T00:00:00Z"]), &args, cache).unwrap();
@@ -992,7 +1001,7 @@ fn record_duration_accumulates_row_over_row_even_when_unsorted() {
     assert_eq!(as_vec(&r3), vec!["3", "PT12H"]);
     assert_eq!(
         c3,
-        Some(chrono::DateTime::parse_from_rfc3339("2024-01-01T12:00:00Z").unwrap())
+        Some(stamp("2024-01-01T12:00:00Z"))
     );
 }
 
@@ -1006,7 +1015,7 @@ fn record_duration_correct_across_a_dst_spring_forward() {
     args.action = Action::Duration { second: None };
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
 
     let (r1, c1) = process_record(
         &record(&["1", "2024-03-10T01:30:00-05:00"]),
@@ -1034,7 +1043,7 @@ fn record_duration_correct_across_a_dst_fall_back() {
     args.action = Action::Duration { second: None };
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
 
     let (r1, c1) = process_record(
         &record(&["1", "2024-11-03T00:30:00-04:00"]),
@@ -1059,7 +1068,7 @@ fn record_duration_parse_error_leaves_cache_untouched() {
     args.action = Action::Duration { second: None };
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let seed = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap();
+    let seed = stamp("2024-01-01T00:00:00Z");
 
     let (result, new_cache) =
         process_record(&record(&["1", "not-a-date"]), &args, Some(seed)).unwrap();
@@ -1076,7 +1085,7 @@ fn record_duration_two_column_computes_absolute_difference_regardless_of_order()
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(4) };
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
 
     // Column 0 is earlier than column 4; the result replaces column 4.
     let (result, _) = process_record(
@@ -1104,7 +1113,7 @@ fn record_duration_two_column_identical_timestamps_is_zero() {
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(1) };
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
     let (result, _) = process_record(
         &record(&["2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z"]),
         &args,
@@ -1121,7 +1130,7 @@ fn record_duration_two_column_accepts_offset_missing_a_colon() {
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(1) };
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
     let (result, _) = process_record(
         &record(&["2024-01-01T00:00:00+0000", "2024-01-02T00:00:00+0000"]),
         &args,
@@ -1138,7 +1147,7 @@ fn record_duration_two_column_either_column_invalid_is_parse_err() {
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(1) };
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
 
     let (result, _) = process_record(
         &record(&["not-a-date", "2024-01-01T00:00:00Z"]),
@@ -1168,7 +1177,7 @@ fn record_duration_two_column_correct_between_two_countries_own_dst_offsets() {
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(1) };
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
     let (result, _) = process_record(
         &record(&["2024-07-04T12:00:00-04:00", "2024-07-04T20:00:00+02:00"]),
         &args,
@@ -1188,7 +1197,7 @@ fn record_duration_two_column_does_not_touch_the_row_over_row_cache() {
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(1) };
     args.insert_position = InsertPosition::Replace;
-    let seed = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z").unwrap();
+    let seed = stamp("2020-01-01T00:00:00Z");
     let (_, new_cache) = process_record(
         &record(&["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]),
         &args,
@@ -1204,7 +1213,7 @@ fn record_duration_two_column_out_of_bound_second_column_is_a_clean_error() {
     args.action = Action::Duration { second: None };
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(9) };
-    let cache: Option<DateTime<FixedOffset>> = None;
+    let cache: Option<Stamp> = None;
     let result = process_record(&record(&["1", "2"]), &args, cache);
     assert!(result.is_err());
 }
@@ -1216,72 +1225,64 @@ fn record_duration_two_column_out_of_bound_second_column_is_a_clean_error() {
 // what they answer at the boundary is the whole of their job, and going
 // through a conversion to ask makes the boundary harder to place.
 
-/// The UTC instant at the start of the hour given.
-fn utc_at(year: i32, month: u32, day: u32, hour: u32) -> DateTime<chrono::Utc> {
-    use chrono::TimeZone;
-    chrono::Utc.with_ymd_and_hms(year, month, day, hour, 0, 0).unwrap()
+/// The clock reading at the start of the hour given.
+fn clock_at(year: i16, month: i8, day: i8, hour: i8) -> DateTime {
+    DateTime::new(year, month, day, hour, 0, 0, 0).unwrap()
 }
 
 #[test]
 fn rfc3339_year_spans_0001_to_9999_and_no_further() {
-    assert!(is_rfc3339_year(&utc_at(2024, 6, 15, 12)));
+    assert!(is_rfc3339_year(clock_at(2024, 6, 15, 12)));
     // Both ends of the range are inside it.
-    assert!(is_rfc3339_year(&utc_at(1, 1, 1, 0)));
-    assert!(is_rfc3339_year(&utc_at(9999, 12, 31, 23)));
-    // And the first year on each side is not. The ceiling is where four
-    // digits run out; the floor is one year short of that, because there
-    // is no year zero for a record to have been written in.
-    assert!(!is_rfc3339_year(&utc_at(0, 12, 31, 23)));
-    assert!(!is_rfc3339_year(&utc_at(-1, 12, 31, 23)));
-    assert!(!is_rfc3339_year(&utc_at(10000, 1, 1, 0)));
+    assert!(is_rfc3339_year(clock_at(1, 1, 1, 0)));
+    assert!(is_rfc3339_year(clock_at(9999, 12, 31, 23)));
+    // And the first year below is not. The floor is one year short of four
+    // digits, because there is no year zero for a record to have been
+    // written in.
+    assert!(!is_rfc3339_year(clock_at(0, 12, 31, 23)));
+    assert!(!is_rfc3339_year(clock_at(-1, 12, 31, 23)));
+    // The ceiling is where four digits run out, which no clock reading can
+    // pass: moving one there gives nothing at all.
+    let last = stamp("9999-12-31T23:00:00Z");
+    assert!(last.on_offset(offset(3600)).is_none());
+    assert!(last.on_offset(offset(0)).is_some());
 }
 
 #[test]
 fn rfc3339_offset_is_whole_minutes_only() {
-    use chrono::TimeZone;
-    for seconds in [0, 60, 30 * 60, 5 * 3600 + 45 * 60, -12 * 3600, 14 * 3600] {
-        let zone = FixedOffset::east_opt(seconds).unwrap();
-        let moment = zone.with_ymd_and_hms(2024, 6, 15, 12, 0, 0).unwrap();
-        assert!(is_rfc3339_offset(&moment), "{seconds}s is whole minutes");
+    for seconds in [0, 60, 30 * 60, 5 * 3600 + 45 * 60, -12 * 3600, 14 * 3600, 23 * 3600 + 59 * 60] {
+        assert!(is_rfc3339_offset(offset(seconds)), "{seconds}s is whole minutes");
     }
     // Local mean time, which is what a zone used before standard time and
     // what RFC3339's +HH:MM has nowhere to put. Amsterdam's +00:17:30,
     // New York's -04:56:02, Monrovia's -00:44:30.
     for seconds in [17 * 60 + 30, -(4 * 3600 + 56 * 60 + 2), -(44 * 60 + 30)] {
-        let zone = FixedOffset::east_opt(seconds).unwrap();
-        let moment = zone.with_ymd_and_hms(1900, 6, 15, 12, 0, 0).unwrap();
-        assert!(!is_rfc3339_offset(&moment), "{seconds}s is not whole minutes");
+        assert!(!is_rfc3339_offset(offset(seconds)), "{seconds}s is not whole minutes");
+    }
+    // Nor a day or more, which a POSIX rule can declare and HH cannot hold.
+    for seconds in [24 * 3600, -24 * 3600, 25 * 3600] {
+        assert!(!is_rfc3339_offset(offset(seconds)), "{seconds}s is a day or more");
     }
 }
 
 #[test]
 fn to_rfc3339_in_range_marks_what_it_cannot_write() {
     assert_eq!(
-        to_rfc3339_in_range(utc_at(2024, 6, 15, 12)),
+        to_rfc3339_in_range(Some(stamp("2024-06-15T12:00:00Z"))),
         "2024-06-15T12:00:00+00:00"
     );
-    // Outside the four-digit year, chrono would write ISO 8601's expanded
-    // form, a different format wearing the same shape.
-    assert_eq!(to_rfc3339_in_range(utc_at(10000, 1, 1, 0)), PARSE_ERR);
+    // Past the four-digit year, the conversion gives nothing to write.
+    assert_eq!(to_rfc3339_in_range(stamp("9999-12-31T23:00:00Z").on_offset(offset(3600))), PARSE_ERR);
 }
 
 #[test]
 fn to_rfc3339_in_range_refuses_a_sub_minute_offset_rather_than_moving_the_instant() {
-    use chrono::TimeZone;
     // Africa/Monrovia's -00:44:30, which it kept until January 1972.
-    // chrono renders this by rounding the offset to -00:45 while the clock
-    // time keeps its seconds, so the result names an instant 30 seconds
-    // from the one it was made from. That is the quiet wrong answer, and
-    // it round-trips as proof: parsing what chrono writes gives back a
-    // different moment.
-    let monrovia = FixedOffset::west_opt(44 * 60 + 30).unwrap();
-    let moment = monrovia.with_ymd_and_hms(1971, 6, 1, 11, 15, 30).unwrap();
-    let rendered = moment.to_rfc3339();
-    assert_ne!(
-        chrono::DateTime::parse_from_rfc3339(&rendered).unwrap(),
-        moment,
-        "chrono's own rendering moves the instant; that is what is guarded"
-    );
+    // Rounding the offset to -00:45 while the clock time keeps its seconds
+    // would name an instant 30 seconds from the one it was made from.
+    let utc = stamp("1971-06-01T12:00:00Z");
+    let moment = utc.on_offset(offset(-(44 * 60 + 30)));
+    assert_eq!(moment.map(|moment| moment.since(&utc)), Some(SignedDuration::ZERO));
     assert_eq!(to_rfc3339_in_range(moment), PARSE_ERR);
 }
 
