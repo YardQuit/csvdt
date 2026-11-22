@@ -8461,6 +8461,24 @@ fn a_tz_path_that_names_no_file_is_refused() {
         .stderr(predicate::str::contains("Check the path"));
 }
 
+#[cfg(unix)]
+#[test]
+fn a_tz_path_that_is_not_a_regular_file_is_refused_for_what_it_is() {
+    // A device or a directory was reported as a file that does not exist,
+    // which sends the reader looking for a typo in a path that is there.
+    for path in ["/dev/null", "/"] {
+        csvdt()
+            .args(["-H", "-l0"])
+            .env("TZ", path)
+            .write_stdin("ts\n2024-06-15T12:00:00Z\n")
+            .assert()
+            .failure()
+            .code(100)
+            .stderr(predicate::str::contains("which exists but is not a regular file"))
+            .stderr(predicate::str::contains("does not exist").not());
+    }
+}
+
 #[test]
 fn an_empty_file_argument_is_refused_rather_than_read_as_stdin() {
     // A "$file" that expands to nothing must not be read as no file at all,

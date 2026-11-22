@@ -102,6 +102,8 @@ A name the database added, Factory, is now accepted as a zone.
   claim it first.
 - On Windows the fill log is refused when it is the input or the output, as on
   Unix.
+- A `TZ` path that exists but is not a regular file, such as `/dev/null`, is
+  refused as what it is rather than as a file that does not exist.
 
 ### Building
 

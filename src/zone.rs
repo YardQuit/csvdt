@@ -81,11 +81,20 @@ pub(crate) fn zone_from_tz(name: &str) -> Result<TimeZone, Box<dyn Error>> {
         if !cfg!(unix) {
             return system_zone();
         }
-        if !std::path::Path::new(name).is_file() {
-            return Err(refusal(format!(
+        // A path that is there but names a device, a directory or a pipe is
+        // refused too, and said to be what it is, so that nobody hunts for a
+        // typo in a path that exists.
+        match std::fs::metadata(name) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(refusal(format!(
                 "TZ names the file '{}', which does not exist. '--local' would \
                  otherwise have reported UTC as though it were the zone that \
-                 file holds. Check the path, or set TZ to a zone name", name)));
+                 file holds. Check the path, or set TZ to a zone name", name))),
+            Ok(about) if !about.is_file() => return Err(refusal(format!(
+                "TZ names '{}', which exists but is not a regular file, so it \
+                 holds no zone. '--local' would otherwise have reported UTC as \
+                 though it were the zone that path holds. Check the path, or \
+                 set TZ to a zone name", name))),
+            _ => {}
         }
         return zone_file(name).map_err(|error| refusal(format!(
             "TZ names the file '{}', which is not a zone file this build can \
