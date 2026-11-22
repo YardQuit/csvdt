@@ -1,7 +1,8 @@
-A command-line tool for parsing and working with CSV files. It
-provides flexible options for handling e.g. whitespace, quote
-styles, and is mainly focusing on handling timestamps making
-data analysis easier and more efficient.
+A command-line tool that converts the timestamps in CSV files
+and rearranges their columns. It reads and writes CSV with
+whatever whitespace, quoting and delimiters a file needs, and is
+made for data analysis, where a value has to come out as the
+source had it or be marked as one that could not be converted.
 
 Duration results (-d/--duration) are deliberately reported only
 in days, hours, minutes, and seconds -- never years, months, or

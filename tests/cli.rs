@@ -2673,7 +2673,7 @@ fn the_short_help_leaves_out_the_reference_material_and_says_where_it_went() {
     }
     // The introduction stays; the paragraph explaining why a duration is
     // never given in months does not.
-    assert!(short.contains("A command-line tool for parsing"));
+    assert!(short.contains("A command-line tool that converts"));
     assert!(!short.contains("never years, months"));
     assert!(long.contains("never years, months"));
 
@@ -2825,7 +2825,7 @@ fn the_manual_page_takes_the_long_help_not_the_summary() {
     )
     .expect("the page should be UTF-8");
     assert!(
-        page.contains("This can only be used combined with"),
+        page.contains("which says the input has one"),
         "the page is rendered from the summaries, not the help",
     );
     // And the section that tells a --help reader the page exists is not in
@@ -8180,7 +8180,7 @@ fn the_manual_page_still_lets_its_prose_fill() {
     // A line from the middle of DESCRIPTION's first paragraph: ordinary
     // prose, and the man page's job is to rewrap it to the reader's width.
     assert!(
-        page.contains("provides flexible options"),
+        page.contains("whatever whitespace, quoting and delimiters a file needs"),
         "the paragraph this test is about is no longer in the page",
     );
     assert!(

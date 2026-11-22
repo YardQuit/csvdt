@@ -1,5 +1,5 @@
 Whether to allow records with a different number of fields from
-the previous record, instead of stopping with an error. Takes an
+the first record, instead of stopping with an error. Takes an
 optional mode, attached with '=':
 
   -f, --flexible
@@ -34,6 +34,12 @@ nothing survives the power going out, so a spool can still be
 left behind by those: it is in the temporary directory under a
 name beginning csvdt-widest-, safe to delete, and the machine's
 own cleaning of that directory will take it eventually.
+
+'widest' pads every row to the widest record in the file, so
+one stray row thousands of fields wide makes every row that
+wide, and the output grows with it: rows times the widest width.
+Look at the fill log, or run 'fix' first, before trusting
+'widest' with an input whose shape you do not know.
 
 That copy is readable by its owner alone, and is only ever
 created at a name nothing holds already -- the temporary

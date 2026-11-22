@@ -1,4 +1,4 @@
-Converts a rfc3339 timestamp in the given column [0...] to an
+Converts an RFC3339 timestamp in the given column [0...] to an
 explicit UTC offset that you supply, comma-joined with no space
 (e.g. -o1,-06:00, -o1,+0200, -o1,Z). Unlike -l/--local, this
 doesn't depend on the timezone the machine running csvdt happens

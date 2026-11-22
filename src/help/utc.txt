@@ -1,2 +1,2 @@
-Converts a rfc3339 timestamp in the given column [0...] to UTC
-time zone.
+Converts an RFC3339 timestamp in the given column [0...] to
+UTC.

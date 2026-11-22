@@ -1,18 +1,18 @@
 
 EXIT STATUS
-What a run reports back to whatever called it. Written down
-because several of the limits above turn on it -- a run that
-converted nothing is told apart from one that worked by the
-status alone -- and because until now it was only discoverable
-by trying.
+What a run reports back to whatever called it. Several of the
+limits above turn on it: a run that converted nothing is told
+apart from one that worked by the status alone.
 
   0
       The run finished. Where an action was given, at least one
       value converted; values that did not are counted on stderr
       and the run is still a success, since a few bad lines
-      among many are quite ordinary. Asking
-      for --help, --version, --list-options or --generate-man
-      reports this too, provided the answer could be written.
+      among many are quite ordinary. An input with no data
+      rows, empty or a header alone under -H, ends 0 too: there
+      was nothing to convert. Asking for --help, --version, the
+      option list or the manual page reports 0 as well,
+      provided the answer could be written.
 
   1
       The run began and could not finish, or finished having
@@ -25,13 +25,17 @@ by trying.
 
       Every one of these is found by doing the work, which is
       what separates them from 2 and 100 below: those two are
-      settled before the input is touched.
+      settled before the input is touched. Two refusals are 1
+      although they come before any reading: an input that is
+      also where the output goes, and a --fill-log destination
+      that is either of them. Both are asked of the files
+      themselves once they are named, not of the command line.
 
       A write that failed is one of them, and it counts for
       what csvdt says about itself as much as for a conversion:
-      'csvdt --help > file' on a full disk reports 1, where it
-      used to write nothing and report 0. A closed pipe is not a
-      failed write -- see the note at the end of this section.
+      'csvdt --help > file' on a full disk reports 1. A closed
+      pipe is not a failed write -- see the note at the end of
+      this section.
 
   2
       The command line did not parse: an option that does not
@@ -43,9 +47,9 @@ by trying.
   100
       The command line parsed, and then something it was told
       to work with was refused: an offset no place uses, a
-      delimiter or quote character longer than one character, a
-      column named twice in --remove, -a or -d, or a TZ naming
-      no zone this binary knows.
+      delimiter or comment character that is not one ASCII
+      character, a column named twice in --remove, -a or -d, or
+      a TZ naming no zone this binary knows.
 
       TZ is in that list because it is refused the same way the
       rest are -- before the input is opened, so nothing has

@@ -499,7 +499,6 @@ fn preserve_aligned_blocks(rendered: &[u8]) -> Vec<u8> {
     out.into_bytes()
 }
 
-
 // Splices the hand-written sections into the rendered page.
 //
 // Everything above them is generated from the Command that parses a command
@@ -516,9 +515,10 @@ fn preserve_aligned_blocks(rendered: &[u8]) -> Vec<u8> {
 // emitted, since losing the sections silently is the one outcome worth
 // ruling out.
 //
-// Runs last of the three passes, so the file is spliced in exactly as
-// written: it is roff already, and the pass that keeps the help's tables
-// from being filled would otherwise put breaks through the middle of it.
+// Runs after the passes that rearrange the generated page, so the file is
+// spliced in exactly as written: it is roff already, and the pass that keeps
+// the help's tables from being filled would otherwise put breaks through the
+// middle of it. Only protect_option_names comes after it.
 fn insert_man_sections(rendered: &[u8], supplement: &str) -> Vec<u8> {
     let text = String::from_utf8_lossy(rendered);
     match text.find(".SH VERSION") {

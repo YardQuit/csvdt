@@ -113,15 +113,19 @@ clock time keeps its seconds, so 1971-06-01T12:00:00Z became
 The timestamp is still in its own column beside the marker. -u
 and -o are unaffected -- theirs are whole-minute offsets by
 construction -- and so is -s/--split, which reads the offset the
-record already carried. A TZ naming a zone behaves the same on
-every platform. A TZ holding POSIX rules instead of a name, such
-as EST5EDT,M3.2.0,M11.1.0, is honoured only on Unix; on Windows
-the system's zone is used.
+record already carried. A TZ holding POSIX rules rather than a
+zone name is honoured only on Unix, as -l/--local says.
 
 -o/--offset ACCEPTS ONLY REAL OFFSETS
 -12:00 through +14:00. A typo beyond that range is refused
 rather than converted, so it cannot quietly produce a timestamp
 carrying an offset no place has ever used.
+
+A CLOSING QUOTE FOLLOWED BY TEXT IS NOT REPORTED
+A quoted field whose closing quote has more text after it, as
+in a,"b"c,d, is read without a word: the text is joined to the
+field, so "b"c arrives as bc. Nothing in the output or on
+stderr marks the field as one that was malformed.
 
 AN UNCLOSED QUOTE IS NOT REPORTED AS ONE
 There is no error for a quote that is opened and never closed.
@@ -295,17 +299,18 @@ ROWS ARE PROCESSED ONE AT A TIME
 Memory use grows with the widest single record, not with the
 file: a million ordinary rows stream through flat, but each
 record is held whole while it is worked on, so one enormous
-field costs about twice its own size in memory. It is held
-twice over -- once in the buffer it was read into, and once as
-the field parsed out of it -- and both stay until the record is
-done with. The case that matters is not exotic: it is the
-unclosed quote above, which turns everything after it, possibly
-the rest of the file, into one field.
+field costs about three times its own size in memory. It is
+held twice over -- once in the buffer it was read into, and once
+as the field parsed out of it -- each buffer grows by doubling,
+so it is often larger than what it holds, and both stay until
+the record is done with. The case that matters is not exotic:
+it is the unclosed quote above, which turns everything after
+it, possibly the rest of the file, into one field.
 
-A crafted or damaged input can cost twice its full size in
-memory that way, where the same bytes as ordinary rows cost
-almost nothing. Measured, a 64 MB field peaks at about 134 MB
-against the 10 MB an empty run takes, and the same figure comes
+A crafted or damaged input can cost three times its full size
+in memory that way, where the same bytes as ordinary rows cost
+almost nothing. Measured, a 64 MB field peaks at about 200 MB
+against the 4 MB an empty run takes, and the same figure comes
 back whatever the run was asked to do: the two copies are the
 reader's, not any action's.
 It costs time as well, and in proportion: doubling the field
@@ -328,6 +333,14 @@ file before writing, which is why --flexible=fix pads only to
 the first record's width. --flexible=widest gets around it by
 reading the input twice rather than by holding it, copying a
 pipe to a temporary file when it has to.
+
+OUTPUT IS NOT SANITISED
+A field is written as it was read. A control character or a
+terminal escape sequence in the input reaches the output, and
+any terminal it is shown on; a field beginning =, +, - or @ is
+taken for a formula by a spreadsheet that opens the file. Only
+--peek, which writes to a terminal, shows control characters by
+code point.
 
 LINUX IS THE INTENDED PLATFORM
 macOS and Windows are supported on a best-effort basis. All

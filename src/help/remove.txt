@@ -8,6 +8,6 @@ place.
 Order doesn't matter. A column named twice is refused rather
 than removed once: the list would not be saying what it looks
 like, and -a/--arrange refuses a repeat for its own reasons, so
-both lists now answer the same mistake the same way. Every
+both lists answer the same mistake the same way. Every
 column must exist, or the row is reported as out of bound rather
 than partly removed.

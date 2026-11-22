@@ -5,7 +5,7 @@ written. The same text reads better as a manual page: it arrives
 in a pager, rewraps to the window, and a section is a search
 rather than a scroll. See --generate-man for the two lines that
 install one. The page also carries what an option's help
-cannot -- the environment csvdt reads, the one file it writes,
+cannot -- the environment csvdt reads, the files it writes,
 and what to reach for when csvdt is the wrong tool. Everything
 else, from installing it to wrapping it in an editor, is at
 <https://github.com/YardQuit/csvdt>

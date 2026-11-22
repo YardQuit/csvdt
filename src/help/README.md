@@ -62,7 +62,7 @@ depending on which file it was in.
 
 ## What decides
 
-`VERBATIM` and `preserve_aligned_blocks` in `src/main.rs`. These tests hold
+`VERBATIM` and `preserve_aligned_blocks` in `src/man.rs`. These tests hold
 the bargain: `the_verbatim_gutter_marks_the_page_and_never_shows_in_it` checks
 that no gutter reaches anything csvdt prints and that every marked line
 arrives in the page as written, with its breaks; `the_gutter_decides_what_is_held_and_what_fills`

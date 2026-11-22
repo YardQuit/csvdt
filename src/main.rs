@@ -1325,7 +1325,7 @@ fn process_stream<R: std::io::Read, W: std::io::Write>(
     // Reuses one StringRecord buffer across every row instead of the
     // `records()` iterator, which clones a fresh StringRecord per row.
     //
-    // The row is then planned and written without ever materializing a second
+    // The row is then planned and written without ever materialising a second
     // StringRecord: `fields` holds &str borrowed from `record` and from the
     // edit's owned strings, and goes straight to the writer. Building an
     // output StringRecord here instead would mean allocating and copying
@@ -2292,8 +2292,8 @@ impl RowEdit {
     }
 
     // Whether the conversion could not produce a result for this row. Asked of
-    // the edit rather than counted at each of the thirteen places that write
-    // the marker, so a conversion added later cannot forget to be counted.
+    // the edit rather than counted at each place that writes the marker, so a
+    // conversion added later cannot forget to be counted.
     fn is_parse_error(&self) -> bool {
         match self {
             RowEdit::Single { value, .. } => value == PARSE_ERR,

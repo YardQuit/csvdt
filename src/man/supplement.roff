@@ -22,9 +22,7 @@
 .\" FILES is enumerated rather than read: an option whose value --list-options
 .\" spells 'file' is a file csvdt opens because it was told to, and
 .\" what_the_manual_page_says_about_files_is_what_csvdt_does requires the
-.\" section to name every one of them. This section called the spool below
-.\" "the only file csvdt creates" for a whole release after --fill-log made
-.\" that false, which is what enumeration is here to stop happening twice.
+.\" section to name every one of them.
 .SH ENVIRONMENT
 .TP
 .B TZ
@@ -32,10 +30,8 @@ The zone
 .B \-l/\-\-local
 converts into. Unset, the system's configured zone is used.
 .IP
-A zone name behaves identically on every platform. A value holding POSIX
-rules rather than a name, such as
-.BR EST5EDT,M3.2.0,M11.1.0 ,
-is honoured only on Unix; on Windows the system's zone is used instead. A
+A value holding POSIX rules rather than a zone name is honoured only on
+Unix, as the option says. A
 name the database compiled into this build does not know is refused rather
 than answered, since falling through to UTC would report a plausible
 timestamp for a zone nobody asked for.

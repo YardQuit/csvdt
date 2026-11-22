@@ -1,12 +1,13 @@
 # csvdt
 
-A command-line tool for parsing and working with CSV files. It provides flexible
-options for handling e.g. whitespace, quote styles, and is mainly focusing on
-handling timestamps making data analysis easier and more efficient.
+A command-line tool that converts the timestamps in CSV files and rearranges
+their columns. It reads and writes CSV with whatever whitespace, quoting and
+delimiters a file needs, and is made for data analysis, where a value has to
+come out as the source had it or be marked as one that could not be converted.
 
 ## Install
 
-### Fedora, RHEL, CentOS Stream
+### Fedora
 
 ```bash
 sudo dnf install https://github.com/YardQuit/csvdt/releases/download/rpm-release/csvdt.x86_64.rpm
@@ -39,7 +40,9 @@ result should be a release, so a release is the only thing that gets packaged.
 
 Only the current Fedora is served; [the packaging
 notes](packaging/rpm/README.md) say what that means if you are on the older
-one, and how to build the spec yourself against any release.
+one, and how to build the spec yourself against any release. RHEL and its
+rebuilds are neither built for nor tested: use the static musl binary below,
+which runs on any Linux.
 
 Every released version also keeps the packages it was published with, on its
 own release page, written once and never replaced. Those are what that
@@ -724,6 +727,12 @@ file one record; and a CR-only file (classic Mac line endings) loses every row
 after its first comment line to `--comment`, since only `\n` ends a comment.
 Convert the line endings first.
 
+Output is not sanitised. A field is written as it was read, so a control
+character or a terminal escape sequence in the input reaches the output and
+any terminal that shows it, and a field beginning `=`, `+`, `-` or `@` is
+taken for a formula by a spreadsheet that opens the file. `--peek` alone,
+which writes to a terminal, shows control characters by code point.
+
 ## Building from source
 
 ```bash
@@ -735,7 +744,9 @@ cargo test
 request, and on `master`. The Rust tests run on Linux, macOS and Windows, since
 `-l/--local` reads `TZ` on Unix and not on Windows and the two genuinely differ.
 
-[`checks/`](checks/) holds a separate set, run by hand rather than in CI:
+[`checks/`](checks/) holds a separate set, not run on pull requests. The
+monthly build runs it twice, with two seeds, before it publishes anything; it
+can be run by hand too:
 
 ```bash
 ./checks/run-checks.sh
@@ -775,10 +786,11 @@ set the version produces a binary reporting the previous one, and nothing
 downstream can tell (the tag name and the binary's `--version` simply
 disagree) on a release page that says otherwise.
 
-Pushing the tag is what publishes everything: both workflows build that tag,
-attach the binaries and the packages to the version's own release, refresh
-`release` and `rpm-release` so the download links point at the new version,
-and cut the first permanent archive entry for it.
+Pushing the tag is what publishes everything: it starts the monthly build,
+which builds the binaries and calls the RPM workflow for the packages. Between
+them they attach both to the version's own release, refresh `release` and
+`rpm-release` so the download links point at the new version, and cut the
+first permanent archive entry for it.
 
 The tag is also the only thing either workflow will build. Both resolve the
 highest version tag and compile that, so a tag for anything but the highest

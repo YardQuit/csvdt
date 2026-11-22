@@ -1,1 +1,1 @@
-Input CSV file to parse.
+Input CSV file to parse. Without it, standard input is read.

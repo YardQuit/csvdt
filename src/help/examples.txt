@@ -73,9 +73,9 @@ gains is empty rather than invented:
 |    1,0,3,4,-1,padded
 |    3,2,2,4,-2,padded
 
-'missing' is what the row lacked, not what was done about it:
-under plain '--flexible' the same rows are logged as 'needed'
-and nothing is padded at all.
+'delta' is how far the row was from the width, not what was
+done about it: under plain '--flexible' the same rows are logged
+as 'short' and nothing is padded at all.
 
 There is no in-place mode, and a redirection onto the input is
 refused rather than obeyed: the shell empties the file before

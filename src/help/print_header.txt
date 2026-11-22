@@ -1,2 +1,2 @@
-Prints the header with the CSV output.
-This can only be used combined with -H, --has-header option.
+Writes the header to the output. Only with -H/--has-header,
+which says the input has one.

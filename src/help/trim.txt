@@ -1,5 +1,4 @@
-The behavior of handling whitespace characters during CSV
-parsing.
+How whitespace around fields is handled when the CSV is read.
 
   none
       Preserves fields and headers.
