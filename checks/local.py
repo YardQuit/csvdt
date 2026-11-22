@@ -28,9 +28,9 @@ Held where the two databases agree, which is modern dates:
   caveat is the point of the window.  csvdt carries its own copy of the IANA
   data (the help says so, and says why) and a host carries another.  For
   recent decades they agree; before standard time they do not, and not
-  narrowly.  Measured here: chrono-tz 2025b has Europe/Amsterdam on +00:17:30
-  until 1892 and +00:00 after it, where this host's tzdata has +00:19:32
-  through 1937.  A differential run over those years would report twenty
+  narrowly.  Measured here once: the bundled copy has Europe/Amsterdam on
+  +00:17:30 until 1892 and +00:00 after it, where a host's tzdata built with
+  the backzone data had +00:19:32 through 1937.  A differential run over those years would report twenty
   minutes of divergence a hundred times over, and none of it would be a fault
   in csvdt.  So the comparison runs from FIRST_COMPARABLE_YEAR, and the older
   dates are still exercised: by the two properties above, which no database
@@ -40,8 +40,8 @@ Held unless the two releases differ:
 
   a clock reading that differs only because the host's tzdata and the copy
   inside csvdt are different releases.  A zone's rules change between
-  releases, including rules for dates still to come (this host's 2026f
-  disagrees with the bundled 2025b about America/Inuvik in 2031), and no
+  releases, including rules for dates still to come (tzdata 2026f disagrees
+  with 2025b about America/Inuvik in 2031), and no
   amount of care in csvdt can make it agree with a newer or older database.
   Where the two releases are known and differ, an offset the host disagrees
   with is reported as a difference between releases, naming both, and does
@@ -55,8 +55,7 @@ Reported rather than held:
   IANA data compiled into this binary rather than the machine's", and the run
   above cannot test that: inside the window the two agree, so a csvdt
   reading the host's files passes every line of it, and so would one that
-  swapped the named zone for `chrono::Local', which honours TZ and the host's
-  files.  Europe/Amsterdam in 1900 can tell them apart on this host, and the
+  swapped the named zone for the host's own zone file of that name.  Europe/Amsterdam in 1900 can tell them apart on this host, and the
   summary says which answered.  It can confirm the binary's own data and never
   quite the opposite: where both copies would refuse the instant, or both give
   the same offset at that one instant, the answer fits either story, whatever
@@ -214,11 +213,11 @@ def which_database(bad):
     machine's" is a promise about where an answer comes from, and the run
     above cannot test it: inside the comparison window the two databases
     agree, so a csvdt reading the host's data would pass every line of it.
-    A csvdt that replaced the named zone with `chrono::Local' (which honours
-    TZ and the host's files) would pass it.
+    A csvdt that replaced the named zone with the host's zone file of that
+    name would pass it.
 
     Where they disagree, the disagreement is the instrument.  An older host's
-    tzdata had Europe/Amsterdam on +00:19:32 in 1900; chrono-tz 2025b has it
+    tzdata had Europe/Amsterdam on +00:19:32 in 1900; the bundled copy has it
     on +00:00.  So csvdt writing the host's answer there is csvdt reading the
     host's database.
 

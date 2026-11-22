@@ -10,8 +10,65 @@ the Emacs one about whole records and the header, and the header, quote and
 delimiter option names and no others. It runs csvdt as a background job, so
 a long run leaves the editor free and `M-x stop-job` ends it.
 
+### Time zone database
+
+The bundled IANA database moves from tzdata 2025b to 2026f, so `-l/--local`
+answers differently for 49 zones at the moments listed here. Every other
+zone, and every other action, answers as before. `csvdt --version` names the
+release. A result produced with an earlier build is not wrong for that build:
+it followed the rules IANA had published then. To reproduce one, use the
+build that made it; to re-examine one, check its timestamps against this list.
+
+Past timestamps, where IANA corrected the historical record:
+
+- Brazil, 1965 and 1966: America/Araguaina, Bahia, Belem, Boa_Vista,
+  Campo_Grande, Cuiaba, Eirunepe, Fortaleza, Maceio, Manaus, Noronha,
+  Porto_Acre, Porto_Velho, Recife, Rio_Branco, Santarem and Sao_Paulo, and
+  Brazil/Acre, Brazil/DeNoronha, Brazil/East and Brazil/West. Daylight saving
+  ended a day later in 1965, on 1 April rather than 31 March, and an hour
+  later on 1 March 1966; those hours now read an hour ahead.
+- Ireland, 1925: Europe/Dublin and Eire. Summer time ended on 20 September
+  rather than 4 October, so the two weeks between read +00:00, not +01:00.
+- Colombia, 1992: America/Bogota reads -04:00 for one more day, 2 to 3 May.
+- Iran, 1979: Asia/Tehran and Iran read +04:30 for one day, 25 to 26 May,
+  where they read +03:30.
+- Baja California, 1953 and 1961 to 1975: America/Tijuana, America/Ensenada,
+  America/Santa_Isabel and Mexico/BajaNorte kept daylight saving in those
+  summers, -07:00 where they read -08:00.
+- Moldova, from 2022: Europe/Chisinau and Europe/Tiraspol change their clocks
+  at 01:00 UTC, as the rest of Europe does, rather than an hour earlier, so
+  the hour from 00:00 to 01:00 UTC on each day of change since March 2022
+  reads differently, and so will those to come.
+- EST5EDT, CST6CDT, MST7MDT and PST8PDT before 1967: they are no longer links
+  to America/New_York, Chicago, Denver and Los_Angeles but zones holding the
+  US rules alone, so they read standard time where those cities kept daylight
+  saving, and their fixed offset where the cities kept local mean time, which
+  was marked `parse_err`.
+
+Future timestamps, where the places themselves changed their rules:
+
+- Morocco: Africa/Casablanca and Africa/El_Aaiun keep +00:00 from 20
+  September 2026, where they read +01:00 outside Ramadan.
+- Alberta and the Northwest Territories: America/Edmonton, America/Inuvik,
+  America/Yellowknife and Canada/Mountain stay on -06:00 from 1 November 2026.
+- British Columbia: America/Vancouver and Canada/Pacific stay on -07:00 from
+  1 November 2026.
+- Manitoba: America/Winnipeg, America/Rainy_River and Canada/Central stay on
+  -05:00 from 1 November 2026.
+- Cuba: America/Havana and Cuba stay on -04:00 from 1 November 2026 to 14
+  March 2027.
+
+A name the database added, Factory, is now accepted as a zone.
+
 ### Changed
 
+- POSIX rules in `TZ` are read in full, on every platform. Rules this build
+  could not follow, transition times past 24:00 among them (Asia/Jerusalem's
+  own `IST-2IDT,M3.4.4/26,M10.5.0`), used to be refused; they now convert.
+  Rules that will not parse are refused, with the reason. On Windows, rules
+  were ignored for the system's zone before.
+- A `TZ` path naming a file that holds no zone is refused. It used to be
+  passed over in silence for the system's own zone.
 - `-` as FILE reads standard input, as leaving FILE out does. A file named
   `-` is given as `./-`.
 - Year 0000 is outside the calendar for every action: `-s` and `-d` now write
@@ -48,8 +105,12 @@ a long run leaves the editor free and `M-x stop-job` ends it.
 
 ### Building
 
+- Dates, times and zones come from jiff and the database jiff-tzdb bundles,
+  in place of chrono and chrono-tz, which are no longer maintained
+  (RUSTSEC-2026-0543, RUSTSEC-2026-0555); chrono-tz's database stopped at
+  tzdata 2025b. Reading and writing timestamps is otherwise unchanged.
 - `Cargo.lock` is committed and every build uses `--locked`. The monthly build
-  updates only chrono-tz, which carries the time zone database, and refuses to
+  updates only jiff-tzdb, which carries the time zone database, and refuses to
   publish if any other crate moved. `cargo audit` runs on every change to the
   lock and before each monthly build; `.github/audit-ignore` lists the
   advisories that do not apply, each with its reason.

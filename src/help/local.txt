@@ -24,11 +24,13 @@ names the bundled release, since a zone newer than this build is
 a different problem from a typo.
 
 A TZ naming a zone (e.g. TZ=America/Chicago) is honoured the
-same way on every platform. A TZ holding POSIX rules instead of
-a name (e.g. TZ=EST5EDT,M3.2.0,M11.1.0) is only honoured on
-Unix; on Windows the system's configured zone is used instead.
-Name the zone, or use -o/--offset, if you need the same answer
-everywhere.
+same way on every platform, and so is a TZ holding POSIX rules
+instead of a name (e.g. TZ=EST5EDT,M3.2.0,M11.1.0). Rules that
+will not parse are refused, as an unknown name is. On Unix, a
+TZ holding the path of a zone file (e.g.
+TZ=:/usr/share/zoneinfo/Europe/Oslo) is read from that file, and
+a file that holds no zone is refused; on Windows the system's
+configured zone is used instead.
 
 A zone whose offset at that moment is not a whole number of
 minutes -- local mean time, which every zone used before it

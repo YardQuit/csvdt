@@ -53,7 +53,7 @@ file name, so without it the release would collect a copy per Fedora release.
 `rpm-release` is the newest version tag. It is rebuilt when a version is
 tagged, and again by the monthly build, because the tag does not move but
 what a build of it contains does. A new time zone database arrives inside
-`chrono-tz`, and a new Fedora changes the dist tag, so an RPM built once at
+`jiff-tzdb`, and a new Fedora changes the dist tag, so an RPM built once at
 release time would go on serving the rules and the distribution of the month
 it was cut.
 
@@ -90,7 +90,7 @@ replaced, and the version's own copy is the release-day build rather than
 whichever monthly rebuild was installed at the time.
 
 So every published build is also attached to an archive release named for what
-it is: `1.0.0-2026.09.abc1234-tzdata2025b`, the version, the month and commit
+it is: `1.0.0-2026.09.abc1234-tzdata2026f`, the version, the month and commit
 it was built from, and the time zone database it carries. That name is read out
 of `RPM-BUILD-INFO`, which records what the installed binary actually answered,
 rather than assembled from the workflow's own variables: every part of it is
@@ -98,10 +98,10 @@ then a fact about the packages being archived.
 
 The monthly build writes the same entry for the binaries, so one entry normally
 holds both. Normally, and not always: the packages are compiled inside Fedora
-from their own update of `chrono-tz` in the committed lock, and can end up on
+from their own update of `jiff-tzdb` in the committed lock, and can end up on
 a different release from the musl binaries built the same night. The tag is derived from each build
-separately for exactly that reason: adopting a name that says `tzdata2025b` for
-a package carrying `2025a` is the one confusion the naming exists to prevent.
+separately for exactly that reason: adopting a name that says `tzdata2026f` for
+a package carrying `2026e` is the one confusion the naming exists to prevent.
 When the two disagree the month has two entries, which is precisely the case
 worth being able to see.
 
@@ -171,8 +171,9 @@ Fedora build roots have no network, so the crates are vendored first:
 
 ```bash
 # From a source tree at the version being packaged. --locked vendors the
-# committed Cargo.lock; `cargo update -p chrono-tz` first, if the package
-# should carry the newest time zone database instead of the version's own.
+# committed Cargo.lock; `cargo update -p jiff-tzdb` first, if the package
+# should carry the newest time zone database instead of the version's own,
+# with CSVDT_TZDATA_MOVED set as %check sets it.
 cargo vendor --locked
 tar czf ~/rpmbuild/SOURCES/csvdt-1.0.0-vendor.tar.gz vendor/
 spectool -g -R packaging/rpm/csvdt.spec     # fetches Source0
@@ -252,7 +253,7 @@ test result: ok. 251 passed; 0 failed; 1 ignored          # the spec's %check
 CSVDT(1)              General Commands Manual              CSVDT(1)
 Loading /usr/share/emacs/site-lisp/site-start.d/csvdt-init.el (source)...
 front end resolves csvdt to: /usr/sbin/csvdt
-and gets: csvdt 1.0.0+2026.08.<commit> (IANA tzdata 2025b)
+and gets: csvdt 1.0.0+2026.08.<commit> (IANA tzdata 2026f)
 ```
 
 `/usr/sbin/csvdt` is `%{_bindir}/csvdt`: Fedora merged `sbin` into `bin`, and

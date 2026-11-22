@@ -616,7 +616,7 @@ fn an_unclosed_quote_swallows_the_rest_of_the_file_under_flexible() {
 
 #[test]
 fn a_conversion_that_leaves_rfc3339s_year_range_is_marked_not_written() {
-    // RFC3339's date-fullyear is four digits. chrono reaches much further and
+    // RFC3339's date-fullyear is four digits. Date libraries reach further and
     // falls back to ISO 8601's expanded form (+10000-01-01, -0001-12-31)
     // which is a different format wearing the same shape, cannot be read back,
     // and gave no sign of the boundary it had crossed. The guard for this
@@ -703,8 +703,8 @@ fn split_keeps_sub_second_precision_like_every_other_conversion() {
     // The time column was formatted with a hard-coded %H:%M:%S, so a fraction
     // the source carried was dropped without a word. Nothing else here does
     // that: -d keeps it unless --round-seconds asks otherwise, and -u/-l/-o
-    // write back what came in. The rendering matches theirs (chrono's 3, 6 or
-    // 9 digits) so a split column and a -u column agree about the same
+    // write back what came in. The rendering matches theirs (3, 6 or 9
+    // digits) so a split column and a -u column agree about the same
     // instant.
     for (input, expected) in [
         ("2024-01-15T10:30:00Z", "10:30:00 +00:00"),
@@ -750,10 +750,10 @@ fn rfc3339_non_numeric_field_is_a_parse_error_marker() {
 }
 
 #[test]
-fn rfc3339_epoch_outside_chrono_range_is_a_parse_error_marker() {
-    // An i64 that parses fine but is out of chrono's representable timestamp
+fn rfc3339_epoch_outside_the_representable_range_is_a_parse_error_marker() {
+    // An i64 that parses fine but is out of any representable timestamp
     // range (e.g. i64::MAX) must not make
-    // `from_timestamp` return None and silently pass the row through
+    // the conversion give nothing and silently pass the row through
     // unmodified, with no value written and no error marker. It must be
     // treated the same as any other unparseable timestamp.
     csvdt()
@@ -2263,7 +2263,7 @@ fn there_is_no_year_zero_to_convert_into() {
 fn local_marks_a_zone_offset_that_is_not_whole_minutes() {
     // RFC3339 writes an offset as +HH:MM, with nowhere to put a seconds part.
     // A zone's local mean time (what every zone used before it adopted
-    // standard time) is rarely a whole minute, and chrono renders one by
+    // standard time) is rarely a whole minute, and a date library renders one by
     // rounding the offset while the clock time keeps its seconds. The result
     // named a different instant from the input: Africa/Monrovia's -00:44:30
     // turned 1971-06-01T12:00:00Z into 1971-06-01T11:15:30-00:45, which reads
@@ -4055,7 +4055,7 @@ fn offset_accepts_the_real_world_extremes() {
 
 #[test]
 fn offset_rejects_a_target_no_real_place_uses() {
-    // chrono would accept anything up to +/-23:59, so without a range check a
+    // A timestamp may carry anything up to +/-23:59, so without a range check a
     // typo like +15:00 for +05:00 would be honoured and produce a plausible
     // timestamp carrying an impossible offset.
     for target in ["+14:01", "+15:00", "+23:59", "-12:01", "-13:00", "+1500"] {
@@ -5977,7 +5977,7 @@ fn empty_input_is_still_empty_under_every_filling_mode() {
 #[test]
 fn rfc3339_refuses_epochs_outside_the_formats_own_range() {
     // RFC3339's date-fullyear is four digits, so 9999 is the last year there
-    // is. chrono reaches far beyond and falls back to ISO 8601's expanded form
+    // is. Date libraries reach far beyond and fall back to ISO 8601's expanded form
     // outside that, "+57534-06-16T00:00:00+00:00", which is a different
     // format wearing the same shape: csvdt cannot read it back, and nor can
     // anything else expecting RFC3339.
@@ -7954,9 +7954,9 @@ fn a_span_across_a_leap_second_is_elapsed_civil_time_not_si_seconds() {
 
 #[test]
 fn duration_across_a_leap_second_is_never_negative() {
-    // chrono orders timestamps by their clock fields but accounts the leap
-    // second's extra time when subtracting, so the low-to-high difference
-    // could still come out negative across 23:59:60, and the sign of a
+    // The date library csvdt used ordered timestamps by their clock fields but
+    // accounted the leap second's extra time when subtracting, so the
+    // low-to-high difference could still come out negative across 23:59:60, and the sign of a
     // sub-second delta landed inside the fraction as a literal '-',
     // making PT0.-5S. Not a duration at all.
     csvdt()
@@ -7991,8 +7991,8 @@ fn duration_across_a_leap_second_rounds_away_from_zero() {
 
 #[test]
 fn a_sixty_second_field_away_from_a_leap_second_is_marked_not_folded() {
-    // chrono reads :60 on any minute at all and folds it onto the second
-    // that follows, so this value and 14:01:00Z arrived as one instant: no
+    // The date library csvdt used read :60 on any minute at all and folded it
+    // onto the second that follows, so this value and 14:01:00Z arrived as one instant: no
     // conversion could tell them apart, and -d between them was PT0S. A
     // formatter that rounds 59.5 up without carrying writes exactly this,
     // so a damaged value was being answered rather than marked, and
@@ -8226,7 +8226,7 @@ fn a_zone_name_in_the_wrong_case_is_refused() {
 
 #[test]
 fn tenth_fractional_digit_is_refused_rather_than_truncated() {
-    // chrono reads at most nine fractional digits and silently drops the
+    // Date libraries read at most nine fractional digits and silently drop the
     // rest, against the promise that what the source had is what comes
     // out. A tenth digit lands in parse_err; nine round-trip.
     csvdt()
@@ -8478,21 +8478,25 @@ fn an_empty_file_argument_is_refused_rather_than_read_as_stdin() {
 
 #[test]
 fn known_limits_no_longer_clear_the_linked_aliases() {
-    // CET, MET and EST5EDT are links exactly as EET and WET are, so they
-    // carry the same historical gap: EST5EDT applies today's US daylight
-    // saving to years that had none, so the help must not name them as the
-    // safe ones.
-    // Asked of the words rather than the lines: 'EET, WET, CET, MET, EST5EDT'
-    // can sit on one line or have a break put inside it by a rewrap, and the
-    // list is no less complete for that. A Windows checkout gives the include_str!'d
-    // help CRLF endings, which this collapses too.
+    // CET and MET are links exactly as EET and WET are, so the help must not
+    // set them apart as the safe ones. EST5EDT and its three neighbours are
+    // not links in tzdata 2026f but zones holding the US rules alone, which
+    // apply today's daylight saving to years that had none, and the help
+    // must say which names are which.
+    // Asked of the words rather than the lines: a list can sit on one line or
+    // have a break put inside it by a rewrap, and is no less complete for
+    // that. A Windows checkout gives the include_str!'d help CRLF endings,
+    // which this collapses too.
     let help = help_words();
     assert!(
         !help.contains("are correct, as are CET, MET and"),
         "KNOWN LIMITS still clears the linked aliases as correct");
     assert!(
-        help.contains("EET, WET, CET, MET, EST5EDT"),
-        "KNOWN LIMITS should name all five gapped aliases together");
+        help.contains("EET, WET, CET and MET are links"),
+        "KNOWN LIMITS should name the four linked aliases together");
+    assert!(
+        help.contains("EST5EDT, CST6CDT, MST7MDT and PST8PDT are not"),
+        "KNOWN LIMITS should name the four rule-only zones together");
 }
 
 // ---- the manual page's prose and the help's invariants ------------------

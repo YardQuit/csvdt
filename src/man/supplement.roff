@@ -30,11 +30,11 @@ The zone
 .B \-l/\-\-local
 converts into. Unset, the system's configured zone is used.
 .IP
-A value holding POSIX rules rather than a zone name is honoured only on
-Unix, as the option says. A
+A value holding POSIX rules rather than a zone name is honoured on every
+platform; the path of a zone file only on Unix, as the option says. A
 name the database compiled into this build does not know is refused rather
-than answered, since falling through to UTC would report a plausible
-timestamp for a zone nobody asked for.
+than answered, and so are rules that will not parse, since falling through
+to UTC would report a plausible timestamp for a zone nobody asked for.
 .IP
 No other conversion reads it.
 .BR \-u ,

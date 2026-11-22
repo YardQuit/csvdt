@@ -77,24 +77,26 @@ chronologically by construction. Build a timeline with those,
 and use -i/--insert to keep an -l column beside it for reading.
 A TZ naming a zone this binary does not know is refused, rather
 than quietly answered in UTC. The deprecated single-word
-names -- EET, WET, CET, MET, EST5EDT -- are links in the release
-bundled here, each to a geographic zone, and carry the whole of
-that zone's history.
+names EET, WET, CET and MET are links in the release bundled
+here, each to a geographic zone, and carry the whole of that
+zone's history: EET answers exactly as Europe/Athens does, WET
+as Europe/Lisbon, CET and MET as Europe/Brussels, on every day
+from 1850 to now.
 
-EET answers exactly as Europe/Athens does, WET as Europe/Lisbon,
-CET and MET as Europe/Brussels, EST5EDT as America/New_York, on
-every day from 1850 to now. They did not always. IANA once
-defined them as zones holding a rule and no history at all, and
-then they answered for dates before those rules began as though
-they had always applied -- EET reading +03:00 through a 1950
-summer where Athens read +02:00.
+EST5EDT, CST6CDT, MST7MDT and PST8PDT are not. In the release
+bundled here they are zones holding the US rules and no history
+of their own, so for dates before those rules they answer as
+though the rules had always applied: EST5EDT reads -05:00
+through the summer of 1950, where America/New_York kept
+daylight saving and read -04:00. IANA has defined these names
+both ways over the years.
 
---version says which release is built in; a build older than the
-change behaves the older way, which is reason enough to name the
-geographic zone in work that has to be reproduced. It is also
-the clearer thing to write down. IANA treats its pre-1970 rules
-as best effort, so -l on timestamps that old is approximate by
-design rather than by fault.
+--version says which release is built in, and a build carrying
+another release may answer the other way, which is reason enough
+to name the geographic zone in work that has to be reproduced.
+It is also the clearer thing to write down. IANA treats its
+pre-1970 rules as best effort, so -l on timestamps that old is
+approximate by design rather than by fault.
 
 -l WRITES parse_err WHERE THE ZONE'S OFFSET IS NOT WHOLE MINUTES
 RFC3339 writes an offset as +HH:MM, with nowhere to put a
@@ -113,8 +115,9 @@ clock time keeps its seconds, so 1971-06-01T12:00:00Z became
 The timestamp is still in its own column beside the marker. -u
 and -o are unaffected -- theirs are whole-minute offsets by
 construction -- and so is -s/--split, which reads the offset the
-record already carried. A TZ holding POSIX rules rather than a
-zone name is honoured only on Unix, as -l/--local says.
+record already carried. A TZ holding POSIX rules can declare
+such an offset too, UTC+3:30:15, and its values are marked the
+same way.
 
 -o/--offset ACCEPTS ONLY REAL OFFSETS
 -12:00 through +14:00. A typo beyond that range is refused

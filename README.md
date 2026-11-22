@@ -164,10 +164,10 @@ page is generated rather than kept by hand. One text, three depths.
 
 ```bash
 $ csvdt --version
-csvdt 1.0.0 (IANA tzdata 2025b)                       # built from source
+csvdt 1.0.0 (IANA tzdata 2026f)                       # built from source
 
 $ csvdt --version
-csvdt 1.0.0+2026.09.abc1234 (IANA tzdata 2025b)       # a published build
+csvdt 1.0.0+2026.09.abc1234 (IANA tzdata 2026f)       # a published build
 ```
 
 Reading that string:
@@ -176,14 +176,14 @@ Reading that string:
 | --- | --- |
 | `1.0.0` | the program version |
 | `+2026.09.abc1234` | build metadata: the year and month it was built, and the commit it was built from. Only a published build carries it; one built from source has nothing to identify but itself |
-| `IANA tzdata 2025b` | the time zone database compiled into this binary, which determines every `-l/--local` result |
+| `IANA tzdata 2026f` | the time zone database compiled into this binary, which determines every `-l/--local` result |
 
 The `+` part is semver build metadata, not a release. A scheduled rebuild
 changes only the bundled time zone database or the compiler, never the program,
 so the version stays put and the metadata distinguishes the build. Together
 with the database name it is also the archive tag that build was kept under:
-`1.0.0+2026.09.abc1234` with `tzdata 2025b` is the release
-`1.0.0-2026.09.abc1234-tzdata2025b`.
+`1.0.0+2026.09.abc1234` with `tzdata 2026f` is the release
+`1.0.0-2026.09.abc1234-tzdata2026f`.
 
 ## Am I up to date?
 
@@ -217,8 +217,9 @@ packages: what an analyst installs to produce a result should be a release.
 The newest release is rebuilt on the first of each month, because `-l/--local`
 resolves zones against the IANA database compiled into the binary and so only
 knows the rules that existed when it was made. The tag does not move, but what
-a build of it contains does: `Cargo.lock` is not committed, so each rebuild
-resolves the current `chrono-tz` and with it the current zone rules. A rebuild
+a build of it contains does: each rebuild takes the committed `Cargo.lock` and
+moves `jiff-tzdb`, which carries the zone rules, to its newest release, and
+nothing else. A rebuild
 is published only when the dependencies or the compiler actually changed, so a
 month in which nothing moved has no release of its own.
 
@@ -230,7 +231,7 @@ kinds of release exist so that something does:
   replaced. This is the release GitHub designates "Latest".
 - **`release`** and **`rpm-release`**: the current build of the newest
   version, replaced in place. Use these for downloads and scripts.
-- **`1.0.0-2026.09.abc1234-tzdata2025b`**: every distinct build, kept
+- **`1.0.0-2026.09.abc1234-tzdata2026f`**: every distinct build, kept
   permanently and never replaced: the binaries for all four platforms *and*
   the RPM packages from the same build. The tag names the version, the commit
   and the time zone database, so it can be quoted in a report and read back
@@ -489,16 +490,16 @@ reproducible from the file by itself, and use `-l` for reading. `--help` ends
 with a KNOWN LIMITS section setting out exactly what `-l` depends on, including
 a known gap in the bundled aliases.
 
-Naming a zone (`TZ=Asia/Tokyo`) behaves identically on every platform. A `TZ`
-holding POSIX rules instead of a name (`TZ=EST5EDT,M3.2.0,M11.1.0`) is only
-honoured on Unix; on Windows the system zone is used instead.
+Naming a zone (`TZ=Asia/Tokyo`) behaves identically on every platform, and so
+does a `TZ` holding POSIX rules instead of a name (`TZ=EST5EDT,M3.2.0,M11.1.0`).
+The path form below is Unix's; on Windows the system zone is used instead.
 
 A `TZ` naming a zone this binary doesn't know is **refused**:
 
 ```
 $ TZ=Europe/Stockholmm csvdt -H -p -l0 data.csv
 csvdt: TZ is set to 'Europe/Stockholmm', which is not a zone in the IANA
-database built into this binary (tzdata 2025b). '--local' would otherwise
+database built into this binary (tzdata 2026f). '--local' would otherwise
 have reported UTC as though it were that zone. ...
 ```
 
@@ -509,11 +510,13 @@ because a zone *newer* than the build is a different problem from a
 misspelling, with a different fix.
 
 Forms that legitimately aren't zone names still work: POSIX rules, the
-bracketed `<+04>-4` form, and glibc's `TZ=:/usr/share/zoneinfo/...` path. Those
-two are checked rather than trusted, for the same reason: a rule this build
-cannot read (a transition time past 24:00, which zones really do publish, as
-Asia/Jerusalem's own `IST-2IDT,M3.4.4/26,M10.5.0` does) and a path naming no
-file would both become UTC without a word if they were not checked.
+bracketed `<+04>-4` form, and glibc's `TZ=:/usr/share/zoneinfo/...` path, which
+is read from the file it names. Rules are read in full, transition times past
+24:00 included, which zones really do publish, as Asia/Jerusalem's own
+`IST-2IDT,M3.4.4/26,M10.5.0` does. Both forms are checked rather than trusted,
+for the same reason: rules that will not parse, a path naming no file and a
+file holding no zone are refused, where they would otherwise become UTC
+without a word.
 
 ## Canonical output
 
