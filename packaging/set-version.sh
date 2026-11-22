@@ -7,7 +7,7 @@
 # on the leg that runs the Emacs suite or builds the RPM; the README lines
 # are caught by nobody and simply go on naming the last release.
 #
-#   ./set-version.sh 1.3.0
+#   packaging/set-version.sh 1.3.0
 #
 # What it will not touch, on purpose:
 #
@@ -18,7 +18,7 @@
 #   the spec's %changelog entry for the new version. That is a sentence
 #   about what changed, which nothing here knows. It is reported as the one
 #   thing left to do by hand.
-set -uo pipefail
+set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
@@ -27,10 +27,11 @@ if [ -z "$new" ]; then
     echo "usage: packaging/set-version.sh <version>   e.g. 1.3.0" >&2
     exit 2
 fi
-# Not a full semver parse: enough to catch a tag name, a path, or a bare
-# word arriving where a version goes, which is the mistake worth stopping.
-if ! printf '%s' "$new" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
-    echo "'$new' does not look like a version (expected 1.3.0, or 1.3.0-rc1)" >&2
+# Three numbers and nothing else, which is what a release tag, the RPM spec's
+# Version and the workflows' tag filter all accept: a pre-release suffix would
+# be refused by the spec and never start a build.
+if ! printf '%s' "$new" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "'$new' does not look like a version (expected 1.3.0)" >&2
     exit 2
 fi
 
@@ -45,10 +46,13 @@ if [ "$old" = "$new" ]; then
 fi
 echo "== $old -> $new"
 
+# The old version as a pattern: its dots are literal, not "any character".
+old_re=$(printf '%s' "$old" | sed 's/[.]/\\./g')
+
 # The three that are checked. Each is matched by its own field rather than
 # by the version string, so a line that merely mentions the old version
 # cannot be hit by accident.
-sed -i "s/^version = \"$old\"/version = \"$new\"/" Cargo.toml
+sed -i "s/^version = \"$old_re\"/version = \"$new\"/" Cargo.toml
 sed -i "s/^;; Version: .*/;; Version: $new/" emacs/csvdt.el
 
 # The spec, above its %changelog only. Release goes back to 1: the number
@@ -57,7 +61,7 @@ changelog_at=$(grep -n '^%changelog' packaging/rpm/csvdt.spec | cut -d: -f1)
 sed -i "1,$((changelog_at - 1)){
     s/^Version:\( *\).*/Version:\1$new/
     s/^Release:\( *\)[0-9]*/Release:\11/
-    s/csvdt-$old-/csvdt-$new-/g
+    s/csvdt-$old_re-/csvdt-$new-/g
 }" packaging/rpm/csvdt.spec
 
 # The prose. Most mentions in these two are an example naming the current
@@ -66,8 +70,8 @@ sed -i "1,$((changelog_at - 1)){
 # sentence about what went wrong at an earlier release names that release,
 # and rewriting it moves the blame onto this one. Nothing here can tell the
 # two apart, so the lines are printed below and read by a person.
-rewrote=$(grep -Fn "$old" README.md packaging/rpm/README.md)
-sed -i "s/$old/$new/g" README.md packaging/rpm/README.md
+rewrote=$(grep -Fn "$old" README.md packaging/rpm/README.md || true)
+sed -i "s/$old_re/$new/g" README.md packaging/rpm/README.md
 
 # And the changelog's heading, which is the one line in that file that is
 # about the release being made rather than about one already made.
@@ -78,7 +82,7 @@ echo "== where it now says $new"
 grep -n "^version = \"$new\"" Cargo.toml | sed 's/^/   Cargo.toml:/'
 grep -n "^;; Version: $new" emacs/csvdt.el | sed 's/^/   emacs\/csvdt.el:/'
 grep -n "^Version: *$new" packaging/rpm/csvdt.spec | sed 's/^/   packaging\/rpm\/csvdt.spec:/'
-grep -Fc "$new" README.md packaging/rpm/README.md | sed 's/^/   mentions in /'
+{ grep -Fc "$new" README.md packaging/rpm/README.md || true; } | sed 's/^/   mentions in /'
 
 echo
 echo "== the prose lines this rewrote, as they read before"
