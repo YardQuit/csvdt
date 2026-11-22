@@ -657,33 +657,10 @@ const TRAILING_HEADINGS: [&str; 4] =
 /// The command line csvdt accepts, with the help for each option. The manual
 /// page and --list-options are rendered from it too, so all three describe
 /// this build.
+///
+/// --help lists the options in the order they are added here, one group at
+/// a time.
 fn build_command() -> clap::Command {
-    // The bundled IANA database version is part of the tool's identity: it
-    // determines every -l/--local result, so output can be tied back to a
-    // known ruleset.
-    //
-    // Published builds also carry semver build metadata identifying the exact
-    // build, e.g. "1.0.1-pre+2026.07.a1b2c3d", set by the release workflow
-    // through CSVDT_BUILD_METADATA. It is metadata rather than a version bump
-    // because a scheduled rebuild usually changes only the time zone database
-    // or the compiler, not this program; semver ignores anything after '+'
-    // when comparing versions, so it distinguishes builds without claiming a
-    // release that didn't happen. A local build simply has none.
-    // Leaked so clap can hold a &'static str; it is a single allocation made
-    // once at startup and lives for the whole run either way.
-    let version: &'static str = Box::leak(
-        format!(
-            "{}{} (IANA tzdata {})",
-            crate_version!(),
-            match option_env!("CSVDT_BUILD_METADATA") {
-                Some(metadata) => format!("+{}", metadata),
-                None => String::new(),
-            },
-            jiff_tzdb::VERSION
-        )
-        .into_boxed_str(),
-    );
-
     clap::Command::new("csvdt")
         // -h introduces the program; --help goes on to say why a duration is
         // never reported in months, which is reference material a reader
@@ -691,7 +668,7 @@ fn build_command() -> clap::Command {
         .about(first_paragraph(ABOUT))
         .long_about(ABOUT)
         .author("Michael A Jones <yardquit@pm.me>")
-        .version(version)
+        .version(version())
         .help_template(TEMPLATE)
         // The long form is folded by hand at 64 columns and printed at an
         // indent of ten, so it has never been wider than 74. The short form
@@ -703,358 +680,12 @@ fn build_command() -> clap::Command {
         .max_term_width(80)
         .after_help(MORE_HELP)
         .after_long_help(TRAILING_LONG)
-        .arg(
-            clap::Arg::new("input_file")
-                .action(clap::ArgAction::Set)
-                // A path rather than text: a file name need not be UTF-8.
-                // Not clap's own PathBuf parser, which refuses an empty
-                // value with a message of its own before the clearer one
-                // below can be given.
-                .value_parser(path_value())
-                .value_name("FILE")
-                .help(help_summary(FILE))
-                .long_help(FILE)
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("has_header")
-                .action(clap::ArgAction::SetTrue)
-                .value_name("has-header")
-                .help(help_summary(HAS_HEADER))
-                .long_help(HAS_HEADER)
-                .short('H')
-                .long("has-header")
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("print_header")
-                .action(clap::ArgAction::SetTrue)
-                .value_name("print-header")
-                .help(help_summary(PRINT_HEADER))
-                .long_help(PRINT_HEADER)
-                .short('p')
-                .long("print-header")
-                .required(false)
-                .requires("has_header")
-        )
-
-        .arg(
-            clap::Arg::new("flexible")
-                .action(clap::ArgAction::Set)
-                .value_name("keep|fix|widest")
-                .help(help_summary(FLEXIBLE))
-                .long_help(FLEXIBLE)
-                .short('f')
-                .long("flexible")
-                .num_args(0..=1)
-                // Attached form only (-f=fix, --flexible=fix). A separated
-                // value would let "csvdt -f data.csv" read the path as the
-                // mode, the same trap -d avoids.
-                .require_equals(true)
-                .default_missing_value("keep")
-                .ignore_case(true)
-                .value_parser(abbreviated_values(&FLEXIBLE_MODES))
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("position")
-                .action(clap::ArgAction::Set)
-                .value_name("column,position")
-                .help(help_summary(POSITION))
-                .long_help(POSITION)
-                .short('i')
-                .long("insert")
-                .num_args(1)
-                .allow_hyphen_values(true)
-                .required(false)
-                .requires("actions_req"),
-        )
-        // The actions, of which a run takes one: clap refuses any two
-        // together, with the same message it gives for any other conflict.
-        .group(clap::ArgGroup::new("action")
-             .args([
-                 "action_split",
-                 "action_to_rfc3339",
-                 "action_to_utc",
-                 "action_to_local",
-                 "action_duration",
-                 "action_offset",
-                 "action_remove",
-                 "action_arrange",
-             ])
-             .multiple(false),
-        )
-        // The actions that write a converted column, which -i places.
-        .group(clap::ArgGroup::new("actions_req")
-             .args([
-                 "action_split",
-                 "action_to_rfc3339",
-                 "action_to_utc",
-                 "action_to_local",
-                 "action_duration",
-                 "action_offset",
-             ])
-             .multiple(true),
-        )
-
-        .arg(
-            clap::Arg::new("action_to_rfc3339")
-                .action(clap::ArgAction::Set)
-                .value_name("num")
-                .help(help_summary(RFC3339))
-                .long_help(RFC3339)
-                .short('r')
-                .long("rfc3339")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("action_to_utc")
-                .action(clap::ArgAction::Set)
-                .value_name("num")
-                .help(help_summary(UTC))
-                .long_help(UTC)
-                .short('u')
-                .long("utc")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("action_to_local")
-                .action(clap::ArgAction::Set)
-                .value_name("num")
-                .help(help_summary(LOCAL))
-                .long_help(LOCAL)
-                .short('l')
-                .long("local")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("action_offset")
-                .action(clap::ArgAction::Set)
-                .value_name("column,offset")
-                .help(help_summary(OFFSET))
-                .long_help(OFFSET)
-                .short('o')
-                .long("offset")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("action_split")
-                .action(clap::ArgAction::Set)
-                .value_name("num")
-                .help(help_summary(SPLIT))
-                .long_help(SPLIT)
-                .short('s')
-                .long("split")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("action_duration")
-                .action(clap::ArgAction::Set)
-                .value_name("num[,num]")
-                .help(help_summary(DURATION))
-                .long_help(DURATION)
-                .short('d')
-                .long("duration")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("round_seconds")
-                .action(clap::ArgAction::SetTrue)
-                .help(help_summary(ROUND_SECONDS))
-                .long_help(ROUND_SECONDS)
-                .long("round-seconds")
-                .required(false)
-                .requires("action_duration")
-        )
-
-        .arg(
-            clap::Arg::new("action_remove")
-                .action(clap::ArgAction::Set)
-                .value_name("num[,num...]")
-                .help(help_summary(REMOVE))
-                .long_help(REMOVE)
-                .long("remove")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("action_arrange")
-                .action(clap::ArgAction::Set)
-                .value_name("num[,num...]")
-                .help(help_summary(ARRANGE))
-                .long_help(ARRANGE)
-                .short('a')
-                .long("arrange")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("trim")
-                .action(clap::ArgAction::Set)
-                .value_name("trim")
-                .help(help_summary(TRIM))
-                // Trimmed, because clap writes "\n\n[default: ...]" after a
-                // long help when the option has one, and the corpus file
-                // ends in a newline of its own, so the reader saw two blank
-                // lines where every other option shows none. Only --trim and
-                // --quote carry a clap default; the three options whose
-                // default is a behaviour rather than a value say so in their
-                // own text. An option that gains a default wants this too.
-                .long_help(TRIM.trim_end())
-                .long("trim")
-                .num_args(1)
-                .required(false)
-                .ignore_case(true)
-                .default_value("none")
-                .value_parser(abbreviated_values(&TRIMS)),
-        )
-
-        .arg(
-            clap::Arg::new("read_delimiter")
-                .action(clap::ArgAction::Set)
-                .value_name("char")
-                .help(help_summary(READ_DELIMITER))
-                .long_help(READ_DELIMITER)
-                .long("read-delimiter")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("single_quotes")
-                .action(clap::ArgAction::SetTrue)
-                .value_name("single-quote")
-                .help(help_summary(SINGLE_QUOTES))
-                .long_help(SINGLE_QUOTES)
-                .long("single-quote")
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("comment")
-                .action(clap::ArgAction::Set)
-                .value_name("char")
-                .help(help_summary(COMMENT))
-                .long_help(COMMENT)
-                .long("comment")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("fill_log")
-                .action(clap::ArgAction::Set)
-                .value_parser(path_value())
-                .value_name("file")
-                .help(help_summary(FILL_LOG))
-                .long_help(FILL_LOG)
-                .long("fill-log")
-                .num_args(1)
-                // Refused without a filling mode rather than writing a log of
-                // nothing: an empty log reads as a clean file, which is the
-                // one conclusion it must never invite.
-                .requires("flexible")
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("print_delimiter")
-                .action(clap::ArgAction::Set)
-                .value_name("char")
-                .help(help_summary(PRINT_DELIMITER))
-                .long_help(PRINT_DELIMITER)
-                .long("print-delimiter")
-                .num_args(1)
-                .required(false)
-        )
-
-        .arg(
-            clap::Arg::new("quotes")
-                .action(clap::ArgAction::Set)
-                .value_name("quoting")
-                .help(help_summary(QUOTES))
-                // Trimmed for the reason given at --trim above.
-                .long_help(QUOTES.trim_end())
-                .long("quote")
-                .num_args(1)
-                .required(false)
-                .ignore_case(true)
-                .default_value("necessary")
-                .value_parser(abbreviated_values(&QUOTINGS))
-        )
-
-        .arg(
-            clap::Arg::new("peek")
-                .action(clap::ArgAction::SetTrue)
-                .help(help_summary(PEEK))
-                .long_help(PEEK)
-                .long("peek")
-                .required(false)
-                // Not exclusive, unlike --list-options and --generate-man:
-                // this one reads the input, and has to read it the way a run
-                // would or the columns it numbers are not the ones a run
-                // sees. So the options that decide what a record *is* are
-                // welcome, and the ones that write are refused, there is
-                // no CSV here for them to act on.
-                // The actions are named one by one rather than as their
-                // group, so clap names the one given in its message rather
-                // than listing all eight.
-                .conflicts_with_all([
-                    "action_to_rfc3339",
-                    "action_to_utc",
-                    "action_to_local",
-                    "action_offset",
-                    "action_split",
-                    "action_duration",
-                    "action_remove",
-                    "action_arrange",
-                    "position",
-                    "round_seconds",
-                    "flexible",
-                    "fill_log",
-                    "quotes",
-                    "print_delimiter",
-                ])
-        )
-        .arg(
-            clap::Arg::new("list_options")
-                .action(clap::ArgAction::SetTrue)
-                .help(help_summary(LIST_OPTIONS))
-                .long_help(LIST_OPTIONS)
-                .long("list-options")
-                .required(false)
-                // A question about the program rather than part of a run, so
-                // like --help and --version it stands alone.
-                .exclusive(true)
-        )
-        .arg(
-            clap::Arg::new("generate_man")
-                .action(clap::ArgAction::SetTrue)
-                .help(help_summary(GENERATE_MAN))
-                .long_help(GENERATE_MAN)
-                .long("generate-man")
-                .required(false)
-                // Another question about the program rather than a run.
-                .exclusive(true)
-        )
+        .args(input_args())
+        .args(conversion_args())
+        .args(column_args())
+        .groups(action_groups())
+        .args(format_args())
+        .args(question_args())
         // clap writes '[default: none] [possible values: ...]' onto the end
         // of the line the help text ends on, which puts three summaries back
         // over the column everything else was folded to, one of them at
@@ -1073,6 +704,359 @@ fn build_command() -> clap::Command {
                 _ => arg,
             }
         })
+}
+
+/// The version --version prints: this build's version, any build metadata
+/// the release workflow gave it, and the release of the bundled IANA time
+/// zone database.
+fn version() -> &'static str {
+    // The bundled IANA database version is part of the tool's identity: it
+    // determines every -l/--local result, so output can be tied back to a
+    // known ruleset.
+    //
+    // Published builds also carry semver build metadata identifying the exact
+    // build, e.g. "1.0.1-pre+2026.07.a1b2c3d", set by the release workflow
+    // through CSVDT_BUILD_METADATA. It is metadata rather than a version bump
+    // because a scheduled rebuild usually changes only the time zone database
+    // or the compiler, not this program; semver ignores anything after '+'
+    // when comparing versions, so it distinguishes builds without claiming a
+    // release that didn't happen. A local build simply has none.
+    // Leaked so clap can hold a &'static str; it is a single allocation made
+    // once at startup and lives for the whole run either way.
+    Box::leak(
+        format!(
+            "{}{} (IANA tzdata {})",
+            crate_version!(),
+            match option_env!("CSVDT_BUILD_METADATA") {
+                Some(metadata) => format!("+{}", metadata),
+                None => String::new(),
+            },
+            jiff_tzdb::VERSION
+        )
+        .into_boxed_str(),
+    )
+}
+
+/// The input file, and the options that say what its first record is and how
+/// records of uneven width are taken.
+fn input_args() -> Vec<clap::Arg> {
+    vec![
+        clap::Arg::new("input_file")
+            .action(clap::ArgAction::Set)
+            // A path rather than text: a file name need not be UTF-8.
+            // Not clap's own PathBuf parser, which refuses an empty
+            // value with a message of its own before the clearer one
+            // below can be given.
+            .value_parser(path_value())
+            .value_name("FILE")
+            .help(help_summary(FILE))
+            .long_help(FILE)
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("has_header")
+            .action(clap::ArgAction::SetTrue)
+            .value_name("has-header")
+            .help(help_summary(HAS_HEADER))
+            .long_help(HAS_HEADER)
+            .short('H')
+            .long("has-header")
+            .required(false),
+        clap::Arg::new("print_header")
+            .action(clap::ArgAction::SetTrue)
+            .value_name("print-header")
+            .help(help_summary(PRINT_HEADER))
+            .long_help(PRINT_HEADER)
+            .short('p')
+            .long("print-header")
+            .required(false)
+            .requires("has_header"),
+        clap::Arg::new("flexible")
+            .action(clap::ArgAction::Set)
+            .value_name("keep|fix|widest")
+            .help(help_summary(FLEXIBLE))
+            .long_help(FLEXIBLE)
+            .short('f')
+            .long("flexible")
+            .num_args(0..=1)
+            // Attached form only (-f=fix, --flexible=fix). A separated
+            // value would let "csvdt -f data.csv" read the path as the
+            // mode, the same trap -d avoids.
+            .require_equals(true)
+            .default_missing_value("keep")
+            .ignore_case(true)
+            .value_parser(abbreviated_values(&FLEXIBLE_MODES))
+            .required(false),
+    ]
+}
+
+/// The actions that convert a timestamp column into a new one, and the options
+/// that place it and shape what is written.
+fn conversion_args() -> Vec<clap::Arg> {
+    vec![
+        clap::Arg::new("position")
+            .action(clap::ArgAction::Set)
+            .value_name("column,position")
+            .help(help_summary(POSITION))
+            .long_help(POSITION)
+            .short('i')
+            .long("insert")
+            .num_args(1)
+            .allow_hyphen_values(true)
+            .required(false)
+            .requires("actions_req"),
+        clap::Arg::new("action_to_rfc3339")
+            .action(clap::ArgAction::Set)
+            .value_name("num")
+            .help(help_summary(RFC3339))
+            .long_help(RFC3339)
+            .short('r')
+            .long("rfc3339")
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("action_to_utc")
+            .action(clap::ArgAction::Set)
+            .value_name("num")
+            .help(help_summary(UTC))
+            .long_help(UTC)
+            .short('u')
+            .long("utc")
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("action_to_local")
+            .action(clap::ArgAction::Set)
+            .value_name("num")
+            .help(help_summary(LOCAL))
+            .long_help(LOCAL)
+            .short('l')
+            .long("local")
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("action_offset")
+            .action(clap::ArgAction::Set)
+            .value_name("column,offset")
+            .help(help_summary(OFFSET))
+            .long_help(OFFSET)
+            .short('o')
+            .long("offset")
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("action_split")
+            .action(clap::ArgAction::Set)
+            .value_name("num")
+            .help(help_summary(SPLIT))
+            .long_help(SPLIT)
+            .short('s')
+            .long("split")
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("action_duration")
+            .action(clap::ArgAction::Set)
+            .value_name("num[,num]")
+            .help(help_summary(DURATION))
+            .long_help(DURATION)
+            .short('d')
+            .long("duration")
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("round_seconds")
+            .action(clap::ArgAction::SetTrue)
+            .help(help_summary(ROUND_SECONDS))
+            .long_help(ROUND_SECONDS)
+            .long("round-seconds")
+            .required(false)
+            .requires("action_duration"),
+    ]
+}
+
+/// The actions that remove columns or put them in another order.
+fn column_args() -> Vec<clap::Arg> {
+    vec![
+        clap::Arg::new("action_remove")
+            .action(clap::ArgAction::Set)
+            .value_name("num[,num...]")
+            .help(help_summary(REMOVE))
+            .long_help(REMOVE)
+            .long("remove")
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("action_arrange")
+            .action(clap::ArgAction::Set)
+            .value_name("num[,num...]")
+            .help(help_summary(ARRANGE))
+            .long_help(ARRANGE)
+            .short('a')
+            .long("arrange")
+            .num_args(1)
+            .required(false),
+    ]
+}
+
+/// The groups the actions form: one an argument line may give only one of,
+/// and the ones that write a converted column, which -i needs one of.
+fn action_groups() -> Vec<clap::ArgGroup> {
+    vec![
+        // The actions, of which a run takes one: clap refuses any two
+        // together, with the same message it gives for any other conflict.
+        clap::ArgGroup::new("action")
+            .args([
+                "action_split",
+                "action_to_rfc3339",
+                "action_to_utc",
+                "action_to_local",
+                "action_duration",
+                "action_offset",
+                "action_remove",
+                "action_arrange",
+            ])
+            .multiple(false),
+        // The actions that write a converted column, which -i places.
+        clap::ArgGroup::new("actions_req")
+            .args([
+                "action_split",
+                "action_to_rfc3339",
+                "action_to_utc",
+                "action_to_local",
+                "action_duration",
+                "action_offset",
+            ])
+            .multiple(true),
+    ]
+}
+
+/// The options for how fields are read, trimmed, quoted and delimited, and
+/// where the fill log goes.
+fn format_args() -> Vec<clap::Arg> {
+    vec![
+        clap::Arg::new("trim")
+            .action(clap::ArgAction::Set)
+            .value_name("trim")
+            .help(help_summary(TRIM))
+            // Trimmed, because clap writes "\n\n[default: ...]" after a
+            // long help when the option has one, and the corpus file
+            // ends in a newline of its own, so the reader saw two blank
+            // lines where every other option shows none. Only --trim and
+            // --quote carry a clap default; the three options whose
+            // default is a behaviour rather than a value say so in their
+            // own text. An option that gains a default wants this too.
+            .long_help(TRIM.trim_end())
+            .long("trim")
+            .num_args(1)
+            .required(false)
+            .ignore_case(true)
+            .default_value("none")
+            .value_parser(abbreviated_values(&TRIMS)),
+        clap::Arg::new("read_delimiter")
+            .action(clap::ArgAction::Set)
+            .value_name("char")
+            .help(help_summary(READ_DELIMITER))
+            .long_help(READ_DELIMITER)
+            .long("read-delimiter")
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("single_quotes")
+            .action(clap::ArgAction::SetTrue)
+            .value_name("single-quote")
+            .help(help_summary(SINGLE_QUOTES))
+            .long_help(SINGLE_QUOTES)
+            .long("single-quote")
+            .required(false),
+        clap::Arg::new("comment")
+            .action(clap::ArgAction::Set)
+            .value_name("char")
+            .help(help_summary(COMMENT))
+            .long_help(COMMENT)
+            .long("comment")
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("fill_log")
+            .action(clap::ArgAction::Set)
+            .value_parser(path_value())
+            .value_name("file")
+            .help(help_summary(FILL_LOG))
+            .long_help(FILL_LOG)
+            .long("fill-log")
+            .num_args(1)
+            // Refused without a filling mode rather than writing a log of
+            // nothing: an empty log reads as a clean file, which is the
+            // one conclusion it must never invite.
+            .requires("flexible")
+            .required(false),
+        clap::Arg::new("print_delimiter")
+            .action(clap::ArgAction::Set)
+            .value_name("char")
+            .help(help_summary(PRINT_DELIMITER))
+            .long_help(PRINT_DELIMITER)
+            .long("print-delimiter")
+            .num_args(1)
+            .required(false),
+        clap::Arg::new("quotes")
+            .action(clap::ArgAction::Set)
+            .value_name("quoting")
+            .help(help_summary(QUOTES))
+            // Trimmed for the reason given at --trim above.
+            .long_help(QUOTES.trim_end())
+            .long("quote")
+            .num_args(1)
+            .required(false)
+            .ignore_case(true)
+            .default_value("necessary")
+            .value_parser(abbreviated_values(&QUOTINGS)),
+    ]
+}
+
+/// The options that answer a question about the input or the program rather
+/// than convert anything.
+fn question_args() -> Vec<clap::Arg> {
+    vec![
+        clap::Arg::new("peek")
+            .action(clap::ArgAction::SetTrue)
+            .help(help_summary(PEEK))
+            .long_help(PEEK)
+            .long("peek")
+            .required(false)
+            // Not exclusive, unlike --list-options and --generate-man:
+            // this one reads the input, and has to read it the way a run
+            // would or the columns it numbers are not the ones a run
+            // sees. So the options that decide what a record *is* are
+            // welcome, and the ones that write are refused, there is
+            // no CSV here for them to act on.
+            // The actions are named one by one rather than as their
+            // group, so clap names the one given in its message rather
+            // than listing all eight.
+            .conflicts_with_all([
+                "action_to_rfc3339",
+                "action_to_utc",
+                "action_to_local",
+                "action_offset",
+                "action_split",
+                "action_duration",
+                "action_remove",
+                "action_arrange",
+                "position",
+                "round_seconds",
+                "flexible",
+                "fill_log",
+                "quotes",
+                "print_delimiter",
+            ]),
+        clap::Arg::new("list_options")
+            .action(clap::ArgAction::SetTrue)
+            .help(help_summary(LIST_OPTIONS))
+            .long_help(LIST_OPTIONS)
+            .long("list-options")
+            .required(false)
+            // A question about the program rather than part of a run, so
+            // like --help and --version it stands alone.
+            .exclusive(true),
+        clap::Arg::new("generate_man")
+            .action(clap::ArgAction::SetTrue)
+            .help(help_summary(GENERATE_MAN))
+            .long_help(GENERATE_MAN)
+            .long("generate-man")
+            .required(false)
+            // Another question about the program rather than a run.
+            .exclusive(true),
+    ]
 }
 
 /// Reads the command line, and answers --help, --version, --list-options and
