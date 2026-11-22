@@ -26,10 +26,10 @@
 ;; therefore usable from Emacs immediately, with no change to this file,
 ;; which is the whole point of doing it this way.
 ;;
-;; Three options are named, in defcustoms, because a region run cannot be
+;; Four options are named, in defcustoms, because a region run cannot be
 ;; worked out without them: which flag says the first record is a header,
-;; and which two set the quote and the delimiter, since where a record
-;; begins depends on both.  The tests check that each is an option csvdt
+;; which two set the quote and the delimiter, since where a record begins
+;; depends on both, and which names a comment character.  The tests check that each is an option csvdt
 ;; still reports and that no other option name appears in this file.
 ;;
 ;; A run happens in the background: the selected text is written to a
@@ -102,6 +102,16 @@ field.  The tests check each form against the options csvdt reports."
   "The csvdt options that set the field delimiter for reading.
 A quote opens a field only where a field begins, which depends on the
 delimiter.  The tests check each form against the options csvdt reports."
+  :type '(repeat string)
+  :group 'csvdt)
+
+(defcustom csvdt-comment-options '("--comment")
+  "The csvdt options that name a comment character.
+With one of them in the arguments csvdt skips comment lines, and where a
+record begins is csvdt's to say.  This package does not read the buffer
+for quoted fields then, and refuses to run on part of the buffer: only the
+whole accessible portion is run.  The tests check each form against the
+options csvdt reports."
   :type '(repeat string)
   :group 'csvdt)
 
@@ -1045,13 +1055,18 @@ RANGES are (BEG . END) conses in buffer order.  Returns a plist:
 :cut       what the narrowing cuts, from `csvdt--narrowing-cuts-record-p';
 :header    the header record to put in front, or nil;
 :records   the index of quoted fields, which holds all that was read.
-RECORDS is an index to reuse."
+RECORDS is an index to reuse.  With a comment option in ARGS the buffer is
+not read for quoted fields: csvdt decides which lines are comments, and
+this package does not."
   (let* ((lines (mapcar (lambda (range)
                           (csvdt--whole-lines (car range) (cdr range)))
                         ranges))
          (dialect (csvdt--dialect args))
          (records (or records
-                      (csvdt--make-records (car dialect) (cdr dialect))))
+                      (csvdt--make-records
+                       (car dialect) (cdr dialect)
+                       (csvdt--option-given-p csvdt-comment-options
+                                              (csvdt--options-part args)))))
          (settled (csvdt--settle-ranges lines records)))
     (list :ranges settled
           :snapped (or snapped (not (equal lines ranges)))
@@ -1310,6 +1325,14 @@ own message if it failed.  `csvdt--await' waits for the returned job."
        "these commands send it the lines as a file of their own")))
   (csvdt--program)
   (let ((plan (csvdt--plan ranges args snapped)))
+    (when (and (csvdt--option-given-p csvdt-comment-options
+                                      (csvdt--options-part args))
+               (not (equal (plist-get plan :ranges)
+                           (list (cons (point-min) (point-max))))))
+      (user-error
+       "Cannot run on part of the buffer with a comment option: csvdt decides \
+which lines are comments, so where a record begins is not known here.  Run it \
+on the whole buffer, or narrow to whole records first"))
     (csvdt--start (current-buffer) args
                   (csvdt--input-pieces (plist-get plan :ranges)
                                        (plist-get plan :header))

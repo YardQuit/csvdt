@@ -41,7 +41,7 @@
 (defvar test-csvdt-ran 0
   "How many checks were reached.")
 
-(defconst test-csvdt-expected 312
+(defconst test-csvdt-expected 317
   "How many checks this file makes.
 Raise it with the count.  A run reporting fewer has not passed, whatever
 the ones it did reach said.
@@ -684,19 +684,25 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
              csvdt-read-delimiter-options)
  nil)
 
-;; The number of these lists is written down in three places outside this file
-;; (csvdt.el's own commentary, the README, and the description of the
-;; emacs-csvdt subpackage in the rpm spec), and all three must give the right
+(test-csvdt-check
+ "every configured comment option is one csvdt actually reports"
+ (seq-remove (lambda (option) (member option (csvdt-options)))
+             csvdt-comment-options)
+ nil)
+
+;; The number of these lists is written down in places outside this file
+;; (csvdt.el's own commentary, the READMEs, and the description of the
+;; emacs-csvdt subpackage in the rpm spec), and all must give the right
 ;; number. The checks above hold each list to options csvdt still reports, and
-;; the check below holds the file to naming no others, but neither notices a
-;; fourth list being added beside them, which is what the prose would then be
+;; the check below holds the file to naming no others, but neither notices
+;; another list being added beside them, which is what the prose would then be
 ;; wrong about.
 ;;
-;; So the count is pinned.  A fourth is not forbidden: it fails here, and the
-;; sentence in each of those three places is what wants writing before this
-;; number is raised.
+;; So the count is pinned.  Another is not forbidden: it fails here, and the
+;; sentence in each of those places is what wants writing before this number
+;; is raised.
 (test-csvdt-check
- "three defcustoms name a csvdt option, as the prose about them says"
+ "four defcustoms name a csvdt option, as the prose about them says"
  (length (seq-filter
           (lambda (symbol)
             ;; A list of strings, one of which opens with a dash. The other
@@ -711,12 +717,13 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
           '(csvdt-header-options
             csvdt-single-quote-options
             csvdt-read-delimiter-options
+            csvdt-comment-options
             csvdt-default-arguments
             csvdt-output-mode
             csvdt-region-carries-header
             csvdt-banked-lines-function
             csvdt-executable)))
- 3)
+ 4)
 
 (dolist (case '(("-H" t)
                 ("--has-header" t)
@@ -855,6 +862,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                (not (member option csvdt-header-options))
                (not (member option csvdt-single-quote-options))
                (not (member option csvdt-read-delimiter-options))
+               (not (member option csvdt-comment-options))
                (string-match-p (concat "\\(?:^\\|[^A-Za-z0-9]\\)"
                                        (regexp-quote option) "\\(?:$\\|[^A-Za-z0-9-]\\)")
                                source))
@@ -2782,6 +2790,55 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                           t))
                     (error 'raw-error))
                   t)
+
+;;; A comment line is csvdt's to recognise
+;;
+;; A comment line may hold a quote, which opened a quoted field as far as
+;; this package could tell: a region below it was widened to rows nobody
+;; selected and reported as cut.  Where records begin is csvdt's to decide
+;; once a comment character is set, so a run on part of the buffer is refused
+;; and one on all of it is csvdt's alone.
+
+(defconst test-csvdt-commented
+  "# exported,\"by\nname,v\nx,1\ny,2\n"
+  "A comment line holding a quote, a header and two rows.")
+
+(with-temp-buffer
+  (insert test-csvdt-commented)
+  (csvdt--run (list (cons (point-min) (point-max)))
+              '("--comment" "#" "-H" "-p"))
+  (test-csvdt-check "a whole buffer with a comment line runs as csvdt reads it"
+                    (test-csvdt-output) "name,v\nx,1\ny,2\n"))
+
+(with-temp-buffer
+  (insert test-csvdt-commented)
+  (goto-char (point-max))
+  (forward-line -1)
+  (let ((output (test-csvdt-output)))
+    (test-csvdt-check "a region of it is refused, saying why"
+                      (condition-case err
+                          (progn (csvdt--run (list (cons (point) (point-max)))
+                                             '("--comment" "#" "-H" "-p"))
+                                 "no error")
+                        (user-error
+                         (and (string-match-p "part of the buffer"
+                                              (cadr err))
+                              t)))
+                      t)
+    (test-csvdt-check "and the output is left as it was"
+                      (test-csvdt-output) output)))
+
+(with-temp-buffer
+  (insert test-csvdt-commented)
+  (goto-char (point-max))
+  (forward-line -1)
+  (test-csvdt-check "the attached spelling is refused the same way"
+                    (condition-case nil
+                        (progn (csvdt--run (list (cons (point) (point-max)))
+                                           '("--comment=#" "-H" "-p"))
+                               "no error")
+                      (user-error 'refused))
+                    'refused))
 
 ;;; Many ranges cost one pass over the buffer
 ;;

@@ -15,11 +15,12 @@ to know them:
   by itself, without spawning csvdt again to ask.
 
 Result: the package depends on no csvdt option name beyond the three it calls
-to ask (`--list-options`, `--help`, `--version`) and the ones three defcustoms
+to ask (`--list-options`, `--help`, `--version`) and the ones four defcustoms
 hold: `csvdt-header-options`, which the package must recognise to know when a
-region needs the buffer's header in front of it, and
-`csvdt-single-quote-options` and `csvdt-read-delimiter-options`, which say
-where one record ends and the next begins. A test asserts each of them is
+region needs the buffer's header in front of it, `csvdt-single-quote-options`
+and `csvdt-read-delimiter-options`, which say where one record ends and the
+next begins, and `csvdt-comment-options`, which says when it cannot tell. A
+test asserts each of them is
 still an option csvdt reports, and another that no other long option name
 appears in `csvdt.el`. Short options are not covered by that test: the `-H -p`
 in `csvdt-default-arguments` is a default you can change, which the package
@@ -630,6 +631,22 @@ Both forms are listed, and a clustered
 `-Hp` counts too, worked out from what csvdt reports about which short options
 take a value. A test asserts every configured form is an option csvdt actually
 reports, so a rename fails the build rather than silently disabling the feature.
+
+## Comment lines
+
+Which lines are comments is csvdt's to say, with `--comment`, and this package
+does not copy that. Working out where a record begins means reading the buffer
+for quoted fields, and a comment line that happens to hold a quote would be
+read as opening one, widening a selection to rows nobody picked. So when the
+arguments name a comment option (`csvdt-comment-options`, both `--comment x` and
+`--comment=x`), the package does not read the buffer for records at all:
+
+- a run over the whole buffer, or over the part it is narrowed to, goes as it
+  is, and csvdt skips the comments;
+- a run over part of the buffer is refused with a message saying so. Narrow to
+  whole records first (`C-x n n`) to run on part of a file with comments;
+- a buffer narrowed in the middle of a record that spans lines is not noticed,
+  since the check for it needs the same reading.
 
 ## Output
 
