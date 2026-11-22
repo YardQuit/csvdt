@@ -13,7 +13,7 @@
 #
 #     spectool -g csvdt.spec          # or fetch Source0 by hand
 #     cargo vendor --locked           # in an unpacked source tree
-#     tar czf csvdt-1.0.0-vendor.tar.gz vendor/
+#     tar czf csvdt-1.1.0-vendor.tar.gz vendor/
 #     rpmbuild -ba csvdt.spec
 #
 # rust2rpm is the maintained route for getting a Rust package into Fedora
@@ -36,7 +36,7 @@
 %{!?_emacs_sitestartdir: %global _emacs_sitestartdir %{_emacs_sitelispdir}/site-start.d}
 
 Name:           csvdt
-Version:        1.0.0
+Version:        1.1.0
 Release:        1%{?dist}
 Summary:        Parse CSV files and convert the timestamps in them
 
@@ -203,6 +203,16 @@ fi
 %{_emacs_sitestartdir}/%{crate}-init.el
 
 %changelog
+* Sun Nov 22 2026 Michael A Jones <yardquit@pm.me> - 1.1.0-1
+- Zone rules come from jiff and its bundled IANA tzdata 2026f, in place of
+  chrono and chrono-tz, which are no longer maintained; 49 zones convert
+  differently, some in the past (see CHANGELOG.md).
+- POSIX rules in TZ that chrono could not read are accepted.
+- '-' as FILE reads standard input; year 0000 is outside the calendar for
+  every action; the fill log counts lines itself; --peek escapes control
+  characters; the Emacs front end runs csvdt in the background.
+- Built from the committed Cargo.lock.
+
 * Fri Aug 21 2026 Michael A Jones <yardquit@pm.me> - 1.0.0-1
 - Initial package.
 - csvdt reads CSV, converts the timestamps in it, and writes canonical CSV

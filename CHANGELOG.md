@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
 The releases now carry `THIRD-PARTY-LICENSES.txt`, the licence texts of the
 crates compiled into the prebuilt binaries, as those licences require. It

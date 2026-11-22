@@ -32,7 +32,7 @@ sudo dnf install \
 The packages are built from [`packaging/rpm/`](packaging/rpm/) in whatever
 Fedora is current that day, and the release holds one generation:
 `csvdt.x86_64.rpm` is a stable name for a file that is really
-`csvdt-1.0.0-1.fc44.x86_64.rpm` today and `.fc45` after Fedora 45 ships.
+`csvdt-1.1.0-1.fc44.x86_64.rpm` today and `.fc45` after Fedora 45 ships.
 `rpm-release` is the newest released version, rebuilt when a version is
 tagged and again each month so the time zone database compiled into it does
 not go stale.
@@ -172,17 +172,17 @@ page is generated rather than kept by hand. One text, three depths.
 
 ```bash
 $ csvdt --version
-csvdt 1.0.0 (IANA tzdata 2026f)                       # built from source
+csvdt 1.1.0 (IANA tzdata 2026f)                       # built from source
 
 $ csvdt --version
-csvdt 1.0.0+2026.09.abc1234 (IANA tzdata 2026f)       # a published build
+csvdt 1.1.0+2026.09.abc1234 (IANA tzdata 2026f)       # a published build
 ```
 
 Reading that string:
 
 | part | meaning |
 | --- | --- |
-| `1.0.0` | the program version |
+| `1.1.0` | the program version |
 | `+2026.09.abc1234` | build metadata: the year and month it was built, and the commit it was built from. Only a published build carries it; one built from source has nothing to identify but itself |
 | `IANA tzdata 2026f` | the time zone database compiled into this binary, which determines every `-l/--local` result |
 
@@ -190,8 +190,8 @@ The `+` part is semver build metadata, not a release. A scheduled rebuild
 changes only the bundled time zone database or the compiler, never the program,
 so the version stays put and the metadata distinguishes the build. Together
 with the database name it is also the archive tag that build was kept under:
-`1.0.0+2026.09.abc1234` with `tzdata 2026f` is the release
-`1.0.0-2026.09.abc1234-tzdata2026f`.
+`1.1.0+2026.09.abc1234` with `tzdata 2026f` is the release
+`1.1.0-2026.09.abc1234-tzdata2026f`.
 
 ## Am I up to date?
 
@@ -234,12 +234,12 @@ month in which nothing moved has no release of its own.
 That means the version number alone does not identify a binary, and three
 kinds of release exist so that something does:
 
-- **`1.0.0`**: the version's own release. Source tarball, plus the binaries
+- **`1.1.0`**: the version's own release. Source tarball, plus the binaries
   and packages that version was published with, written once and never
   replaced. This is the release GitHub designates "Latest".
 - **`release`** and **`rpm-release`**: the current build of the newest
   version, replaced in place. Use these for downloads and scripts.
-- **`1.0.0-2026.09.abc1234-tzdata2026f`**: every distinct build, kept
+- **`1.1.0-2026.09.abc1234-tzdata2026f`**: every distinct build, kept
   permanently and never replaced: the binaries for all four platforms *and*
   the RPM packages from the same build. The tag names the version, the commit
   and the time zone database, so it can be quoted in a report and read back
