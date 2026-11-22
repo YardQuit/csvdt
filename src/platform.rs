@@ -100,8 +100,13 @@ pub(crate) fn require_readable_stdin() -> Result<(), Box<dyn Error>> {
 // regular file is, and a run cannot be both ends of a pipe.
 #[cfg(unix)]
 pub(crate) fn file_identity(file: &std::fs::File) -> Option<(u64, u64)> {
+    metadata_identity(&file.metadata().ok()?)
+}
+
+// The identity file_identity reads, from what the platform says about a file.
+#[cfg(unix)]
+fn metadata_identity(about: &std::fs::Metadata) -> Option<(u64, u64)> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
-    let about = file.metadata().ok()?;
     // A regular file has data to lose; a fifo has a reader to mislead, which
     // is the same harm by another route: '--fill-log /dev/stdout' into a
     // pipe would put the log's own rows into the CSV somebody is reading,
@@ -142,6 +147,23 @@ pub(crate) fn file_identity(file: &std::fs::File) -> Option<(u64, u64)> {
 #[cfg(not(any(unix, windows)))]
 pub(crate) fn file_identity(_file: &std::fs::File) -> Option<(u64, u64)> {
     None
+}
+
+// The identity of the file a path names, following symbolic links, asked
+// without opening it on Unix. Opening is not a question there: a fifo opened
+// for reading waits for a writer, and when csvdt is to be that writer it
+// waits for ever, and a pipe opened and closed again can leave its writer
+// with nobody to write to.
+#[cfg(unix)]
+pub(crate) fn path_identity(path: &std::path::Path) -> Option<(u64, u64)> {
+    metadata_identity(&std::fs::metadata(path).ok()?)
+}
+
+// Windows has no fifo at a path, and its identity needs a handle, so the
+// file is opened to ask.
+#[cfg(not(unix))]
+pub(crate) fn path_identity(path: &std::path::Path) -> Option<(u64, u64)> {
+    file_identity(&std::fs::File::open(path).ok()?)
 }
 
 // The identity of one of the run's own streams, standard input or standard

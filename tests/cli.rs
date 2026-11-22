@@ -261,6 +261,33 @@ fn an_unwritable_fill_log_is_reported_before_the_input_is_spooled() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+// A fifo as the --fill-log destination is written to like any file. The
+// check that the log is neither the input nor the output opened it to read,
+// and a fifo opened to read waits for a writer: csvdt, which was waiting.
+#[cfg(unix)]
+#[test]
+fn a_fifo_as_the_fill_log_is_written_without_waiting_on_itself() {
+    let dir = tempfile_dir().join("fill-log-fifo");
+    std::fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("log");
+    let made = std::process::Command::new("mkfifo").arg(&fifo).status().unwrap();
+    assert!(made.success());
+    let reader = {
+        let fifo = fifo.clone();
+        std::thread::spawn(move || std::fs::read_to_string(fifo).unwrap())
+    };
+    csvdt()
+        .args(["-f=fix", "--fill-log"])
+        .arg(&fifo)
+        .write_stdin("a,b\n1\n")
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success()
+        .stdout("a,b\n1,\n");
+    assert!(reader.join().unwrap().contains("padded"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // ---- column actions: split / rfc3339 / utc / local / duration / remove ---
 // Every action takes its column number as its own argument (e.g. -s1),
 // glued or space-separated. -i is independent: "-i <col> <mode>".

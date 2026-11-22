@@ -210,8 +210,9 @@ fn answered(written: std::io::Result<()>) {
 // data.csv' names no input path at all, and '--fill-log /dev/stdout' names
 // no file but is one.
 //
-// A destination that does not exist yet cannot be either, and is the ordinary
-// case: nothing is opened and nothing is refused.
+// Nothing is opened to ask: a fifo opened to read waits for a writer, and
+// csvdt is the writer it would be waiting for. A destination that does not
+// exist yet cannot be either, and is the ordinary case: nothing is refused.
 fn refuse_fill_log_that_is_the_input_or_the_output(
     destination: &std::path::Path,
     input_file: Option<&std::path::Path>,
@@ -219,15 +220,12 @@ fn refuse_fill_log_that_is_the_input_or_the_output(
     if is_stderr(destination) {
         return Ok(());
     }
-    let Ok(existing) = std::fs::File::open(destination) else { return Ok(()) };
-    let Some(log) = platform::file_identity(&existing) else { return Ok(()) };
+    let Some(log) = platform::path_identity(destination) else { return Ok(()) };
     let destination = destination.display();
 
     let input = match input_file {
         None => platform::stdin_identity(),
-        Some(path) => std::fs::File::open(path)
-            .ok()
-            .and_then(|file| platform::file_identity(&file)),
+        Some(path) => platform::path_identity(path),
     };
     if input == Some(log) {
         return Err(Box::new(std::io::Error::new(
