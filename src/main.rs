@@ -375,42 +375,16 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
         // either: it was read, and its data rows print `""` as well, so it
         // stays with them.
         if !headers.is_empty() {
-            if args.fill_mode == FillMode::FirstRecord {
-                fill_width = Some(headers.len());
-            }
-            // Plain --flexible fills nothing and so has no width of its own.
-            // The log still wants one to measure against, and a single pass
-            // has only the first record to offer, the header, when there is
-            // one, exactly as fix would take it.
-            if args.fill_mode == FillMode::Off && fill_log.is_some() {
-                fill_width = Some(headers.len());
-            }
             // The header is padded too under Widest, since the widest row may
             // be wider than it. The added names are empty rather than invented.
-            if let Some(width) = fill_width {
-                // Under Widest no record can be wider than the counted width,
-                // the header included, the counting pass read it too. A
-                // header that is means the input changed between the two
-                // reads, which the data rows already report in those terms;
-                // unchecked here, it would fall through to the writer's bare
-                // record-length error instead.
-                if headers.len() > width {
-                    if let Some(log) = fill_log.as_deref_mut() {
-                        log.note(at(headers.position()), headers.len(), width, "over")?;
-                    }
-                    return Err(row_wider_than_reference(
-                        headers.len(), width, args.fill_mode));
-                }
-                if let (true, Some(log)) = (headers.len() < width, fill_log.as_deref_mut()) {
-                    log.note(at(headers.position()), headers.len(), width, "padded")?;
-                }
-                // Under FillMode::Off the width above is the header's own, so
-                // neither branch can fire and nothing pads: the header is the
-                // reference rather than a row measured against it.
-                while headers.len() < width {
-                    headers.push_field("");
-                }
-            }
+            // Under fix, and under plain --flexible with a log, it is the
+            // first record and so sets the width the rows are measured
+            // against. Under Widest no record can be wider than the counted
+            // width, the header included, the counting pass read it too. A
+            // header that is means the input changed between the two reads,
+            // which is reported in the same terms as for a data row rather
+            // than left to the writer's bare record-length error.
+            fit_to_width(&mut headers, &mut fill_width, args.fill_mode, fill_log.as_deref_mut(), &at)?;
             // Not stored back into the reader: nothing reads its header state
             // after this point, the loop below only calls read_record, and
             // the writer is handed the record directly.
@@ -439,50 +413,10 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
     // every field of every row, which measured ~35% slower on a 2M-row file.
     let mut record = csv::StringRecord::new();
     while reader.read_record(&mut record).map_err(explain_unequal_lengths)? {
-        if args.fill_mode != FillMode::Off {
-            // Without a header to measure, the first data row sets the width.
-            let width = *fill_width.get_or_insert(record.len());
-            if record.len() > width {
-                // Logged before the error returns, so the log ends on the row
-                // that ended the run rather than stopping just short of the
-                // one a reader most wants to see.
-                if let Some(log) = fill_log.as_deref_mut() {
-                    log.note(at(record.position()), record.len(), width, "over")?;
-                }
-                return Err(row_wider_than_reference(
-                    record.len(), width, args.fill_mode));
-            }
-            if let (true, Some(log)) = (record.len() < width, fill_log.as_deref_mut()) {
-                log.note(at(record.position()), record.len(), width, "padded")?;
-            }
-            // Padded before the action runs, so a column index refers to the
-            // rectangular row: an action pointed at a field this row was
-            // missing sees an empty value rather than an out-of-bound error.
-            while record.len() < width {
-                record.push_field("");
-            }
-        } else if let Some(log) = fill_log.as_deref_mut() {
-            // Plain --flexible passes every row through untouched, so the
-            // log records where each row stands rather than what was done to
-            // it, 'short' where fix or widest would have padded. Nothing in
-            // this mode's output marks a short row, which makes the log the
-            // only account of one there is.
-            //
-            // Measured against the first record, which is the only reference
-            // a single pass has, and so a narrower one than widest would use:
-            // a row wider than the first is 'over' here, where widest would
-            // merely have counted it and padded the rest out to it.
-            let width = *fill_width.get_or_insert(record.len());
-            match record.len().cmp(&width) {
-                std::cmp::Ordering::Less => {
-                    log.note(at(record.position()), record.len(), width, "short")?
-                },
-                std::cmp::Ordering::Greater => {
-                    log.note(at(record.position()), record.len(), width, "over")?
-                },
-                std::cmp::Ordering::Equal => (),
-            }
-        }
+        // Padded before the action runs, so a column index refers to the
+        // rectangular row: an action pointed at a field this row was missing
+        // sees an empty value rather than an out-of-bound error.
+        fit_to_width(&mut record, &mut fill_width, args.fill_mode, fill_log.as_deref_mut(), &at)?;
         let (edit, new_dt_cache) = plan_row_edit(&record, args, dt_cache)
             .map_err(|error| locate_out_of_bound(error, &record, Some(at(record.position()))))?;
         lines.forget_before(record.position());
@@ -500,6 +434,77 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
     }
 
     Ok(tally)
+}
+
+/// Measures RECORD against the width a filling mode works to, pads it out to
+/// that width when the mode fills, and notes in the fill log what was done.
+///
+/// WIDTH is the reference width so far. The first record to arrive with none
+/// set, the header when there is one, sets it, which is all a single pass has
+/// to go on; under Widest it comes in already set from the counting pass.
+/// AT gives a record's line and record number for the log.
+///
+/// Under a filling mode a short record is padded with empty fields and logged
+/// as 'padded', and a wider one is logged as 'over' and then refused, since
+/// shortening it would throw fields away. It is logged before the error
+/// returns, so the log ends on the record that ended the run.
+///
+/// Plain --flexible (FillMode::Off) passes every record through untouched,
+/// so the log says where each one stands rather than what was done to it:
+/// 'short' where fix or widest would have padded, and 'over' for a record
+/// wider than the first, which widest would have counted and padded the rest
+/// out to. Nothing in that mode's output marks a short record, which makes
+/// the log the only account of one there is. Without a log the mode has
+/// nothing to measure, and the record is left as it is.
+#[inline(always)]
+fn fit_to_width(
+    record: &mut csv::StringRecord,
+    width: &mut Option<usize>,
+    mode: FillMode,
+    fill_log: Option<&mut FillLog>,
+    at: &impl Fn(Option<&csv::Position>) -> (u64, u64),
+) -> Result<(), Box<dyn Error>> {
+    if mode == FillMode::Off && fill_log.is_none() {
+        return Ok(());
+    }
+    let width = *width.get_or_insert(record.len());
+    // Most records are as wide as the first; only the rest pay for a call.
+    if record.len() == width {
+        return Ok(());
+    }
+    fit_uneven_record(record, width, mode, fill_log, at)
+}
+
+/// Does what [`fit_to_width`] says for a record whose width is not WIDTH:
+/// logs it, then refuses it when it is wider and the mode fills, or pads it
+/// when it is shorter and the mode fills.
+#[inline(never)]
+fn fit_uneven_record(
+    record: &mut csv::StringRecord,
+    width: usize,
+    mode: FillMode,
+    fill_log: Option<&mut FillLog>,
+    at: &impl Fn(Option<&csv::Position>) -> (u64, u64),
+) -> Result<(), Box<dyn Error>> {
+    let length = record.len();
+    let outcome = match (length > width, mode) {
+        (true, _) => "over",
+        (false, FillMode::Off) => "short",
+        (false, _) => "padded",
+    };
+    if let Some(log) = fill_log {
+        log.note(at(record.position()), length, width, outcome)?;
+    }
+    if mode == FillMode::Off {
+        return Ok(());
+    }
+    if length > width {
+        return Err(row_wider_than_reference(length, width, mode));
+    }
+    while record.len() < width {
+        record.push_field("");
+    }
+    Ok(())
 }
 
 /// Rows longer than the reference width cannot be made rectangular by padding,
