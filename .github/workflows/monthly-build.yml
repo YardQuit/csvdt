@@ -82,7 +82,7 @@ jobs:
       metadata: ${{ steps.id.outputs.metadata }}
       built: ${{ steps.id.outputs.built }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           # Whole history, because what gets built is picked out of the
@@ -157,7 +157,7 @@ jobs:
       - name: Resolve the dependency set
         run: cargo update
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dependency-set
           path: Cargo.lock
@@ -207,7 +207,7 @@ jobs:
       CSVDT_BUILD_METADATA: ${{ needs.meta.outputs.metadata }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # The commit meta resolved, not the one the run was triggered
           # from. On a schedule those differ by every commit since the
@@ -269,7 +269,7 @@ jobs:
       # in-range dependencies as of a single moment, above all the newest
       # tzdata, rather than as of whenever each leg happened to reach this
       # step.
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: dependency-set
 
@@ -299,7 +299,7 @@ jobs:
       # whose assets do not expire at all. Worth saying because the two look
       # alike from the Actions tab, where an expired artifact is the first
       # thing offered on a run that published a release still serving fine.
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: csvdt-${{ matrix.target }}
           path: staged/
@@ -320,7 +320,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ needs.meta.outputs.sha }}
 
@@ -344,7 +344,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ needs.meta.outputs.sha }}
           # Publishing pushes tags as TAG_PUSH_TOKEN through an
@@ -358,7 +358,7 @@ jobs:
           # own token in the environment.
           persist-credentials: false
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           path: downloaded
 
