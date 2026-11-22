@@ -1609,9 +1609,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 
 ;;; A filename among the arguments would replace the selection
 
-;; These commands always send the lines on standard input, so a filename in the
-;; argument line is not a second input: csvdt reads the file and ignores the
-;; selection, and the output buffer looks exactly like a successful run on it.
+;; These commands always give csvdt the lines as a temporary file after the
+;; arguments, so a filename in the argument line is a second file, which csvdt
+;; refuses with a message naming the temporary file rather than the one typed.
 (let ((elsewhere (make-temp-file "test-csvdt-other" nil ".csv" "z,z\n9,9\n")))
   (unwind-protect
       (progn
@@ -1631,7 +1631,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                                   (list "-H" "-p" elsewhere))
                       "ran anyway")
              (user-error
-              (and (string-match-p "ignore the selection"
+              (and (string-match-p "second file beside the selection"
                                    (error-message-string error))
                    t)))
            t))
@@ -1665,9 +1665,8 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 ;; The same table read the other way round, with a filename after the option:
 ;; one carrying its own value leaves the word after it where the filename
 ;; goes, and that word has to still be reported.  Taking every option for one
-;; that eats the next argument, "-u0 other.csv" stops being flagged: csvdt
-;; reads that file, ignores the selection, and the output buffer looks exactly
-;; like a successful run on the lines nobody sent.
+;; that eats the next argument, "-u0 other.csv" stops being flagged, and the
+;; run fails on a message about a temporary file nobody typed.
 (let ((elsewhere (make-temp-file "test-csvdt-other" nil ".csv" "z,z\n9,9\n")))
   (unwind-protect
       (dolist (args (list (list "-u0" elsewhere) (list "-Hu0" elsewhere)))
@@ -1677,14 +1676,13 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
     (delete-file elsewhere)))
 
 ;; The check only reports what csvdt would really open. A word left where the
-;; filename goes that names nothing is left to csvdt, whose own message for it
-;; is better than a guess from here: it names the option the word belongs to.
+;; filename goes that names nothing is left to csvdt to refuse.
 (test-csvdt-check "a word that is not a file is left to csvdt"
                   (csvdt--file-arguments (list "-H" "-p" "-f" "fix"))
                   nil)
 
 ;; A directory is not something csvdt can read either, and it is not what this
-;; is looking for: only a regular file silently replaces the selection.
+;; is looking for: only a regular file is a filename argument.
 (test-csvdt-check "a directory is not a filename argument"
                   (csvdt--file-arguments (list "-H" "-p" temporary-file-directory))
                   nil)

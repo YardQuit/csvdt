@@ -561,9 +561,10 @@ must be attached with \"=\"."
 
 (defun csvdt--file-arguments (args)
   "Return the arguments in ARGS that csvdt would read as a file to open.
-Only ones that name a file on disk.  The commands send the selection on
-standard input, so a filename replaces it and the result looks like a
-successful run on the file.  Nothing is reported when the option table
+Only ones that name a file on disk.  The commands give csvdt the selection
+as a temporary file after these arguments, so a filename among them is a
+second file, and csvdt's refusal of it names the temporary file rather than
+the filename typed.  Nothing is reported when the option table
 cannot say which options take a separate value (the `--help' fallback,
 where :value is nil), since telling a value from a filename needs that."
   (unless (seq-some (lambda (record) (plist-get record :value))
@@ -1324,9 +1325,9 @@ own message if it failed.  `csvdt--await' waits for the returned job."
   (let ((files (csvdt--file-arguments args)))
     (when files
       (user-error
-       "Cannot run: csvdt would read %s and ignore the selection; %s"
+       "Cannot run: %s would be a second file beside the selection; %s"
        (string-join files ", ")
-       "these commands send it the lines as a file of their own")))
+       "these commands give csvdt the lines as a file of their own")))
   (csvdt--program)
   (let ((plan (csvdt--plan ranges args snapped)))
     (when (and (csvdt--option-given-p csvdt-comment-options

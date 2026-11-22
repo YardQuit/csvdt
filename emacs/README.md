@@ -226,23 +226,25 @@ A filename in that line is refused, rather than run:
 
 ```
 csvdt arguments: -H -p sales.csv
-Cannot run: csvdt would read sales.csv and ignore the selection; these commands
-send it the lines as a file of their own
+Cannot run: sales.csv would be a second file beside the selection; these
+commands give csvdt the lines as a file of their own
 ```
 
-These commands always hand csvdt the selected lines as a file, so a filename
-is not a second input: csvdt reads the file and the selection never reaches
-it. Nothing in the result would say so: the output buffer shows another
-file's contents, and the echo area reports a successful run.
+These commands always hand csvdt the selected lines as a temporary file after
+your arguments, so a filename among them is a second file. csvdt takes one,
+and its refusal would name the temporary file, which you never typed, rather
+than the filename you did.
 
-Only a name that really is a file is refused, which leaves the more common slip
-to csvdt itself. `-f fix` puts `fix` where the filename goes, because that
-mode has to be attached with `=`, and csvdt's own message for it names the
-option:
+Only a name that really is a file is refused here. Any other word left where
+the filename goes, such as `fix` in `-f fix` (that mode has to be attached with
+`=`), reaches csvdt, which refuses the run the same way, naming the temporary
+file:
 
 ```
-csvdt exited 1: no file named 'fix'. If you meant the --flexible mode,
-attach it: -f=fix
+csvdt exited 2: error: unexpected argument '/tmp/csvdt-inputXXXXXX' found
+
+Usage: csvdt [OPTIONS] [FILE]
+...
 ```
 
 Which arguments are values rather than filenames comes from
