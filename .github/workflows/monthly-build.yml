@@ -375,15 +375,24 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ needs.meta.outputs.sha }}
-          # Publishing pushes tags as TAG_PUSH_TOKEN through an
-          # authenticated URL, and the credential this checkout would
-          # otherwise persist defeats that: it is an extra Authorization
-          # header written into .git/config for every github.com request,
-          # and a header outranks the credentials in a URL. Measured: the
-          # first push made with the secret in place still arrived as the
-          # App token and was refused exactly as before. Nothing else in
-          # this job talks to the remote through git, and gh carries its
-          # own token in the environment.
+          # Publishing pushes tags as TAG_PUSH_TOKEN, and the credential this
+          # checkout would otherwise persist defeats that: it is an extra
+          # Authorization header written into .git/config for every
+          # github.com request, and it outranks the one push-tag.sh sets.
+          # Measured: the first push made with the secret in place still
+          # arrived as the App token and was refused exactly as before.
+          # Nothing else in this job talks to the remote through git, and gh
+          # carries its own token in the environment.
+          persist-credentials: false
+
+      # The helper scripts, from the workflow's own ref and not from the
+      # commit being published: that one may be an old version tag that has
+      # no .github/scripts at all.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          path: ci
+          sparse-checkout: .github/scripts
           persist-credentials: false
 
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -561,52 +570,20 @@ jobs:
           VERSION_TZDATA: ${{ steps.version.outputs.tzdata }}
           GH_TOKEN: ${{ github.token }}
           TAG_PUSH_TOKEN: ${{ secrets.TAG_PUSH_TOKEN }}
+          CI_SCRIPTS: ${{ github.workspace }}/ci/.github/scripts
         run: |
           built="${META_BUILT}"
           ref="${META_REF}"
           sha="${META_SHA}"
           repo="${REPOSITORY}"
 
-          # Every tag this step writes goes through TAG_PUSH_TOKEN (a
-          # fine-grained personal access token for this repository alone,
-          # holding Contents and Workflows read-and-write) rather than the
-          # run's own token. GITHUB_TOKEN is a GitHub App token, and GitHub
-          # refuses to let an App write any ref whose workflow files differ
-          # from the default branch's: that reads as updating the workflows
-          # themselves, which asks for a workflows permission the permissions
-          # block above has no way to grant, because GITHUB_TOKEN cannot hold
-          # it at all. A rebuilt release is by nature behind master, so from
-          # the first workflow edit after a tag, every archive tag names
-          # exactly such a commit, and a version tagged behind such an edit
-          # puts the rolling tags in the same position. Tag pushes of the
-          # newest version alone would work without the token, because the
-          # built commit and master are then the same commit.
-          #
-          # This rule is what "Resource not accessible by integration (HTTP
-          # 403)" on the archive entry's create says: pushing the tag with git
-          # instead gets the refusal in plain words, "refusing to allow a
-          # GitHub App to create or update workflow monthly-build.yml without
-          # workflows permission". Whether it also explains the ref API
-          # refusals recorded further down is not established: those hit
-          # commits whose workflow files matched master's, so they stay on the
-          # books as written.
-          #
-          # Stripped of whitespace before use: a secret pasted with a trailing
-          # newline arrives here still carrying it, and inside the URL below
-          # that newline is fatal in words that point anywhere but at the
-          # paste: "fatal: credential url cannot be parsed". Tokens never
-          # contain whitespace, so there is nothing this can eat that was
-          # load-bearing.
-          TAG_PUSH_TOKEN=$(printf '%s' "${TAG_PUSH_TOKEN:-}" | tr -d '[:space:]')
-
-          # Checked before anything is published, so a missing secret
-          # stops the run here rather than between the archive entry and
-          # the rolling release.
-          if [ -z "${TAG_PUSH_TOKEN:-}" ]; then
-            echo "::error::The TAG_PUSH_TOKEN secret is empty or not set. Publishing writes tags, which GITHUB_TOKEN is refused once master's workflow files have moved past the built commit. Create a fine-grained personal access token for this repository alone, holding Contents and Workflows read-and-write, and store it as the TAG_PUSH_TOKEN repository secret."
-            exit 1
-          fi
-          push_remote="https://x-access-token:${TAG_PUSH_TOKEN}@github.com/${repo}.git"
+          # Every tag this step writes goes through push-tag.sh, which uses
+          # TAG_PUSH_TOKEN and not the run's own token; its header says why.
+          # Checked before anything is published, so a missing secret stops
+          # the run here rather than between the archive entry and the
+          # rolling release.
+          push_tag="$CI_SCRIPTS/push-tag.sh"
+          "$push_tag" --check
           # Named, because the staging directory is also called release/ and
           # `gh release upload release release/BUILD-INFO` reads as neither.
           tag=release
@@ -735,7 +712,7 @@ jobs:
             # push is a silent no-op, and anything else (this tag existing
             # somewhere other than the commit it names) deserves the loud
             # failure a plain push gives it.
-            git push "$push_remote" "$sha:refs/tags/$archive_tag"
+            "$push_tag" "$sha" "$archive_tag"
             gh release create "$archive_tag" release/* \
               --title "csvdt ${VERSION_CSVDT} - tzdata ${VERSION_TZDATA} (${built})" \
               --notes "$archive_notes" \
@@ -759,34 +736,13 @@ jobs:
           #    place. What remains is one asset at a time being briefly
           #    replaced, rather than the whole release being briefly absent.
           #
-          #    Written with git rather than through the ref API, which does not
-          #    work here. Creating refs/tags/release through `POST
-          #    /repos/OWNER/REPO/git/refs` is refused with "Reference does not
-          #    exist (HTTP 422)": on a create, for a name that collides with
-          #    nothing, naming a commit the API itself will return, in a
-          #    repository with no rulesets and no tag protection, from a token
-          #    that has just created a tag of its own through the releases API.
-          #    Every input is valid and the permission is demonstrably there,
-          #    and no reason for the refusal has been established.
-          #
-          #    So the tag is written the way git writes one. One command
-          #    covers both creating it and moving it, which also retires the
-          #    read-before-write above it: that existed because PATCHing a
-          #    ref to the sha it already held was refused with "Resource not
-          #    accessible by integration (HTTP 403)", a message about
-          #    permissions that was nothing of the kind. Pushing a tag onto
-          #    the commit it already names is a no-op git performs in
-          #    silence, so there is nothing left to read first and no state
-          #    to get wrong.
+          #    Written with git through push-tag.sh, whose header says why the
+          #    ref API is not used. One push creates the tag and moves it.
           #
           #    --force because this ref is a pointer and moving it is the
           #    whole point. It is never a version tag: those are pushed by
           #    hand and this job is given no name it could overwrite.
-          #
-          #    Through TAG_PUSH_TOKEN like every tag here: a version can
-          #    be tagged behind a workflow edit, and the App-token rule at
-          #    the top of this step would then refuse this push too.
-          git push "$push_remote" --force "$sha:refs/tags/$tag"
+          "$push_tag" --force "$sha" "$tag"
           echo "  refs/tags/$tag now at $sha"
 
           # BUILD-INFO is uploaded strictly last in both branches, because it
@@ -809,20 +765,8 @@ jobs:
             # download, and "up to date" reported for a binary that was not.
             # Binaries first, then the files that describe them, then
             # BUILD-INFO last of all.
-            for asset in $(cd release && ls csvdt-*) Cargo.lock VERSION SHA256SUMS; do
-              gh release upload "$tag" "release/$asset" --clobber
-            done
-            # Drop anything this build did not produce. BUILD-INFO is in the
-            # produced set, so the old copy on the release is never "stale" to
-            # this loop: it is replaced below, as the commit marker.
-            produced=$(cd release && ls)
-            gh release view "$tag" --json assets --jq '.assets[].name' \
-              | while read -r asset; do
-                  if ! printf '%s\n' "$produced" | grep -qxF -- "$asset"; then
-                    echo "Removing asset no longer produced: $asset"
-                    gh release delete-asset "$tag" "$asset" --yes
-                  fi
-                done
+            "$CI_SCRIPTS/replace-assets.sh" "$tag" release \
+              $(cd release && ls csvdt-*) Cargo.lock VERSION SHA256SUMS
             gh release edit "$tag" \
               --title "csvdt ${VERSION_CSVDT} - tzdata ${VERSION_TZDATA} (current build, ${built})" \
               --notes "$rolling_notes" \
