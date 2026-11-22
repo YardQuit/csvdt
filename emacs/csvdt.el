@@ -153,7 +153,7 @@ declined rather than misread.")
   "List of (PROGRAM MTIME VERSION . RECORDS) from the last option discovery.
 Keyed on the program's path and modification time, so a csvdt upgrade
 invalidates it by itself without a subprocess being spawned to ask: the
-cache used to be checked against `csvdt --version\', which meant one run
+cache used to be checked against `csvdt --version', which meant one run
 of the binary per lookup, and a single command looks options up once
 per argument, so a run with four arguments forked csvdt several times to
 learn nothing had changed.  VERSION is kept for anything that wants to
@@ -279,7 +279,7 @@ Matches both the short-and-long form (\"  -x, --xxx <VALUE>\") and the
 long-only form (\"      --xxx <VALUE>\"), so no option name appears in this
 file at all.  A help layout does not say whether an option takes a value
 in any way worth parsing, so :value is left nil, meaning not known,
-and `csvdt--file-arguments\=' declines to guess at filenames without that
+and `csvdt--file-arguments' declines to guess at filenames without that
 knowledge, rather than mistaking an option's value for one."
   (let ((records '())
         (case-fold-search nil))
@@ -315,7 +315,7 @@ which a lookup can check without running anything.  A rebuilt csvdt gets
 a fresh mtime and so a fresh read; the version string is fetched once at
 that point and stored alongside, not consulted per call."
   (let* ((program
-          ;; The real file, not a symlink to it: `file-attributes\=' describes
+          ;; The real file, not a symlink to it: `file-attributes' describes
           ;; the link itself, whose mtime never moves, so a csvdt rebuilt
           ;; behind a stable ~/bin symlink would never invalidate the cache.
           (file-truename (csvdt--program)))
@@ -335,7 +335,7 @@ that point and stored alongside, not consulted per call."
 The prompt shows the version on every command, and reading it live undid
 half of what the mtime-keyed cache saved: one spawn per command, for a
 string that only changes when the binary does: exactly what the cache
-already tracks.  `csvdt-version-string\=' stays live for the command that
+already tracks.  `csvdt-version-string' stays live for the command that
 exists to ask."
   (csvdt--option-records)
   (nth 2 csvdt--options-cache))
@@ -454,7 +454,7 @@ escaping to be worth more than that."
          ;; Whitespace outside quotes ends the argument being gathered.
          ;; Newlines included: a line pasted with its trailing newline used
          ;; to fold it into the last argument, which csvdt then refused.
-         ;; `split-string-and-unquote\=' split on them, and this must too.
+         ;; `split-string-and-unquote' split on them, and this must too.
          ;; Formfeed and vertical tab likewise: that function split on
          ;; them, and dropping them from the set would fold one into an
          ;; argument where it never was before.
@@ -569,7 +569,7 @@ scanning stops at the first of those, which is what makes
 A short whose value must be attached with \"=\" does not: nothing after
 it in a cluster can be its value, so to clap it is just another flag and
 scanning walks over it: \"-fH\" is two flags, and treating it as \"-f
-plus a value\" hid the \"-H\" from `csvdt--header-requested-p\'.  Which
+plus a value\" hid the \"-H\" from `csvdt--header-requested-p'.  Which
 options are which comes from csvdt itself; when it does not say, none
 are assumed and only whole arguments match."
   (when (and (string-prefix-p "-" argument)
@@ -577,7 +577,7 @@ are assumed and only whole arguments match."
              ;; An '=' anywhere means option=value to clap: "-f=keep" is
              ;; -f with an attached mode, never a cluster. Scanned as one it
              ;; yielded junk flags ("-=" "-k" ...), harmless under the
-             ;; default `csvdt-header-options\=' but a false header-carry
+             ;; default `csvdt-header-options' but a false header-carry
              ;; the moment that defcustom names a letter the value holds.
              (not (string-match-p "=" argument))
              (> (length argument) 1))
@@ -718,11 +718,11 @@ one and guessing what was meant would be worse than not."
   "Return BEG..END widened to whole lines.
 Half a line is half a record whatever else is true: sending part of one
 would hand csvdt a truncated row.  A range ending exactly at the start of
-a line stops there, having been selected up to the previous line\'s
+a line stops there, having been selected up to the previous line's
 newline rather than into this one.
 
 Whole lines are not yet whole records: a quoted field may hold newlines
-and carry one record across several.  `csvdt--whole-records\=' finishes
+and carry one record across several.  `csvdt--whole-records' finishes
 the job; this is the cheap part of it, and the whole of it for a file
 whose fields hold no newlines."
   (save-excursion
@@ -842,8 +842,8 @@ newlines at all."
     (cons start (max finish start))))
 
 (defun csvdt--narrowing-cuts-record-p (ranges quote delimiter)
-  "Which end of RANGES the buffer\\='s narrowing cuts a record at.
-Returns `start\\=', `end\\=', `both\\=' or nil.  QUOTE and DELIMITER are the
+  "Which end of RANGES the buffer's narrowing cuts a record at.
+Returns `start', `end', `both' or nil.  QUOTE and DELIMITER are the
 dialect the run will read with, which is what decides where a record ends.
 Widening can only reach as far as the accessible portion: a buffer
 narrowed to begin or end mid-record has nothing whole to widen to, so the clamp
@@ -907,15 +907,15 @@ run that fails because of the cut is the case the check exists for."
 
 (defun csvdt--piece-bounds (item)
   "Return ITEM as a sorted (BEG . END) pair in this buffer, or nil.
-ITEM is a cons or an overlay, as `csvdt-banked-lines-function\=' and the
-region report pieces.  One decoding, shared by `csvdt--normalise-ranges\='
-and `csvdt--mid-line-boundary-p\=', so what counts as a live piece cannot
+ITEM is a cons or an overlay, as `csvdt-banked-lines-function' and the
+region report pieces.  One decoding, shared by `csvdt--normalise-ranges'
+and `csvdt--mid-line-boundary-p', so what counts as a live piece cannot
 drift between what a run covers and what it says about the selection.
 
 A pair's ends may be integers or markers: a marker is how a package
 holds a position that must survive edits, so pairs of them are what a
 banking package most naturally reports.  They were silently dropped
-instead, and `csvdt-run-dwim\=', finding nothing banked, ran over the
+instead, and `csvdt-run-dwim', finding nothing banked, ran over the
 whole buffer without a word.
 
 nil for a dead overlay, which reports nil for both ends, and for a
@@ -928,7 +928,7 @@ last line has no newline would widen onto that line, where \"No banked
 lines\" is the truth.
 
 Either way round: a pair is two ends, not a direction, and
-`region-beginning\=' and `region-end\=' are the only reason one usually
+`region-beginning' and `region-end' are the only reason one usually
 arrives sorted.  Taking them as given turned a reversed pair into an
 empty range, so the lines it named went silently missing."
   (when (or (consp item) (overlayp item))
@@ -947,10 +947,10 @@ empty range, so the lines it named went silently missing."
 An indirect buffer and its base hold the same characters at the same
 positions, so a marker or overlay made in one names exactly the text the
 other would name: unlike a position from an unrelated buffer, which is
-what the foreign-buffer refusal is for.  `clone-indirect-buffer\=' is an
+what the foreign-buffer refusal is for.  `clone-indirect-buffer' is an
 ordinary way to look at a file, and banking made in the base was refused
-there: `csvdt-run-banked\=' said \"No banked lines\", and
-`csvdt-run-dwim\=', finding nothing banked, ran over the whole buffer."
+there: `csvdt-run-banked' said \"No banked lines\", and
+`csvdt-run-dwim', finding nothing banked, ran over the whole buffer."
   (and (buffer-live-p buffer)
        (eq (or (buffer-base-buffer buffer) buffer)
            (or (buffer-base-buffer (current-buffer)) (current-buffer)))))
@@ -973,7 +973,7 @@ Dead overlays are dropped, every range is widened to whole lines, and
 ranges that touch are merged, so a selection that happens to abut a
 banked stretch becomes one, and no line is ever sent twice.
 SOURCE names where ITEMS came from, for the error a malformed one raises;
-it defaults to `csvdt-banked-lines-function\=', which is the usual source
+it defaults to `csvdt-banked-lines-function', which is the usual source
 and the one a reader would think to check."
   ;; The naming below is per item, so a function returning something that
   ;; is not a list at all, a vector, a number, a string, reached dolist
@@ -1025,8 +1025,8 @@ banked lines inside one record that spans several widen to that same
 record, and it went out once per range: a duplicate row, valid CSV,
 clean-looking, and nothing in a count to question it.
 
-Order is left exactly as given, unlike `csvdt--merge-ranges\='.  Buffer
-order is something `csvdt--run\=' asks of its caller rather than something
+Order is left exactly as given, unlike `csvdt--merge-ranges'.  Buffer
+order is something `csvdt--run' asks of its caller rather than something
 it imposes, and sorting here would quietly take that decision away from
 whoever assembled the list."
   (let ((kept '()))
@@ -1055,14 +1055,14 @@ whoever assembled the list."
   "Return a function reporting overlays in the buffer that carry PROPERTY.
 A fallback for a package that exposes no function of its own: naming the
 property it happens to set reaches into its internals, and can break when
-those change.  Prefer pointing `csvdt-banked-lines-function\=' straight at
+those change.  Prefer pointing `csvdt-banked-lines-function' straight at
 a function the package documents, where there is one.
 
 Most packages that bank lines mark them with an overlay, so where there is
 not, this is usually the whole of plugging one in:
 
     (setq csvdt-banked-lines-function
-          (csvdt-banked-lines-from-overlays \='some-package-banked))
+          (csvdt-banked-lines-from-overlays \\='some-package-banked))
 
 To find PROPERTY, put point on a banked line and run
 \\[describe-text-properties]: the overlays covering it are listed with the
@@ -1074,9 +1074,9 @@ being shared with whatever else highlights that buffer."
 
 (defun csvdt--region-ranges ()
   "Return the active region as (BEG . END) conses, or nil when there is none.
-`region-bounds\=' rather than `region-beginning\=' and `region-end\=', because
+`region-bounds' rather than `region-beginning' and `region-end', because
 a region need not be one stretch: a rectangle is one piece per line, and a
-package that defines its own selection through `region-extract-function\='
+package that defines its own selection through `region-extract-function'
 reports its pieces the same way.  Taking the two ends instead would swallow
 everything lying between them."
   (and (use-region-p) (region-bounds)))
@@ -1084,7 +1084,7 @@ everything lying between them."
 (defun csvdt--banked-lines ()
   "Return what `csvdt-banked-lines-function' reports, or nil.
 A function that is named but not defined is a configuration error rather
-than an absence of banked lines: the bare \"Symbol\'s function definition
+than an absence of banked lines: the bare \"Symbol's function definition
 is void\" does not say that the setting is what is wrong, and returning nil
 instead would run over the whole buffer without a word.
 The likeliest cause is the package that defines it not being loaded, or
@@ -1100,14 +1100,14 @@ being older than the function named."
 (defun csvdt--mid-line-boundary-p (items)
   "Non-nil when a piece in ITEMS begins or ends inside a line.
 ITEMS are the raw pieces a command was given (conses or overlays, as
-`csvdt--normalise-ranges\' takes them) asked before normalising widens
+`csvdt--normalise-ranges' takes them) asked before normalising widens
 them, because afterwards every range is whole lines and nothing is left
 to notice.
 
 An end sits on a line boundary at the start of a line, at the end of
 one, or at the end of the buffer.  The end of a line, because an
 overlay covering a line usually stops before the newline (that is the
-shape `csvdt-banked-lines-from-overlays\=' reports) and the row it
+shape `csvdt-banked-lines-from-overlays' reports) and the row it
 names is whole: widening adds only the newline, and calling that a
 widened selection put the notice on every banked run.  A beginning is
 on a boundary only at the start of a line: beginning at the end of one
@@ -1142,12 +1142,12 @@ convert, rows a re-read would take for comments) is shown with the
 summary rather than thrown away.
 SNAPPED says the caller's raw selection had a boundary inside a line, so
 the run covers whole rows the selection only touched.  The commands
-compute it with `csvdt--mid-line-boundary-p\' before normalising, since
+compute it with `csvdt--mid-line-boundary-p' before normalising, since
 normalised ranges are already whole lines and carry no sign of it."
   (let ((files (csvdt--file-arguments args)))
     (when files
       (user-error
-       "csvdt would read %s and ignore the selection; %s"
+       "Cannot run: csvdt would read %s and ignore the selection; %s"
        (string-join files ", ")
        "these commands send it the lines on standard input")))
   (let* ((program (csvdt--program))
@@ -1329,11 +1329,11 @@ normalised ranges are already whole lines and carry no sign of it."
   "Run csvdt over the active region with ARGS.
 Useful for trying something on a handful of rows before the whole file.
 Every piece of the region, where it has more than one: see
-`csvdt--region-ranges\='.
+`csvdt--region-ranges'.
 The pieces are normalised first, as the banked ones always were.
-`csvdt--run\=' asks for ranges in buffer order, and a region need not
-report them that way: `region-bounds\=' does, but a package hooking
-`region-extract-function\=' defines its own selection and may report the
+`csvdt--run' asks for ranges in buffer order, and a region need not
+report them that way: `region-bounds' does, but a package hooking
+`region-extract-function' defines its own selection and may report the
 pieces in any order, overlapping, or naming nothing at all.  Handing those
 straight on sent rows out of buffer order (which csvdt reads, where it
 measures between consecutive rows, as the order the events happened in)
@@ -1374,7 +1374,7 @@ not send a line twice.  With neither, the whole buffer."
   (interactive (list (csvdt--read-arguments)))
   ;; Each list is normalised under its own name, so a malformed piece is
   ;; blamed on whichever source reported it, normalising the two together
-  ;; pointed every complaint at `csvdt-banked-lines-function\=', including
+  ;; pointed every complaint at `csvdt-banked-lines-function', including
   ;; for pieces the region supplied.  The merged result is normalised once
   ;; more, which is what merges a selection into a banked stretch it abuts.
   (let* ((banked-raw (csvdt--banked-lines))
@@ -1388,7 +1388,6 @@ not send a line twice.  With neither, the whole buffer."
                      (csvdt--mid-line-boundary-p
                       (append banked-raw region-raw))))))
 
-;;;###autoload
 (defun csvdt--describe-dialect ()
   "The dialect a run started from the prefilled arguments would read with.
 Which character quotes a field, and which separates them, decide where a

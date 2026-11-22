@@ -41,7 +41,7 @@
 (defvar test-csvdt-ran 0
   "How many checks were reached.")
 
-(defconst test-csvdt-expected 300
+(defconst test-csvdt-expected 303
   "How many checks this file makes.
 Raise it with the count.  A run reporting fewer has not passed, whatever
 the ones it did reach said.
@@ -49,7 +49,7 @@ the ones it did reach said.
 Counted, not just tallied, for the reason tty-test.el gives about
 itself: ALL PASS was printed whenever nothing had failed, which is also
 true of a run where nothing was tried -- a check commented out while
-something was being chased, a `let\=' that returned early, an edit that
+something was being chased, a `let' that returned early, an edit that
 left the calls unreachable.  Twelve checks deleted from this file went
 on printing ALL PASS and exiting 0, with nothing anywhere saying that
 298 had become 286.")
@@ -862,7 +862,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 ;;; Selection shapes
 ;;
 ;; Whatever sets the region (Emacs itself or a modal editor on top of it)
-;; reaches this package as `use-region-p\=' and the region bounds, so what
+;; reaches this package as `use-region-p' and the region bounds, so what
 ;; matters is the shape it leaves behind rather than which package left it.
 
 (require 'rect)
@@ -2692,6 +2692,54 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                           t))
                     (error 'raw-error))
                   t)
+
+;;; Documentation reads as it was meant to
+;;
+;; A backslash before an equals sign inside a docstring is read by Lisp as
+;; the equals sign alone, so a quoted name written with one shows up in
+;; C-h f as "name=" followed by the closing quote.
+
+(let ((garbled '())
+      (text-quoting-style 'curve))
+  (mapatoms
+   (lambda (symbol)
+     (when (string-prefix-p "csvdt" (symbol-name symbol))
+       (dolist (doc (list (and (fboundp symbol) (documentation symbol))
+                          (and (boundp symbol)
+                               (documentation-property
+                                symbol 'variable-documentation))))
+         (when (and (stringp doc)
+                    (string-match-p "[[:alnum:]-]=[\u2019']" doc))
+           (push symbol garbled))))))
+  (test-csvdt-check "no docstring shows a stray = where a quote closes"
+                    (sort garbled #'string<) nil))
+
+(test-csvdt-check "a refused filename starts its message with a capital"
+                  (let ((file (make-temp-file "csvdt-file")))
+                    (unwind-protect
+                        (with-temp-buffer
+                          (condition-case err
+                              (progn (csvdt--run (list (cons (point-min)
+                                                             (point-max)))
+                                                 (list "-H" file))
+                                     "no error")
+                            (user-error
+                             (let ((case-fold-search nil))
+                               (and (string-match-p "\\`[[:upper:]]" (cadr err))
+                                    t)))))
+                      (delete-file file)))
+                  t)
+
+;; An autoload cookie on a private function puts a stub for it in the
+;; autoloads file of whoever installs the package.
+(test-csvdt-check "no private function carries an autoload cookie"
+                  (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name "csvdt.el" test-csvdt-directory))
+                    (and (re-search-forward
+                          "^;;;###autoload\n(defun csvdt--" nil t)
+                         t))
+                  nil)
 
 (message "\n%s"
          (cond

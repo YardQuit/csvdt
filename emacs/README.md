@@ -224,8 +224,8 @@ A filename in that line is refused, rather than run:
 
 ```
 csvdt arguments: -H -p sales.csv
-csvdt would read sales.csv and ignore the selection; these commands send it
-the lines on standard input
+Cannot run: csvdt would read sales.csv and ignore the selection; these commands
+send it the lines on standard input
 ```
 
 These commands always hand csvdt the selected lines on standard input, so a

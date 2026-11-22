@@ -33,7 +33,7 @@
   "Symbols NEWS dates later than they really are: name, the arity the
 excuse covers, and why.
 The arity is the point.  An excuse here is a claim about how the package
-calls the symbol, and the claim is what makes it safe: `count-lines\=' is
+calls the symbol, and the claim is what makes it safe: `count-lines' is
 older than its NEWS entry only because that entry is about a third
 argument nobody here passes.  Pass it and the excuse becomes a lie that
 hides a real finding -- which is why the excuse was written down with its

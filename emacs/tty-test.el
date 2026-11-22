@@ -118,7 +118,7 @@ so that the command under test is reached the way it would be reached."
 Every other check here reads the output buffer, and a line submitted at
 the prompt reaches that buffer the same way whichever list it was
 remembered in -- so none of them can tell csvdt's own history from the
-one every minibuffer shares.  Passing nil for `read-from-minibuffer\\='s
+one every minibuffer shares.  Passing nil for `read-from-minibuffer's
 HIST argument leaves all ten of them green while sending csvdt's command
 lines to `minibuffer-history', where an unrelated prompt offers them on
 \\[previous-history-element] and offers its own back here.
