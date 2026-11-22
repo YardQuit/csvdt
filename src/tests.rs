@@ -461,15 +461,15 @@ type ProcessedRecord = (csv::StringRecord, Option<Stamp>);
 fn process_record(
     record: &csv::StringRecord,
     args: &ArgumentFlags,
-    dt_cache: Option<Stamp>,
+    previous_stamp: Option<Stamp>,
 ) -> Result<ProcessedRecord, Box<dyn Error>> {
-    let (edit, cache) = plan_row_edit(record, args, dt_cache)?;
+    let (edit, next_stamp) = plan_row_edit(record, args, previous_stamp)?;
     let mut fields: Vec<&str> = Vec::with_capacity(record.len() + 2);
     apply_row_edit(record, args, &edit, &mut fields);
-    Ok((csv::StringRecord::from(fields), cache))
+    Ok((csv::StringRecord::from(fields), next_stamp))
 }
 
-/// No row-over-row cache goes in, and none comes out, for any case here.
+/// No previous stamp goes in, and none comes out, for any case here.
 #[test]
 fn process_record_writes_what_each_action_makes_of_a_row() {
     use InsertPosition::{After, Before, Replace};
@@ -684,9 +684,9 @@ fn process_record_writes_what_each_action_makes_of_a_row() {
         let result = process_record(&record(&input), &args, None);
         match expected {
             Some(expected) => {
-                let (written, cache) = result.unwrap_or_else(|error| panic!("{label}: {error}"));
+                let (written, next_stamp) = result.unwrap_or_else(|error| panic!("{label}: {error}"));
                 assert_eq!(as_vec(&written), expected, "{label}");
-                assert_eq!(cache, None, "{label}: the cache must stay empty");
+                assert_eq!(next_stamp, None, "{label}: no stamp may be carried");
             },
             None => assert!(result.is_err(), "{label}: expected an error"),
         }
@@ -781,11 +781,11 @@ fn record_to_local_produces_the_same_instant_as_utc() {
     args.action = Action::ToLocal(bundled_zone("Asia/Kolkata").unwrap());
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
+    let previous_stamp: Option<Stamp> = None;
     let (result, _) = process_record(
         &record(&["1", "2024-06-01T10:00:00+05:00", "x"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     let produced = as_vec(&result)[1].to_string();
@@ -800,11 +800,11 @@ fn record_to_local_accepts_offset_missing_a_colon() {
     args.action = Action::ToLocal(bundled_zone("Asia/Kolkata").unwrap());
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
+    let previous_stamp: Option<Stamp> = None;
     let (result, _) = process_record(
         &record(&["1", "2024-06-01T10:00:00+0500", "x"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     let produced = as_vec(&result)[1].to_string();
@@ -936,21 +936,21 @@ fn format_iso8601_duration_whole_seconds_unaffected_by_rounding() {
 // ---- process_record: duration (single column) --------------------------
 
 #[test]
-fn record_duration_first_row_is_zero_and_seeds_cache() {
+fn record_duration_first_row_is_zero_and_seeds_the_previous_stamp() {
     let mut args = default_args();
     args.action = Action::Duration { second: None };
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
-    let (result, new_cache) = process_record(
+    let previous_stamp: Option<Stamp> = None;
+    let (result, next_stamp) = process_record(
         &record(&["1", "2024-01-01T00:00:00Z"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(as_vec(&result), vec!["1", "PT0S"]);
     assert_eq!(
-        new_cache,
+        next_stamp,
         Some(stamp("2024-01-01T00:00:00Z"))
     );
 }
@@ -961,16 +961,16 @@ fn record_duration_accepts_offset_missing_a_colon() {
     args.action = Action::Duration { second: None };
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
-    let (result, new_cache) = process_record(
+    let previous_stamp: Option<Stamp> = None;
+    let (result, next_stamp) = process_record(
         &record(&["1", "2024-01-01T00:00:00+0000"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(as_vec(&result), vec!["1", "PT0S"]);
     assert_eq!(
-        new_cache,
+        next_stamp,
         Some(stamp("2024-01-01T00:00:00+00:00"))
     );
 }
@@ -982,22 +982,22 @@ fn record_duration_accumulates_row_over_row_even_when_unsorted() {
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
 
-    let mut cache: Option<Stamp> = None;
+    let mut previous_stamp: Option<Stamp> = None;
 
     let (r1, c1) =
-        process_record(&record(&["1", "2024-01-01T00:00:00Z"]), &args, cache).unwrap();
+        process_record(&record(&["1", "2024-01-01T00:00:00Z"]), &args, previous_stamp).unwrap();
     assert_eq!(as_vec(&r1), vec!["1", "PT0S"]);
-    cache = c1;
+    previous_stamp = c1;
 
     let (r2, c2) =
-        process_record(&record(&["2", "2024-01-02T00:00:00Z"]), &args, cache).unwrap();
+        process_record(&record(&["2", "2024-01-02T00:00:00Z"]), &args, previous_stamp).unwrap();
     assert_eq!(as_vec(&r2), vec!["2", "P1D"]);
-    cache = c2;
+    previous_stamp = c2;
 
     // Out-of-order timestamp: duration is the absolute difference from
     // the previous row, per the documented "sort first" caveat.
     let (r3, c3) =
-        process_record(&record(&["3", "2024-01-01T12:00:00Z"]), &args, cache).unwrap();
+        process_record(&record(&["3", "2024-01-01T12:00:00Z"]), &args, previous_stamp).unwrap();
     assert_eq!(as_vec(&r3), vec!["3", "PT12H"]);
     assert_eq!(
         c3,
@@ -1015,12 +1015,12 @@ fn record_duration_correct_across_a_dst_spring_forward() {
     args.action = Action::Duration { second: None };
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
+    let previous_stamp: Option<Stamp> = None;
 
     let (r1, c1) = process_record(
         &record(&["1", "2024-03-10T01:30:00-05:00"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(as_vec(&r1), vec!["1", "PT0S"]);
@@ -1043,12 +1043,12 @@ fn record_duration_correct_across_a_dst_fall_back() {
     args.action = Action::Duration { second: None };
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
+    let previous_stamp: Option<Stamp> = None;
 
     let (r1, c1) = process_record(
         &record(&["1", "2024-11-03T00:30:00-04:00"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(as_vec(&r1), vec!["1", "PT0S"]);
@@ -1063,17 +1063,17 @@ fn record_duration_correct_across_a_dst_fall_back() {
 }
 
 #[test]
-fn record_duration_parse_error_leaves_cache_untouched() {
+fn record_duration_parse_error_leaves_the_previous_stamp_alone() {
     let mut args = default_args();
     args.action = Action::Duration { second: None };
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
     let seed = stamp("2024-01-01T00:00:00Z");
 
-    let (result, new_cache) =
+    let (result, next_stamp) =
         process_record(&record(&["1", "not-a-date"]), &args, Some(seed)).unwrap();
     assert_eq!(as_vec(&result), vec!["1", "parse_err"]);
-    assert_eq!(new_cache, Some(seed), "cache must not advance on a parse error");
+    assert_eq!(next_stamp, Some(seed), "the previous stamp must not advance on a parse error");
 }
 
 // ---- process_record: duration (two columns / same-row) -----------------
@@ -1085,13 +1085,13 @@ fn record_duration_two_column_computes_absolute_difference_regardless_of_order()
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(4) };
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
+    let previous_stamp: Option<Stamp> = None;
 
     // Column 0 is earlier than column 4; the result replaces column 4.
     let (result, _) = process_record(
         &record(&["2024-01-01T00:00:00Z", "a", "b", "c", "2024-01-02T12:00:00Z"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(as_vec(&result), vec!["2024-01-01T00:00:00Z", "a", "b", "c", "P1DT12H"]);
@@ -1100,7 +1100,7 @@ fn record_duration_two_column_computes_absolute_difference_regardless_of_order()
     let (result, _) = process_record(
         &record(&["2024-01-02T12:00:00Z", "a", "b", "c", "2024-01-01T00:00:00Z"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(as_vec(&result), vec!["2024-01-02T12:00:00Z", "a", "b", "c", "P1DT12H"]);
@@ -1113,11 +1113,11 @@ fn record_duration_two_column_identical_timestamps_is_zero() {
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(1) };
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
+    let previous_stamp: Option<Stamp> = None;
     let (result, _) = process_record(
         &record(&["2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(as_vec(&result), vec!["2024-01-01T00:00:00Z", "PT0S"]);
@@ -1130,11 +1130,11 @@ fn record_duration_two_column_accepts_offset_missing_a_colon() {
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(1) };
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
+    let previous_stamp: Option<Stamp> = None;
     let (result, _) = process_record(
         &record(&["2024-01-01T00:00:00+0000", "2024-01-02T00:00:00+0000"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(as_vec(&result), vec!["2024-01-01T00:00:00+0000", "P1D"]);
@@ -1147,12 +1147,12 @@ fn record_duration_two_column_either_column_invalid_is_parse_err() {
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(1) };
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
+    let previous_stamp: Option<Stamp> = None;
 
     let (result, _) = process_record(
         &record(&["not-a-date", "2024-01-01T00:00:00Z"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(as_vec(&result), vec!["not-a-date", "parse_err"]);
@@ -1160,7 +1160,7 @@ fn record_duration_two_column_either_column_invalid_is_parse_err() {
     let (result, _) = process_record(
         &record(&["2024-01-01T00:00:00Z", "not-a-date"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(as_vec(&result), vec!["2024-01-01T00:00:00Z", "parse_err"]);
@@ -1177,11 +1177,11 @@ fn record_duration_two_column_correct_between_two_countries_own_dst_offsets() {
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(1) };
     args.insert_position = InsertPosition::Replace;
-    let cache: Option<Stamp> = None;
+    let previous_stamp: Option<Stamp> = None;
     let (result, _) = process_record(
         &record(&["2024-07-04T12:00:00-04:00", "2024-07-04T20:00:00+02:00"]),
         &args,
-        cache,
+        previous_stamp,
     )
     .unwrap();
     assert_eq!(
@@ -1191,20 +1191,20 @@ fn record_duration_two_column_correct_between_two_countries_own_dst_offsets() {
 }
 
 #[test]
-fn record_duration_two_column_does_not_touch_the_row_over_row_cache() {
+fn record_duration_two_column_does_not_touch_the_previous_stamp() {
     let mut args = default_args();
     args.action = Action::Duration { second: None };
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(1) };
     args.insert_position = InsertPosition::Replace;
     let seed = stamp("2020-01-01T00:00:00Z");
-    let (_, new_cache) = process_record(
+    let (_, next_stamp) = process_record(
         &record(&["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]),
         &args,
         Some(seed),
     )
     .unwrap();
-    assert_eq!(new_cache, Some(seed), "two-column duration is independent of the dt_cache");
+    assert_eq!(next_stamp, Some(seed), "two-column duration is independent of the previous stamp");
 }
 
 #[test]
@@ -1213,8 +1213,8 @@ fn record_duration_two_column_out_of_bound_second_column_is_a_clean_error() {
     args.action = Action::Duration { second: None };
     args.selected_column = 0;
     args.action = Action::Duration { second: Some(9) };
-    let cache: Option<Stamp> = None;
-    let result = process_record(&record(&["1", "2"]), &args, cache);
+    let previous_stamp: Option<Stamp> = None;
+    let result = process_record(&record(&["1", "2"]), &args, previous_stamp);
     assert!(result.is_err());
 }
 

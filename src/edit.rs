@@ -245,12 +245,12 @@ pub(crate) fn insert_target(args: &ArgumentFlags, len: usize) -> usize {
 pub(crate) type PlannedEdit = (RowEdit, Option<Stamp>);
 
 /// Parses the row and works out what to write, without touching the field
-/// list. Returns the edit plus the row-over-row duration cache to carry into
-/// the next row.
+/// list. PREVIOUS_STAMP is the last timestamp the row-over-row --duration
+/// read, if any; the edit comes back with the one to carry into the next row.
 pub(crate) fn plan_row_edit(
     record: &csv::StringRecord,
     args: &ArgumentFlags,
-    dt_cache: Option<Stamp>,
+    previous_stamp: Option<Stamp>,
 ) -> Result<PlannedEdit, Box<dyn Error>> {
     check_bounds(args, record.len())?;
     let target = insert_target(args, record.len());
@@ -313,16 +313,16 @@ pub(crate) fn plan_row_edit(
                 // exact instant (e.g. the Unix epoch, which is how a lot of
                 // exports write a null date) look like "no previous row" and
                 // silently report PT0S.
-                let previous = dt_cache.unwrap_or(stamp);
+                let previous = previous_stamp.unwrap_or(stamp);
                 let value = format_iso8601_duration(stamp.since(&previous), args.round_seconds);
                 return Ok((single(value), Some(stamp)));
             },
-            // A row we can't parse leaves the cache untouched, so the next
+            // A row we can't parse leaves the stamp untouched, so the next
             // parseable row still measures against the last real timestamp.
             Err(_) => single(parse_err()),
         },
     };
-    Ok((edit, dt_cache))
+    Ok((edit, previous_stamp))
 }
 
 /// Fills `fields` with the row's final contents: the record's own fields,
@@ -331,7 +331,7 @@ pub(crate) fn plan_row_edit(
 /// the edit plan_header_edit makes of it.
 pub(crate) fn apply_row_edit<'a>(
     record: &'a csv::StringRecord,
-    args: &'a ArgumentFlags,
+    args: &ArgumentFlags,
     edit: &'a RowEdit,
     fields: &mut Vec<&'a str>,
 ) {

@@ -343,7 +343,7 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
     mut fill_log: Option<&mut FillLog>,
 ) -> Result<Tally, Box<dyn Error>> {
     let mut tally = Tally::default();
-    let mut dt_cache: Option<Stamp> = None;
+    let mut previous_stamp: Option<Stamp> = None;
     // Where a record is, as the fill log and the out-of-bound message give
     // it: the physical line it starts on, and its number among the records.
     let at = |position: Option<&csv::Position>| {
@@ -417,7 +417,7 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
         // rectangular row: an action pointed at a field this row was missing
         // sees an empty value rather than an out-of-bound error.
         fit_to_width(&mut record, &mut fill_width, args.fill_mode, fill_log.as_deref_mut(), &at)?;
-        let (edit, new_dt_cache) = plan_row_edit(&record, args, dt_cache)
+        let (edit, next_stamp) = plan_row_edit(&record, args, previous_stamp)
             .map_err(|error| locate_out_of_bound(error, &record, Some(at(record.position()))))?;
         lines.forget_before(record.position());
         tally.record(&edit);
@@ -430,7 +430,7 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
         if args.flush_each_record {
             writer.flush()?;
         }
-        dt_cache = new_dt_cache;
+        previous_stamp = next_stamp;
     }
 
     Ok(tally)
