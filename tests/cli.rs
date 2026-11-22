@@ -3123,7 +3123,7 @@ fn what_the_manual_page_says_about_the_environment_is_what_csvdt_does() {
     };
     said("TZ");
     said("TMPDIR");
-    said("csvdt\\-widest\\-<pid>.csv");
+    said("csvdt\\-widest\\-<pid>\\-<random>.csv");
 
     // The zone a name does not name is refused rather than answered.
     csvdt()
@@ -6935,7 +6935,7 @@ fn widest_does_not_write_through_a_symlink_left_at_the_name_it_wanted() {
         .unwrap();
     let _ = writer.join();
 
-    // The run still works: a taken name costs a second try, not the mode.
+    // The run still works, under a name of its own.
     assert!(
         output.status.success(),
         "should have spooled under another name: {:?}",
@@ -6975,12 +6975,13 @@ fn widest_does_not_write_through_a_symlink_left_at_the_name_it_wanted() {
 
 #[test]
 #[cfg(unix)]
-fn widest_says_so_when_every_name_it_could_spool_under_is_taken() {
-    // Refusing a taken name means there is a way to leave csvdt with nowhere to
-    // write, so that has to be a clear error naming the directory rather than a
-    // bare 'File exists'. It is also the only outcome available to whoever
-    // plants the names: no overwrite, and nothing silently unpadded.
-    let dir = tempfile_dir().join("widest-spool-exhausted");
+fn widest_cannot_be_locked_out_by_names_planted_for_its_pid() {
+    // The spool's names were the pid and a count, so anyone able to write the
+    // temporary directory could create all eight ahead of a run and make the
+    // mode fail. Here the shell execs csvdt, which hands over the very pid
+    // the names were planted under; the names now carry a part nobody can
+    // predict, so the run still finds one free.
+    let dir = tempfile_dir().join("widest-spool-planted");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let fifo = dir.join("input.csv");
@@ -7000,20 +7001,8 @@ fn widest_says_so_when_every_name_it_could_spool_under_is_taken() {
         .unwrap();
     let _ = writer.join();
 
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    assert!(!output.status.success(), "should have failed: {:?}", stderr);
-    assert!(
-        stderr.contains("--flexible=widest")
-            && stderr.contains(&dir.display().to_string())
-            && stderr.contains("TMPDIR"),
-        "should name the mode, the directory and the way out: {:?}",
-        stderr,
-    );
-    assert!(
-        output.stdout.is_empty(),
-        "should not have written a half-padded file: {:?}",
-        String::from_utf8_lossy(&output.stdout),
-    );
+    assert!(output.status.success(), "{:?}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "a,b,,\n0,1,2,3\n0,,,\n");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

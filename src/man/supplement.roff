@@ -62,7 +62,7 @@ that cannot be created has to name the variable a reader is meant to set,
 and the two families spell it differently.
 .SH FILES
 .TP
-.I $TMPDIR/csvdt\-widest\-<pid>.csv
+.I $TMPDIR/csvdt\-widest\-<pid>\-<random>.csv
 The only file csvdt creates unasked.
 .B \-\-flexible=widest
 reads its input twice, once to find the widest record and once to pad every
@@ -72,7 +72,8 @@ is made.
 .IP
 Created with mode 0600, since the copy holds the whole of an input that is
 often a log, and removed when the run ends \(em including when the run is
-interrupted. A numbered variant is tried when the name is taken, so a stale
+interrupted. The name carries the process id and 64 bits nobody can
+predict, so another account cannot create it ahead of the run, and a stale
 copy left behind by a killed run cannot lock the mode out.
 .TP
 .B \-\-fill\-log

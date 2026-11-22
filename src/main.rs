@@ -544,8 +544,8 @@ impl Drop for TempSpool {
         // Only after the file is gone, so a signal landing in between finds
         // the name still armed and removes it itself. The other order leaves
         // a window where neither does. Nothing else can be at the name to
-        // remove by mistake: it carries this process's id, and this process
-        // is still alive to hold it.
+        // remove by mistake: it carries this process's id and a part nobody
+        // could predict, and this process is still alive to hold it.
         #[cfg(unix)]
         disarm_spool_signals();
     }
@@ -676,9 +676,22 @@ impl Drop for SpoolSignalsHeld {
     }
 }
 
-// How many names to try before giving up. A live process cannot share its id,
-// so a name is only ever taken by something left over or something planted.
+// How many names to try before giving up. Each carries this process's id and
+// a part nobody can predict, so a name is only ever taken by chance.
 const SPOOL_ATTEMPTS: u32 = 8;
+
+// The name of the spool file for one attempt: the process's id, so a file
+// left behind can be traced to the run that left it, and 64 bits drawn from
+// the standard library's per-process random hash keys. Without that part the
+// names were the id and a count, which another account on the machine could
+// work out and create ahead of the run, all eight of them, to make
+// '--flexible=widest' fail.
+fn spool_name(attempt: u32) -> String {
+    use std::hash::BuildHasher;
+    let unpredictable = std::collections::hash_map::RandomState::new()
+        .hash_one((attempt, std::time::SystemTime::now()));
+    format!("csvdt-widest-{}-{unpredictable:016x}.csv", std::process::id())
+}
 
 // Creates the file the spool will be copied into.
 //
@@ -722,18 +735,11 @@ const TEMP_DIRECTORY_VARIABLE: &str = "TMPDIR";
 // nor a pipe named as a file can be rewound.
 fn spool(mut input: impl std::io::Read) -> Result<TempSpool, Box<dyn Error>> {
     let directory = std::env::temp_dir();
-    let identifier = std::process::id();
     let mut refusal = None;
 
     for attempt in 1..=SPOOL_ATTEMPTS {
-        // The plain name first, then numbered ones, so a taken name costs a
-        // second try rather than the run. A file killed processes leave behind
-        // is claimed by whichever id comes round to it next, and would
-        // otherwise lock that run out of the mode entirely.
-        let path = directory.join(match attempt {
-            1 => format!("csvdt-widest-{identifier}.csv"),
-            _ => format!("csvdt-widest-{identifier}-{attempt}.csv"),
-        });
+        // A taken name costs a second try rather than the run.
+        let path = directory.join(spool_name(attempt));
 
         // Held across creating the file and arming the handler, which are one
         // step as far as a signal is concerned; see SpoolSignalsHeld. A name
