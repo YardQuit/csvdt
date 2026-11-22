@@ -147,10 +147,14 @@ jobs:
       # version, whatever ref the run was triggered from.
       - name: What this run packages
         id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           git config --global --add safe.directory "$PWD"
-          if [ '${{ github.event_name }}' = 'pull_request' ]; then
-            ref='${{ github.ref_name }}'
+          if [ "${EVENT_NAME}" = 'pull_request' ]; then
+            ref="${REF_NAME}"
             echo "checking the proposed change rather than a release"
           else
             # Highest version, not most recently created: a patch to an
@@ -180,9 +184,9 @@ jobs:
             # The kept generation is the newest release, so a tag push for
             # an older series would replace it with a package that is not
             # current. Highest wins and anything else stops here.
-            if [ '${{ github.ref_type }}' = 'tag' ] \
-               && [ '${{ github.ref_name }}' != "$ref" ]; then
-              echo "::error::${{ github.ref_name }} was pushed, but $ref is the newest version tag. This workflow packages the newest version only."
+            if [ "${REF_TYPE}" = 'tag' ] \
+               && [ "${REF_NAME}" != "$ref" ]; then
+              echo "::error::${REF_NAME} was pushed, but $ref is the newest version tag. This workflow packages the newest version only."
               exit 1
             fi
             git checkout -q --detach "$ref"
@@ -254,8 +258,10 @@ jobs:
           esac
 
       - name: Assemble the sources the spec asks for
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          v='${{ steps.version.outputs.version }}'
+          v="${VERSION}"
           rpmdev-setuptree
 
           # Source0 is the GitHub tarball of a tag. Here it is this commit,
@@ -390,6 +396,8 @@ jobs:
 
       - name: Collect
         id: collect
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           mkdir -p rpms
           cp ~/rpmbuild/RPMS/*/*.rpm ~/rpmbuild/SRPMS/*.rpm rpms/
@@ -410,7 +418,7 @@ jobs:
           # the time zone database, which is the thing most likely to
           # differ between two RPMs carrying the same csvdt version.
           {
-            echo "commit    ${{ steps.source.outputs.sha }}"
+            echo "commit    ${SOURCE_SHA}"
             echo "fedora    $(rpm --eval '%{?dist}' | tr -d '.')"
             echo "rustc     $(rustc --version)"
             echo "csvdt     $(csvdt --version)"
@@ -489,10 +497,14 @@ jobs:
           path: rpms
 
       - name: Publish
+        env:
+          BUILD_SOURCE_REF: ${{ needs.build.outputs.source_ref }}
+          BUILD_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           tag=rpm-release
-          repo='${{ github.repository }}'
-          sha='${{ needs.build.outputs.source_sha }}'
+          repo="${REPOSITORY}"
+          sha="${BUILD_SOURCE_SHA}"
           title='csvdt RPM (newest release)'
 
           # Stripped of whitespace before use: a secret pasted with a
@@ -511,7 +523,7 @@ jobs:
           push_remote="https://x-access-token:${TAG_PUSH_TOKEN}@github.com/${repo}.git"
 
           intro=$(cat <<EOF
-          The RPM of csvdt's newest released version, \`${{ needs.build.outputs.source_ref }}\`, replaced in place: this release holds one generation and no history. It is rebuilt when a version is tagged and by the monthly build, so what is in it is the current build of the released csvdt.
+          The RPM of csvdt's newest released version, \`${BUILD_SOURCE_REF}\`, replaced in place: this release holds one generation and no history. It is rebuilt when a version is tagged and by the monthly build, so what is in it is the current build of the released csvdt.
 
           A rebuild leaves the package's version-release alone, because the source it was built from did not change -- so \`dnf install\` fetches the current build of the release while \`dnf update\` sees nothing new in it. What does differ between two rebuilds is the time zone database and the Fedora they were built on, and \`RPM-BUILD-INFO\` is what says which.
           EOF
@@ -619,6 +631,8 @@ jobs:
       # downloads that one finds out. The monthly build learned this the hard
       # way and says so in its own comments; the same check belongs here.
       - name: Verify the release serves what was built, and steals nothing
+        env:
+          REPOSITORY: ${{ github.repository }}
         run: |
           tag=rpm-release
           published=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
@@ -640,7 +654,7 @@ jobs:
             echo "::error::$tag is not marked prerelease, so it can take the Latest designation away from the release the README points at."
             exit 1
           fi
-          actual_latest=$(gh api "repos/${{ github.repository }}/releases/latest" \
+          actual_latest=$(gh api "repos/${REPOSITORY}/releases/latest" \
                             --jq .tag_name 2>/dev/null || echo none)
           if [ "$actual_latest" = "$tag" ]; then
             echo "::error::GitHub now calls $tag the latest release, so a rolling RPM generation is what the repository offers as current rather than a version."
@@ -737,8 +751,10 @@ jobs:
       # What a version shipped as, kept with the version.
       - name: Attach the packages to the version's own release
         if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          tag='${{ github.ref_name }}'
+          tag="${REF_NAME}"
 
           # A release created in the web interface makes its own tag, so it
           # is usually already there by the time this runs. A tag pushed with
@@ -794,10 +810,14 @@ jobs:
       # holds both sets. Notes are written only on creation: the other job's
       # description of the same build is not worth overwriting.
       - name: Keep this build permanently
+        env:
+          BUILD_SOURCE_REF: ${{ needs.build.outputs.source_ref }}
+          BUILD_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+          KEPT_TAG: ${{ steps.kept.outputs.tag }}
         run: |
-          tag='${{ steps.kept.outputs.tag }}'
-          sha='${{ needs.build.outputs.source_sha }}'
-          ref='${{ needs.build.outputs.source_ref }}'
+          tag="${KEPT_TAG}"
+          sha="${BUILD_SOURCE_SHA}"
+          ref="${BUILD_SOURCE_REF}"
 
           # Permanent means permanent. The tag names the version, the commit
           # and the time zone database, but not the compiler or the Fedora

@@ -112,6 +112,9 @@ jobs:
       # succeeds over nothing. Measured, not assumed. The emptiness is what
       # the check below reports.
       - id: id
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           ref=$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
                   | sort -V | tail -n1)
@@ -124,9 +127,9 @@ jobs:
           # for an older series would hand all of it to a version that is
           # not current, so it stops here and says why rather than quietly
           # publishing something else.
-          if [ '${{ github.ref_type }}' = 'tag' ] \
-             && [ '${{ github.ref_name }}' != "$ref" ]; then
-            echo "::error::${{ github.ref_name }} was pushed, but $ref is the newest version tag. This workflow builds the newest version only."
+          if [ "${REF_TYPE}" = 'tag' ] \
+             && [ "${REF_NAME}" != "$ref" ]; then
+            echo "::error::${REF_NAME} was pushed, but $ref is the newest version tag. This workflow builds the newest version only."
             exit 1
           fi
           git checkout -q --detach "$ref"
@@ -451,12 +454,16 @@ jobs:
       # archiving.
       - name: Fingerprint this build
         id: fingerprint
+        env:
+          META_SHA: ${{ needs.meta.outputs.sha }}
+          VERSION_BASE: ${{ steps.version.outputs.base }}
+          VERSION_TZDATA: ${{ steps.version.outputs.tzdata }}
         run: |
           lock_hash=$(sha256sum release/Cargo.lock | cut -d' ' -f1)
           {
-            echo "csvdt          ${{ steps.version.outputs.base }}"
-            echo "tzdata         ${{ steps.version.outputs.tzdata }}"
-            echo "commit         ${{ needs.meta.outputs.sha }}"
+            echo "csvdt          ${VERSION_BASE}"
+            echo "tzdata         ${VERSION_TZDATA}"
+            echo "commit         ${META_SHA}"
             cat release/COMPILERS
             echo "cargo_lock     sha256:${lock_hash}"
           } > release/BUILD-INFO
@@ -480,6 +487,7 @@ jobs:
       - name: Compare against the last published build
         id: changed
         env:
+          FINGERPRINT_FP: ${{ steps.fingerprint.outputs.fp }}
           GH_TOKEN: ${{ github.token }}
         run: |
           # BUILD-INFO on the rolling release describes the last build that was
@@ -490,7 +498,7 @@ jobs:
             prev="none"
           fi
           echo "previous=$prev" >> "$GITHUB_OUTPUT"
-          if [ "$prev" = "${{ steps.fingerprint.outputs.fp }}" ]; then
+          if [ "$prev" = "${FINGERPRINT_FP}" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Inputs identical to the published build; nothing to release."
             diff previous-BUILD-INFO release/BUILD-INFO || true
@@ -514,13 +522,22 @@ jobs:
       - name: Publish
         if: steps.changed.outputs.changed == 'true'
         env:
+          FINGERPRINT_FP: ${{ steps.fingerprint.outputs.fp }}
+          META_BUILT: ${{ needs.meta.outputs.built }}
+          META_METADATA: ${{ needs.meta.outputs.metadata }}
+          META_REF: ${{ needs.meta.outputs.ref }}
+          META_SHA: ${{ needs.meta.outputs.sha }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION_BASE: ${{ steps.version.outputs.base }}
+          VERSION_CSVDT: ${{ steps.version.outputs.csvdt }}
+          VERSION_TZDATA: ${{ steps.version.outputs.tzdata }}
           GH_TOKEN: ${{ github.token }}
           TAG_PUSH_TOKEN: ${{ secrets.TAG_PUSH_TOKEN }}
         run: |
-          built="${{ needs.meta.outputs.built }}"
-          ref='${{ needs.meta.outputs.ref }}'
-          sha='${{ needs.meta.outputs.sha }}'
-          repo='${{ github.repository }}'
+          built="${META_BUILT}"
+          ref="${META_REF}"
+          sha="${META_SHA}"
+          repo="${REPOSITORY}"
 
           # Every tag this step writes goes through TAG_PUSH_TOKEN (a
           # fine-grained personal access token for this repository alone,
@@ -571,15 +588,15 @@ jobs:
           # The version alone does not identify a binary (two builds of one
           # tag can carry different zone rules) and neither does the commit,
           # for the same reason. This names all three.
-          archive_tag="${{ steps.version.outputs.base }}-${{ needs.meta.outputs.metadata }}-tzdata${{ steps.version.outputs.tzdata }}"
+          archive_tag="${VERSION_BASE}-${META_METADATA}-tzdata${VERSION_TZDATA}"
           echo "archive entry: $archive_tag"
 
           # Body shared by both releases; they carry identical assets and
           # differ only in the paragraph above this.
           common=$(cat <<EOF
-          **Bundled IANA time zone database: ${{ steps.version.outputs.tzdata }}**
+          **Bundled IANA time zone database: ${VERSION_TZDATA}**
 
-          \`-l/--local\` resolves zones against the database compiled into the binary rather than the one installed on the machine, so the same input converts identically on any host. This build knows the rules as of tzdata ${{ steps.version.outputs.tzdata }}; if a zone changes its rules later, use a newer build for timestamps affected by that change. \`-u\`, \`-o\`, \`-d\`, \`-s\` and \`-r\` involve no zone rules and are unaffected by the database version.
+          \`-l/--local\` resolves zones against the database compiled into the binary rather than the one installed on the machine, so the same input converts identically on any host. This build knows the rules as of tzdata ${VERSION_TZDATA}; if a zone changes its rules later, use a newer build for timestamps affected by that change. \`-u\`, \`-o\`, \`-d\`, \`-s\` and \`-r\` involve no zone rules and are unaffected by the database version.
 
           | file | platform |
           | --- | --- |
@@ -604,7 +621,7 @@ jobs:
           )
 
           archive_notes=$(cat <<EOF
-          Archived build of csvdt ${{ steps.version.outputs.csvdt }}, made ${built} from \`${ref}\` at \`${sha}\`.
+          Archived build of csvdt ${VERSION_CSVDT}, made ${built} from \`${ref}\` at \`${sha}\`.
 
           This release is never replaced. It exists so a result can be traced back to, and reproduced with, the exact binary that produced it -- which the version number alone cannot do, because a released version is rebuilt as the time zone database moves. For the current build of the newest release, use the \`release\` release instead.
 
@@ -661,7 +678,7 @@ jobs:
               rm -rf archived
             fi
             if [ -n "$published_fp" ] \
-               && [ "$published_fp" != "${{ steps.fingerprint.outputs.fp }}" ]; then
+               && [ "$published_fp" != "${FINGERPRINT_FP}" ]; then
               echo "::error::${archive_tag} already exists and describes a different build: same commit and same tzdata, different compiler. Its binaries are what someone citing that tag expects, so they are left untouched. Delete the tag deliberately if it must be replaced."
               exit 1
             fi
@@ -692,7 +709,7 @@ jobs:
             # failure a plain push gives it.
             git push "$push_remote" "$sha:refs/tags/$archive_tag"
             gh release create "$archive_tag" release/* \
-              --title "csvdt ${{ steps.version.outputs.csvdt }} - tzdata ${{ steps.version.outputs.tzdata }} (${built})" \
+              --title "csvdt ${VERSION_CSVDT} - tzdata ${VERSION_TZDATA} (${built})" \
               --notes "$archive_notes" \
               --latest=false
           fi
@@ -779,7 +796,7 @@ jobs:
                   fi
                 done
             gh release edit "$tag" \
-              --title "csvdt ${{ steps.version.outputs.csvdt }} - tzdata ${{ steps.version.outputs.tzdata }} (current build, ${built})" \
+              --title "csvdt ${VERSION_CSVDT} - tzdata ${VERSION_TZDATA} (current build, ${built})" \
               --notes "$rolling_notes" \
               --latest=false
           else
@@ -789,7 +806,7 @@ jobs:
             # partway produced the same self-masking state the update path
             # was rewritten to avoid.
             gh release create "$tag" $(cd release && ls | grep -vxF BUILD-INFO | sed 's|^|release/|') \
-              --title "csvdt ${{ steps.version.outputs.csvdt }} - tzdata ${{ steps.version.outputs.tzdata }} (current build, ${built})" \
+              --title "csvdt ${VERSION_CSVDT} - tzdata ${VERSION_TZDATA} (current build, ${built})" \
               --notes "$rolling_notes" \
               --latest=false
           fi
@@ -814,9 +831,10 @@ jobs:
       - name: Attach the binaries to the version's own release
         if: github.ref_type == 'tag'
         env:
+          REF_NAME: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag='${{ github.ref_name }}'
+          tag="${REF_NAME}"
 
           # Staged into a directory of its own rather than renamed in place.
           # One file has to be renamed (the RPM workflow attaches to this same
@@ -935,11 +953,13 @@ jobs:
       # found it unmoved, and two minutes later still.
       - name: The Latest designation belongs to the newest version release
         env:
+          META_REF: ${{ needs.meta.outputs.ref }}
+          REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          repo='${{ github.repository }}'
+          repo="${REPOSITORY}"
           # Named for the message below, which is about a specific version.
-          ref='${{ needs.meta.outputs.ref }}'
+          ref="${META_REF}"
 
           # Asked of GitHub rather than of git: this job checks out shallow
           # and has no tags to sort. Draft and prerelease entries cannot hold
@@ -968,27 +988,39 @@ jobs:
           echo "  ok  GitHub's latest release is $actual"
 
       - name: Summary
+        env:
+          CHANGED_CHANGED: ${{ steps.changed.outputs.changed }}
+          FINGERPRINT_FP: ${{ steps.fingerprint.outputs.fp }}
+          FRESHNESS_LATEST: ${{ steps.freshness.outputs.latest }}
+          FRESHNESS_STALE: ${{ steps.freshness.outputs.stale }}
+          FRESHNESS_USED: ${{ steps.freshness.outputs.used }}
+          META_REF: ${{ needs.meta.outputs.ref }}
+          META_SHA: ${{ needs.meta.outputs.sha }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          VERSION_CSVDT: ${{ steps.version.outputs.csvdt }}
+          VERSION_TZDATA: ${{ steps.version.outputs.tzdata }}
         run: |
           {
             echo "### Monthly build"
             echo ""
-            echo "Built \`${{ needs.meta.outputs.ref }}\` at \`${{ needs.meta.outputs.sha }}\`."
+            echo "Built \`${META_REF}\` at \`${META_SHA}\`."
             echo ""
-            if [ "${{ steps.changed.outputs.changed }}" = "true" ]; then
+            if [ "${CHANGED_CHANGED}" = "true" ]; then
               echo "Published: dependencies or toolchain changed since the last build, or the released version did."
             else
               echo "Nothing published: same commit, same dependencies and same compiler as the current build, so the binaries would be equivalent. The existing releases were left untouched."
             fi
-            if [ '${{ github.ref_type }}' = 'tag' ]; then
+            if [ "${REF_TYPE}" = 'tag' ]; then
               echo ""
-              echo "Also attached to the \`${{ github.ref_name }}\` release: the binaries that version shipped with, kept as they are."
+              echo "Also attached to the \`${REF_NAME}\` release: the binaries that version shipped with, kept as they are."
             fi
             echo ""
-            echo "- csvdt: \`${{ steps.version.outputs.csvdt }}\`"
-            echo "- bundled tzdata: \`${{ steps.version.outputs.tzdata }}\`"
-            echo "- build fingerprint: \`${{ steps.fingerprint.outputs.fp }}\`"
-            echo "- chrono-tz resolved: \`${{ steps.freshness.outputs.used }}\` (latest published: \`${{ steps.freshness.outputs.latest }}\`)"
-            if [ "${{ steps.freshness.outputs.stale }}" = "true" ]; then
+            echo "- csvdt: \`${VERSION_CSVDT}\`"
+            echo "- bundled tzdata: \`${VERSION_TZDATA}\`"
+            echo "- build fingerprint: \`${FINGERPRINT_FP}\`"
+            echo "- chrono-tz resolved: \`${FRESHNESS_USED}\` (latest published: \`${FRESHNESS_LATEST}\`)"
+            if [ "${FRESHNESS_STALE}" = "true" ]; then
               echo ""
               echo "> A newer chrono-tz exists than this build resolved. If the version series changed, update the requirement in \`Cargo.toml\`."
             fi
