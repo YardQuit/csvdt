@@ -761,8 +761,14 @@ jobs:
               --notes "See CHANGELOG.md for what changed in $tag." || true
           fi
 
+          # Only the names the entry lacks: a rerun finishing an interrupted
+          # upload, or the packages arriving beside the binaries. What is
+          # already there is a permanent record and is not written over.
+          have=$(gh release view "$tag" --json assets --jq '.assets[].name')
           for asset in $(cd archive && ls); do
-            gh release upload "$tag" "archive/$asset" --clobber
+            if ! printf '%s\n' "$have" | grep -qxF -- "$asset"; then
+              gh release upload "$tag" "archive/$asset"
+            fi
           done
 
           published=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
@@ -821,14 +827,24 @@ jobs:
           # that produces different packages is refused, since only a person
           # can say which of the two should keep the name.
           if gh release view "$tag" >/dev/null 2>&1; then
-            if gh release download "$tag" -p RPM-BUILD-INFO -D published 2>/dev/null; then
+            # No RPM-BUILD-INFO on the entry is ordinary: the monthly build's
+            # binaries job may have created it first, and the packages are
+            # then simply added. One that is listed but cannot be downloaded
+            # proves nothing about what it holds, so it stops the run rather
+            # than being read as "nothing to compare against".
+            have=$(gh release view "$tag" --json assets --jq '.assets[].name')
+            if printf '%s\n' "$have" | grep -qxF RPM-BUILD-INFO; then
+              if ! gh release download "$tag" -p RPM-BUILD-INFO -D published; then
+                echo "::error::${tag} lists an RPM-BUILD-INFO that could not be downloaded, so what it holds cannot be compared with this build. Nothing was changed."
+                exit 1
+              fi
               if ! cmp -s published/RPM-BUILD-INFO archive/RPM-BUILD-INFO; then
                 echo "::error::${tag} already holds different packages: same version, commit and time zone database, but a different compiler or Fedora release. They are what someone citing that tag expects, so they are left untouched. Delete the tag deliberately if it must be replaced."
                 diff published/RPM-BUILD-INFO archive/RPM-BUILD-INFO || true
                 exit 1
               fi
+              rm -rf published
             fi
-            rm -rf published
           else
             notes=$(cat <<EOF
           Archived build of csvdt \`${ref}\` from \`${sha}\`, carrying IANA time zone database \`$(printf '%s' "$tag" | sed 's/.*-tzdata//')\`.
@@ -865,8 +881,14 @@ jobs:
               --latest=false || true
           fi
 
+          # Only the names the entry lacks: a rerun finishing an interrupted
+          # upload, or the packages arriving beside the binaries. What is
+          # already there is a permanent record and is not written over.
+          have=$(gh release view "$tag" --json assets --jq '.assets[].name')
           for asset in $(cd archive && ls); do
-            gh release upload "$tag" "archive/$asset" --clobber
+            if ! printf '%s\n' "$have" | grep -qxF -- "$asset"; then
+              gh release upload "$tag" "archive/$asset"
+            fi
           done
 
           published=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
