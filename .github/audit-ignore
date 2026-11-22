@@ -1,0 +1,17 @@
+# Advisories that cargo audit is told to pass over, one per line.
+#
+# The audit stops a monthly build, and a pull request that touches Cargo.lock
+# or Cargo.toml, on any known vulnerability in the locked dependencies. An
+# advisory belongs here only when it has been read and does not apply to csvdt:
+# the vulnerable function is never called, or the condition it needs cannot
+# arise in a program that reads CSV from a file or a pipe. A dependency that
+# is merely out of date, or an advisory nobody has had time to read, does not
+# belong here; update the dependency or read the advisory.
+#
+# Format: the advisory ID first, then a comment saying why it does not apply,
+# on the same line or the lines above it. A line starting with # is ignored.
+# Remove the entry when the crate is updated past the advisory.
+#
+#   RUSTSEC-0000-0000  # reason this does not apply to csvdt
+#
+# No advisory is ignored at present.

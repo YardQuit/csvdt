@@ -1,0 +1,46 @@
+# Checks the locked dependencies against the RustSec advisory database when
+# they, or the rules for checking them, change.
+#
+# Cargo.lock is committed, so what a tag builds is a fixed set that nothing
+# else re-examines between releases. The monthly build audits the set it is
+# about to publish; this runs when a change to Cargo.lock or Cargo.toml is
+# proposed or lands, so a vulnerable version is found in the pull request that
+# brings it in and not on the first of the next month.
+#
+# An advisory that does not apply is listed, with its reason, in
+# .github/audit-ignore.
+name: Audit
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - '.github/audit-ignore'
+      - '.github/scripts/audit.sh'
+      - '.github/workflows/audit.yml'
+  pull_request:
+    paths:
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - '.github/audit-ignore'
+      - '.github/scripts/audit.sh'
+      - '.github/workflows/audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    # Includes compiling cargo-audit, which is most of it.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Audit
+        run: .github/scripts/audit.sh
