@@ -113,6 +113,7 @@ run_check tallies       python
 run_check memory        python
 run_check timing        python
 run_check option_matrix python
+run_check lines         python
 run_check readme_examples python
 
 if command -v "$emacs" >/dev/null; then

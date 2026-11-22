@@ -44,7 +44,7 @@ sys.exit(subprocess.run(real, env=env).returncode)
 # and timing.py build large files and are left out for the time they take.
 QUICK = ["csv_roundtrip", "quoting", "timestamps", "durations", "local",
          "columns", "list_options", "canonical", "peek", "exit_status",
-         "tallies", "option_matrix", "readme_examples"]
+         "tallies", "option_matrix", "readme_examples", "lines"]
 
 
 def write_stub(directory, name, body):
@@ -84,7 +84,7 @@ class SilenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             stub = write_stub(directory, "csvdt", SILENT)
             for name in ["csv_roundtrip", "quoting", "timestamps", "durations",
-                         "list_options"]:
+                         "list_options", "lines"]:
                 with self.subTest(check=name):
                     self.assertNotEqual(run_check(name, stub).returncode, 0)
 
