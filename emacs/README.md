@@ -14,15 +14,18 @@ to know them:
   against the binary's path and modification time, so a rebuild invalidates it
   by itself, without spawning csvdt again to ask.
 
-Result: **no csvdt option name appears anywhere in `csvdt.el`** beyond the three
-it calls to ask (`--list-options`, `--help`, `--version`) and the few a
-defcustom holds: `csvdt-header-options`, which the package must recognise to
-know when a region needs the buffer's header in front of it, and
+Result: the package depends on no csvdt option name beyond the three it calls
+to ask (`--list-options`, `--help`, `--version`) and the ones three defcustoms
+hold: `csvdt-header-options`, which the package must recognise to know when a
+region needs the buffer's header in front of it, and
 `csvdt-single-quote-options` and `csvdt-read-delimiter-options`, which say
 where one record ends and the next begins. A test asserts each of them is
-still an option csvdt reports. Add an option to csvdt and it is
-completable in Emacs immediately, with no change here, checked literally, by
-diffing the discovered set against the binary.
+still an option csvdt reports, and another that no other long option name
+appears in `csvdt.el`. Short options are not covered by that test: the `-H -p`
+in `csvdt-default-arguments` is a default you can change, which the package
+does not depend on. Add an option to csvdt and it is completable in Emacs
+immediately, with no change here, checked literally, by diffing the discovered
+set against the binary.
 
 `--list-options` also says how each value must be attached, which the help
 layout doesn't make machine-readable. `--flexible` is the one option whose value
@@ -621,9 +624,9 @@ run already starts at the header, so nothing is prepended; nor is anything when
 the arguments do not ask for a header, since that would add a row the selection
 does not have.
 
-This is the one place the package names a csvdt option, in
-`csvdt-header-options`: it cannot know which option means "header" otherwise,
-and `--list-options` does not say. Both forms are listed, and a clustered
+`csvdt-header-options` is where the package learns which option means
+"header", which it cannot know otherwise, since `--list-options` does not say.
+Both forms are listed, and a clustered
 `-Hp` counts too, worked out from what csvdt reports about which short options
 take a value. A test asserts every configured form is an option csvdt actually
 reports, so a rename fails the build rather than silently disabling the feature.
