@@ -1,4 +1,4 @@
-// The command line: the options, their help, and the flags a run is given.
+//! The command line: the options, their help, and the flags a run is given.
 
 use std::error::Error;
 use chrono::FixedOffset;
@@ -9,34 +9,38 @@ use crate::man;
 use crate::zone::*;
 use crate::{fatal, answer, answered, say_as_clap_would, without_trailing_padding};
 
-// What --flexible does about records narrower than the rest.
+/// What --flexible does about records narrower than the rest.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub(crate) enum FillMode {
-    // Bare -f: let uneven records through untouched.
+    /// Bare -f: let uneven records through untouched.
     #[default]
     Off,
-    // -f=fix: pad out to the first record's width in a single pass, which is
-    // all a stream allows.
+    /// -f=fix: pad out to the first record's width in a single pass, which is
+    /// all a stream allows.
     FirstRecord,
-    // -f=widest: read the file once to find the widest record, then pad
-    // everything to that. Needs a file it can read twice.
+    /// -f=widest: read the file once to find the widest record, then pad
+    /// everything to that. Needs a file it can read twice.
     Widest,
 }
 
-// How --quote has the writer quote fields. Resolved from the option's word
-// once, at startup, so the checks made on every written field compare an enum
-// rather than lowercasing and matching the word again.
+/// How --quote has the writer quote fields. Resolved from the option's word
+/// once, at startup, so the checks made on every written field compare an enum
+/// rather than lowercasing and matching the word again.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Quoting {
+    /// Every field quoted.
     Always,
+    /// A field quoted only where it has to be, the default.
     #[default]
     Necessary,
+    /// No field quoted, even where that writes CSV that cannot be read back.
     Never,
+    /// Every field quoted that is not a number.
     NonNumeric,
 }
 
 impl Quoting {
-    // The csv crate's setting for this style.
+    /// The csv crate's setting for this style.
     pub(crate) fn style(self) -> csv::QuoteStyle {
         match self {
             Quoting::Always => csv::QuoteStyle::Always,
@@ -47,105 +51,140 @@ impl Quoting {
     }
 }
 
-// The one action a run carries out on each row, with what it needs beyond
-// the column it reads, which is ArgumentFlags::selected_column. clap refuses
-// two actions together, so one value says which it is.
+/// The one action a run carries out on each row, with what it needs beyond
+/// the column it reads, which is ArgumentFlags::selected_column. clap refuses
+/// two actions together, so one value says which it is.
 #[derive(Default, Debug, Clone)]
 pub(crate) enum Action {
-    // No action: the rows are written as they were read, reformatted.
+    /// No action: the rows are written as they were read, reformatted.
     #[default]
     Passthrough,
-    // -s/--split: the timestamp's date and time, as two columns.
+    /// -s/--split: the timestamp's date and time, as two columns.
     Split,
-    // -r/--rfc3339: epoch seconds to RFC3339.
+    /// -r/--rfc3339: epoch seconds to RFC3339.
     ToRfc3339,
-    // -u/--utc.
+    /// -u/--utc.
     ToUtc,
-    // -l/--local, in the zone resolved at startup; None leaves the zone to
-    // chrono, which reads a POSIX rule in TZ itself.
+    /// -l/--local, in the zone resolved at startup; None leaves the zone to
+    /// chrono, which reads a POSIX rule in TZ itself.
     ToLocal(Option<chrono_tz::Tz>),
-    // -o/--offset, to the offset given.
+    /// -o/--offset, to the offset given.
     ToOffset(FixedOffset),
-    // -d/--duration: from the previous row's timestamp, or, with a second
-    // column, between the two columns of the same row.
-    Duration { second: Option<usize> },
-    // --remove: the columns to drop, highest index first, so dropping one
-    // never shifts another still to come.
+    /// -d/--duration: from the previous row's timestamp, or, with a second
+    /// column, between the two columns of the same row.
+    Duration {
+        /// The second column of the two-column form.
+        second: Option<usize>,
+    },
+    /// --remove: the columns to drop, highest index first, so dropping one
+    /// never shifts another still to come.
     Remove(Vec<usize>),
-    // -a/--arrange: the columns to put first, in the order given, and the
-    // same set sorted, so whether a column was named is a binary search.
-    Arrange { order: Vec<usize>, listed: Vec<usize> },
+    /// -a/--arrange: the columns to put first, in the order given, and the
+    /// same set sorted, so whether a column was named is a binary search.
+    Arrange {
+        /// The columns named, in the order given.
+        order: Vec<usize>,
+        /// The same columns, sorted.
+        listed: Vec<usize>,
+    },
 }
 
-// Where -i puts a converted column relative to the column it is given.
+/// Where -i puts a converted column relative to the column it is given.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub(crate) enum InsertPosition {
+    /// Ahead of the column.
     Before,
+    /// Over the column.
     Replace,
+    /// Behind the column, the default.
     #[default]
     After,
 }
 
+/// Everything a run was asked to do, read from the command line once, at
+/// startup, so the row loop works with resolved values only.
 #[derive(Default, Debug, Clone)]
 pub(crate) struct ArgumentFlags {
-    pub(crate) input_file: Option<std::path::PathBuf>, // FILE; None reads standard input
-    pub(crate) has_headers: bool,                    // -H
-    pub(crate) peek: bool,                           // --peek
-    pub(crate) output_header: bool,                  // -p --print-header
-    pub(crate) flexible_record: bool,                // -f --flexible
-    pub(crate) fill_mode: FillMode,                  // --flexible's mode
-    pub(crate) action: Action,                       // the one action asked for, if any
-    pub(crate) selected_column: usize,               // the action's own (first) column
-    pub(crate) insert_column: Option<i64>,           // -i's column; None means "use the action's own"
-    pub(crate) insert_position: InsertPosition,      // -i's before/after/replace word; default after
-    pub(crate) round_seconds: bool,                  // --round-seconds
-    pub(crate) whitespace_trim: csv::Trim,           // --trim
-    pub(crate) input_delimiter: Option<char>,        // --read-delimiter
-    pub(crate) input_quotes: bool,                   // --single-quotes
-    pub(crate) read_as_comment: Option<char>,        // --comment
-    pub(crate) fill_log: Option<std::path::PathBuf>, // --fill-log's destination; "-" is stderr
-    pub(crate) flush_each_record: bool,              // standard output is a terminal
-    pub(crate) output_delimiter: Option<char>,       // --print-delimiter
-    pub(crate) output_quotes: Quoting,               // --quote
+    /// The input file, FILE. None reads standard input.
+    pub(crate) input_file: Option<std::path::PathBuf>,
+    /// -H/--has-header: the first record is a header, not data.
+    pub(crate) has_headers: bool,
+    /// --peek: show the top of the input as a numbered table instead of a run.
+    pub(crate) peek: bool,
+    /// -p/--print-header: write the header to the output.
+    pub(crate) output_header: bool,
+    /// -f/--flexible in any mode: records may differ in width.
+    pub(crate) flexible_record: bool,
+    /// What --flexible does about a narrow record: nothing, or pad it.
+    pub(crate) fill_mode: FillMode,
+    /// The one action asked for, or Passthrough when none was.
+    pub(crate) action: Action,
+    /// The column the action reads; the first of two for -d.
+    pub(crate) selected_column: usize,
+    /// -i/--insert's column, where the result goes. None puts it at the action's own.
+    pub(crate) insert_column: Option<i64>,
+    /// -i/--insert's position word: before, replace or, by default, after.
+    pub(crate) insert_position: InsertPosition,
+    /// --round-seconds: round -d's result to whole seconds.
+    pub(crate) round_seconds: bool,
+    /// --trim: the whitespace the reader takes off fields and headers.
+    pub(crate) whitespace_trim: csv::Trim,
+    /// --read-delimiter: the delimiter read, when not a comma.
+    pub(crate) input_delimiter: Option<char>,
+    /// --single-quote: the reader quotes with ' rather than ".
+    pub(crate) input_quotes: bool,
+    /// --comment: the character that starts a comment line when reading.
+    pub(crate) read_as_comment: Option<char>,
+    /// --fill-log's destination; "-" is standard error.
+    pub(crate) fill_log: Option<std::path::PathBuf>,
+    /// Whether each row is flushed as it is written, which is done when standard output is a terminal.
+    pub(crate) flush_each_record: bool,
+    /// --print-delimiter: the delimiter written, when not a comma.
+    pub(crate) output_delimiter: Option<char>,
+    /// --quote: how the writer quotes fields.
+    pub(crate) output_quotes: Quoting,
 }
 
-// The words --trim, --quote, --flexible and -i's position accept, each beside
-// what it stands for. All may be abbreviated, and all are matched
-// case-insensitively, from this one table each: clap's list of accepted values
-// and the meaning of each are both read from it, so the two cannot drift
-// apart. A second hand-written copy at the point of use could: if one copy
-// lowercased and the other did not, '--trim ALL' would pass clap, match
-// nothing, and silently mean '--trim none'.
+/// The words --trim, --quote, --flexible and -i's position accept, each beside
+/// what it stands for. All may be abbreviated, and all are matched
+/// case-insensitively, from this one table each: clap's list of accepted values
+/// and the meaning of each are both read from it, so the two cannot drift
+/// apart. A second hand-written copy at the point of use could: if one copy
+/// lowercased and the other did not, '--trim ALL' would pass clap, match
+/// nothing, and silently mean '--trim none'.
 pub(crate) type Choices<T> = [(&'static str, T)];
 
+/// --trim's words.
 pub(crate) const TRIMS: [(&str, csv::Trim); 4] = [
     ("all", csv::Trim::All),
     ("fields", csv::Trim::Fields),
     ("headers", csv::Trim::Headers),
     ("none", csv::Trim::None),
 ];
+/// --quote's words.
 pub(crate) const QUOTINGS: [(&str, Quoting); 4] = [
     ("always", Quoting::Always),
     ("necessary", Quoting::Necessary),
     ("never", Quoting::Never),
     ("nonnumeric", Quoting::NonNumeric),
 ];
-// -i/--insert's position word. Not a clap value_parser: -i takes
-// "column,position" as one value, so the word is parsed out of it by hand.
+/// -i/--insert's position word. Not a clap value_parser: -i takes
+/// "column,position" as one value, so the word is parsed out of it by hand.
 pub(crate) const POSITIONS: [(&str, InsertPosition); 3] = [
     ("before", InsertPosition::Before),
     ("replace", InsertPosition::Replace),
     ("after", InsertPosition::After),
 ];
+/// --flexible's modes.
 pub(crate) const FLEXIBLE_MODES: [(&str, FillMode); 3] = [
     ("keep", FillMode::Off),
     ("fix", FillMode::FirstRecord),
     ("widest", FillMode::Widest),
 ];
 
-// Every abbreviation of these values clap should accept: each prefix that only
-// one of them has. A prefix two of them share is left out, so 'n' is refused
-// rather than resolved to whichever of never/necessary/nonnumeric comes first.
+/// Every abbreviation of these values clap should accept: each prefix that only
+/// one of them has. A prefix two of them share is left out, so 'n' is refused
+/// rather than resolved to whichever of never/necessary/nonnumeric comes first.
 pub(crate) fn abbreviated_values<T>(choices: &Choices<T>) -> Vec<PossibleValue> {
     let unambiguous = |prefix: &str| {
         choices.iter().filter(|(full, _)| full.starts_with(prefix)).count() == 1
@@ -164,9 +203,9 @@ pub(crate) fn abbreviated_values<T>(choices: &Choices<T>) -> Vec<PossibleValue> 
     possible
 }
 
-// What a given value stands for. Only prefixes of exactly one full form are
-// accepted above, so matching on the prefix cannot be ambiguous. Asked once
-// per option at startup, never per row.
+/// What a given value stands for. Only prefixes of exactly one full form are
+/// accepted above, so matching on the prefix cannot be ambiguous. Asked once
+/// per option at startup, never per row.
 pub(crate) fn resolve_value<T: Copy>(choices: &Choices<T>, given: &str) -> Option<T> {
     let given = given.to_lowercase();
     let mut matching = choices.iter().filter(|(full, _)| full.starts_with(&given));
@@ -176,15 +215,15 @@ pub(crate) fn resolve_value<T: Copy>(choices: &Choices<T>, given: &str) -> Optio
     }
 }
 
-// Reads the single character an option like --read-delimiter takes.
-//
-// The CSV reader and writer work in bytes, so the value has to be one ASCII
-// character, since a multi-byte one cannot be a byte. The check counts
-// characters, so a single non-ASCII one is reported as such. An
-// empty value is refused rather than quietly leaving the default in place: it
-// is far more often an unset shell variable than a request for the default,
-// and silently reading with the wrong delimiter is the kind of thing that is
-// noticed several steps later, if at all.
+/// Reads the single character an option like --read-delimiter takes.
+///
+/// The CSV reader and writer work in bytes, so the value has to be one ASCII
+/// character, since a multi-byte one cannot be a byte. The check counts
+/// characters, so a single non-ASCII one is reported as such. An
+/// empty value is refused rather than quietly leaving the default in place: it
+/// is far more often an unset shell variable than a request for the default,
+/// and silently reading with the wrong delimiter is the kind of thing that is
+/// noticed several steps later, if at all.
 pub(crate) fn parse_single_ascii_char(option: &str, value: &str) -> Result<char, Box<dyn Error>> {
     let invalid = |message: String| -> Box<dyn Error> {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, message))
@@ -209,17 +248,17 @@ pub(crate) fn parse_single_ascii_char(option: &str, value: &str) -> Result<char,
     }
 }
 
-// Explains a column number that will not parse, naming the option and showing
-// what it was given. Rust's own ParseIntError ("invalid digit found in
-// string") names neither the option nor the value, so `-a "1, 2"` would report
-// a problem with a digit without mentioning the space, the list, or --arrange.
+/// Explains a column number that will not parse, naming the option and showing
+/// what it was given. Rust's own ParseIntError ("invalid digit found in
+/// string") names neither the option nor the value, so `-a "1, 2"` would report
+/// a problem with a digit without mentioning the space, the list, or --arrange.
 pub(crate) fn invalid_column(option: &str, value: &str, signed: bool) -> Box<dyn Error> {
     invalid_column_of(option, value, value, signed)
 }
 
-// The same, for VALUE that failed as one part of WHOLE, which is what the
-// message quotes: -d's "1,0," reported as "0," would show a value nobody
-// typed. The explanation still comes from the part that failed.
+/// The same, for VALUE that failed as one part of WHOLE, which is what the
+/// message quotes: -d's "1,0," reported as "0," would show a value nobody
+/// typed. The explanation still comes from the part that failed.
 pub(crate) fn invalid_column_of(option: &str, value: &str, whole: &str, signed: bool) -> Box<dyn Error> {
     let detail = if value.is_empty() && whole.is_empty() {
         "was given an empty column number. A stray comma leaves one empty, as \
@@ -245,26 +284,27 @@ pub(crate) fn invalid_column_of(option: &str, value: &str, whole: &str, signed: 
         std::io::ErrorKind::InvalidData, format!("'{option}' {detail}")))
 }
 
+/// Reads one column number for OPTION, explaining a value that is not one.
 pub(crate) fn parse_column(option: &str, value: &str) -> Result<usize, Box<dyn Error>> {
     value.parse::<usize>().map_err(|_| invalid_column(option, value, false))
 }
 
-// -i/--insert's column may be negative, since it is clamped into the row rather
-// than refused, so the message for it does not rule a minus sign out.
+/// -i/--insert's column may be negative, since it is clamped into the row rather
+/// than refused, so the message for it does not rule a minus sign out.
 pub(crate) fn parse_signed_column(option: &str, value: &str) -> Result<i64, Box<dyn Error>> {
     value.parse::<i64>().map_err(|_| invalid_column(option, value, true))
 }
 
-// Each column of a "0,2,3" list, reported one value at a time rather than as
-// the whole list, since one value is what failed.
+/// Each column of a "0,2,3" list, reported one value at a time rather than as
+/// the whole list, since one value is what failed.
 pub(crate) fn parse_column_list(option: &str, value: &str) -> Result<Vec<usize>, Box<dyn Error>> {
     value.split(',').map(|part| parse_column(option, part)).collect()
 }
 
-// The first column named more than once in a list, if any. Both options that
-// take a list refuse a repeat: for -a the list is the new order, so a repeat
-// would duplicate a field and leave the row wider than it came in, and for
-// --remove it is a miscount, a list that does not say what it looks like.
+/// The first column named more than once in a list, if any. Both options that
+/// take a list refuse a repeat: for -a the list is the new order, so a repeat
+/// would duplicate a field and leave the row wider than it came in, and for
+/// --remove it is a miscount, a list that does not say what it looks like.
 pub(crate) fn repeated_column(columns: &[usize]) -> Option<usize> {
     let mut sorted = columns.to_vec();
     sorted.sort_unstable();
@@ -274,6 +314,7 @@ pub(crate) fn repeated_column(columns: &[usize]) -> Option<usize> {
         .map(|pair| pair[0])
 }
 
+/// The refusal of a column OPTION names twice, saying why with BECAUSE.
 pub(crate) fn repeated_column_error(option: &str, column: usize, because: &str) -> Box<dyn Error> {
     Box::new(std::io::Error::new(
         std::io::ErrorKind::InvalidData,
@@ -282,26 +323,27 @@ pub(crate) fn repeated_column_error(option: &str, column: usize, because: &str) 
     ))
 }
 
-// The range real UTC offsets occupy: -12:00 (Baker Island) to +14:00 (the
-// Line Islands). No place has ever used anything outside it.
+/// The range real UTC offsets occupy: -12:00 (Baker Island) to +14:00 (the
+/// Line Islands). No place has ever used anything outside it.
 pub(crate) const MIN_TARGET_OFFSET_SECONDS: i32 = -12 * 3600;
+/// The highest of that range.
 pub(crate) const MAX_TARGET_OFFSET_SECONDS: i32 = 14 * 3600;
 
-// Parses a standalone UTC offset for -o/--offset: Z in either case, or a
-// sign, two digits of hours and two of minutes with or without a colon
-// between them ("+02:00", "-0600"), which is the offset a timestamp carries,
-// with the "+HHMM" leniency the reader allows. Nothing else is taken, not
-// even surrounding blanks: an offset is read by its shape here rather than
-// glued onto a timestamp and parsed with it, which let ".5Z" through as a
-// fraction of a second followed by Z.
-//
-// Offsets outside the range real places use are rejected. chrono itself
-// accepts anything up to +/-23:59, so without this a typo like "+15:00" for
-// "+05:00" would be honoured and produce a plausible-looking timestamp
-// carrying an offset that cannot exist, exactly the sort of quiet error
-// this tool otherwise goes out of its way not to make. Only the target
-// that was asked for is checked; offsets found in the data are left alone, since
-// those are the input's business rather than a mistake in the command.
+/// Parses a standalone UTC offset for -o/--offset: Z in either case, or a
+/// sign, two digits of hours and two of minutes with or without a colon
+/// between them ("+02:00", "-0600"), which is the offset a timestamp carries,
+/// with the "+HHMM" leniency the reader allows. Nothing else is taken, not
+/// even surrounding blanks: an offset is read by its shape here rather than
+/// glued onto a timestamp and parsed with it, which let ".5Z" through as a
+/// fraction of a second followed by Z.
+///
+/// Offsets outside the range real places use are rejected. chrono itself
+/// accepts anything up to +/-23:59, so without this a typo like "+15:00" for
+/// "+05:00" would be honoured and produce a plausible-looking timestamp
+/// carrying an offset that cannot exist, exactly the sort of quiet error
+/// this tool otherwise goes out of its way not to make. Only the target
+/// that was asked for is checked; offsets found in the data are left alone, since
+/// those are the input's business rather than a mistake in the command.
 pub(crate) fn parse_offset(value: &str) -> Result<FixedOffset, Box<dyn Error>> {
     let malformed = || -> Box<dyn Error> {
         Box::new(std::io::Error::new(
@@ -346,9 +388,9 @@ pub(crate) fn parse_offset(value: &str) -> Result<FixedOffset, Box<dyn Error>> {
     FixedOffset::east_opt(seconds).ok_or_else(malformed)
 }
 
-// Reads the position word from -i's second value, which may be abbreviated.
-// It becomes an InsertPosition here, once, so a typo is a clean startup error
-// and the row loop works with the enum alone.
+/// Reads the position word from -i's second value, which may be abbreviated.
+/// It becomes an InsertPosition here, once, so a typo is a clean startup error
+/// and the row loop works with the enum alone.
 pub(crate) fn parse_position_word(word: &str) -> Result<InsertPosition, Box<dyn Error>> {
     resolve_value(&POSITIONS, word)
         .ok_or_else(|| {
@@ -359,21 +401,21 @@ pub(crate) fn parse_position_word(word: &str) -> Result<InsertPosition, Box<dyn 
         })
 }
 
-// The parser for an option that names a file: the value as the operating
-// system gave it, empty or not, and whether or not it is UTF-8.
+/// The parser for an option that names a file: the value as the operating
+/// system gave it, empty or not, and whether or not it is UTF-8.
 pub(crate) fn path_value() -> impl clap::builder::TypedValueParser<Value = std::path::PathBuf> {
     use clap::builder::TypedValueParser;
     clap::builder::OsStringValueParser::new().map(std::path::PathBuf::from)
 }
 
-// The format version reported on --list-options' first line. Bump it only if
-// the meaning of a field changes; adding a comment line or an option does not,
-// since consumers are told to skip comments and read fields positionally.
+/// The format version reported on --list-options' first line. Bump it only if
+/// the meaning of a field changes; adding a comment line or an option does not,
+/// since consumers are told to skip comments and read fields positionally.
 pub(crate) const OPTION_LIST_VERSION: u32 = 1;
 
-// Renders --list-options' output by asking clap what it was given, so the list
-// cannot disagree with the options that actually exist. Nothing here names an
-// option: a new .arg() appears in the output with no change to this function.
+/// Renders --list-options' output by asking clap what it was given, so the list
+/// cannot disagree with the options that actually exist. Nothing here names an
+/// option: a new .arg() appears in the output with no change to this function.
 pub(crate) fn option_list(command: &clap::Command) -> String {
     // build() is what adds the automatic --help and --version, which are as
     // real to a caller as the ones declared by hand.
@@ -421,20 +463,20 @@ pub(crate) fn option_list(command: &clap::Command) -> String {
     out
 }
 
-// The one-line form of a help text: the sentence it opens with.
-//
-// -h and --help are one text at two depths rather than two texts. A second
-// corpus of one-liners would be a second thing to keep true, and the first
-// thing to go stale, which is the argument this program already makes for
-// generating its manual page rather than keeping one by hand. Every file in
-// src/help opens with a sentence saying what the option is; the summary is
-// that sentence, taken rather than written again.
-//
-// A sentence ends at a full stop outside brackets. Inside them it does not:
-// four entries carry an "(e.g. -o1,-06:00)" whose stop would cut the line in
-// half, and the syntax it shows is the part a reader of the short help most
-// needs. Reflowed, because the corpus is wrapped for the long form and the
-// short one is a single sentence for clap to wrap to the terminal.
+/// The one-line form of a help text: the sentence it opens with.
+///
+/// -h and --help are one text at two depths rather than two texts. A second
+/// corpus of one-liners would be a second thing to keep true, and the first
+/// thing to go stale, which is the argument this program already makes for
+/// generating its manual page rather than keeping one by hand. Every file in
+/// src/help opens with a sentence saying what the option is; the summary is
+/// that sentence, taken rather than written again.
+///
+/// A sentence ends at a full stop outside brackets. Inside them it does not:
+/// four entries carry an "(e.g. -o1,-06:00)" whose stop would cut the line in
+/// half, and the syntax it shows is the part a reader of the short help most
+/// needs. Reflowed, because the corpus is wrapped for the long form and the
+/// short one is a single sentence for clap to wrap to the terminal.
 pub(crate) fn help_summary(text: &str) -> String {
     let flowed = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut depth = 0usize;
@@ -455,25 +497,25 @@ pub(crate) fn help_summary(text: &str) -> String {
     wrapped(&flowed[..end])
 }
 
-// The column the whole help corpus is written to.
+/// The column the whole help corpus is written to.
 pub(crate) const HELP_COLUMNS: usize = 64;
 
-// TEXT folded to that column.
-//
-// clap only wraps text with its wrap_help feature, which this program does
-// not take: the corpus is folded by hand instead, so that what a reader sees
-// is what was written and a table stays a table. A summary is made rather
-// than written, so it has to be folded here or not at all, left flowing,
-// one ran a single line of -h out to 211 columns.
-//
-// A word naming an option is joined to the word before it, and the pair is
-// what gets placed. In the description column a line beginning '--' reads as
-// the start of a new entry, to someone skimming and to anything parsing the
-// output. Mending a bad break after making it, by moving the word before it
-// down until the line no longer starts with '--', would leave '--version or
-// ...' at a line start where two option names fall together, or push lines
-// past 64 columns by adding to a line already full. Joining first means
-// there is nothing to mend afterwards.
+/// TEXT folded to that column.
+///
+/// clap only wraps text with its wrap_help feature, which this program does
+/// not take: the corpus is folded by hand instead, so that what a reader sees
+/// is what was written and a table stays a table. A summary is made rather
+/// than written, so it has to be folded here or not at all, left flowing,
+/// one ran a single line of -h out to 211 columns.
+///
+/// A word naming an option is joined to the word before it, and the pair is
+/// what gets placed. In the description column a line beginning '--' reads as
+/// the start of a new entry, to someone skimming and to anything parsing the
+/// output. Mending a bad break after making it, by moving the word before it
+/// down until the line no longer starts with '--', would leave '--version or
+/// ...' at a line start where two option names fall together, or push lines
+/// past 64 columns by adding to a line already full. Joining first means
+/// there is nothing to mend afterwards.
 pub(crate) fn wrapped(text: &str) -> String {
     let mut atoms: Vec<String> = Vec::new();
     for word in text.split_whitespace() {
@@ -500,18 +542,18 @@ pub(crate) fn wrapped(text: &str) -> String {
     lines.join("\n")
 }
 
-// The opening paragraph of TEXT, for the same reason: the short help wants
-// the introduction, and the paragraphs after it are reference material that
-// a reader asking for a summary did not ask for.
-//
-// Keeps the newline the paragraph ends on, which is the blank line the help
-// template puts between the introduction and the usage line.
-//
-// A paragraph ends at a blank line, which is not the same as ending at
-// "\n\n": git hands a Windows checkout the corpus with CRLF endings, where
-// the blank line is "\r\n\r\n" and the shorter pattern is nowhere in the
-// file, so -h would print the whole introduction, the durations paragraph
-// included.
+/// The opening paragraph of TEXT, for the same reason: the short help wants
+/// the introduction, and the paragraphs after it are reference material that
+/// a reader asking for a summary did not ask for.
+///
+/// Keeps the newline the paragraph ends on, which is the blank line the help
+/// template puts between the introduction and the usage line.
+///
+/// A paragraph ends at a blank line, which is not the same as ending at
+/// "\n\n": git hands a Windows checkout the corpus with CRLF endings, where
+/// the blank line is "\r\n\r\n" and the shorter pattern is nowhere in the
+/// file, so -h would print the whole introduction, the durations paragraph
+/// included.
 pub(crate) fn first_paragraph(text: &str) -> &str {
     let mut at = 0;
     for line in text.split_inclusive('\n') {
@@ -523,38 +565,65 @@ pub(crate) fn first_paragraph(text: &str) -> &str {
     text
 }
 
+/// The layout clap fills to print the help.
 const TEMPLATE: &str = include_str!("./help/help_template.txt");
+/// What csvdt is for: the opening of -h, all of it in --help and the manual page.
 const ABOUT: &str = include_str!("./help/about.txt");
+/// The help for the FILE argument.
 const FILE: &str = include_str!("./help/file.txt");
+/// The help for -H/--has-header.
 const HAS_HEADER: &str = include_str!("./help/has_header.txt");
+/// The help for --print-header.
 const PRINT_HEADER: &str = include_str!("./help/print_header.txt");
+/// The help for --flexible.
 const FLEXIBLE: &str = include_str!("./help/flexible.txt");
+/// The help for -i/--insert.
 const POSITION: &str = include_str!("./help/position.txt");
+/// The help for --trim.
 const TRIM: &str = include_str!("./help/trim.txt");
+/// The help for --read-delimiter.
 const READ_DELIMITER: &str = include_str!("./help/read_delimiter.txt");
+/// The help for --single-quote.
 const SINGLE_QUOTES: &str = include_str!("./help/single_quotes.txt");
+/// The help for --comment.
 const COMMENT: &str = include_str!("./help/comment.txt");
+/// The help for --fill-log.
 const FILL_LOG: &str = include_str!("./help/fill_log.txt");
+/// The help for --print-delimiter.
 const PRINT_DELIMITER: &str = include_str!("./help/print_delimiter.txt");
+/// The help for --quote.
 const QUOTES: &str = include_str!("./help/quotes.txt");
+/// The help for --split.
 const SPLIT: &str = include_str!("./help/split.txt");
+/// The help for -r/--rfc3339.
 const RFC3339: &str = include_str!("./help/rfc3339.txt");
+/// The help for -u/--utc.
 const UTC: &str = include_str!("./help/utc.txt");
+/// The help for --local.
 const LOCAL: &str = include_str!("./help/local.txt");
+/// The help for --duration.
 const DURATION: &str = include_str!("./help/duration.txt");
+/// The help for --round-seconds.
 const ROUND_SECONDS: &str = include_str!("./help/round_seconds.txt");
+/// The help for --offset.
 const OFFSET: &str = include_str!("./help/offset.txt");
+/// The help for --remove.
 const REMOVE: &str = include_str!("./help/remove.txt");
+/// The help for --arrange.
 const ARRANGE: &str = include_str!("./help/arrange.txt");
+/// The help for --list-options.
 const LIST_OPTIONS: &str = include_str!("./help/list_options.txt");
+/// The help for --peek.
 const PEEK: &str = include_str!("./help/peek.txt");
+/// The help for --generate-man.
 const GENERATE_MAN: &str = include_str!("./help/generate_man.txt");
-// Not help text: roff, for the page only. See insert_man_sections.
+/// Not help text: roff, for the page only. See insert_man_sections.
 const MAN_SUPPLEMENT: &str = include_str!("./man/supplement.roff");
 // The one trailing section clap allows, composed from the four files.
 // A macro rather than a const, since concat! wants literals, and
 // include_str! and this both expand to one. EXAMPLES comes first, where
 // a man page puts it: after the options, before the reference material.
+/// The four trailing help files joined, as one literal.
 macro_rules! trailing {
     () => {
         concat!(
@@ -565,28 +634,29 @@ macro_rules! trailing {
         )
     };
 }
+/// The trailing sections of --help as the manual page takes them.
 const TRAILING: &str = trailing!();
-// The same, plus where to go next. The page does not get this one: it
-// ends in a SEE ALSO that says it already, and better, since a page is
-// read where the other pages are.
+/// The same, plus where to go next. The page does not get this one: it
+/// ends in a SEE ALSO that says it already, and better, since a page is
+/// read where the other pages are.
 const TRAILING_LONG: &str = concat!(trailing!(), include_str!("./help/documentation.txt"));
-// What -h ends with instead: that it is a summary, and what the long
-// form adds. clap already appends "(see more with '--help')" to the help
-// entry itself, which says where to look but not what is there.
+/// What -h ends with instead: that it is a summary, and what the long
+/// form adds. clap already appends "(see more with '--help')" to the help
+/// entry itself, which says where to look but not what is there.
 const MORE_HELP: &str = include_str!("./help/more_help.txt");
-// The headings those three files open with. A man page wants them as
-// sections rather than as capitalised lines inside one, and taking them
-// from here rather than matching on shape keeps a heading from being
-// invented out of ordinary prose, KNOWN LIMITS appears mid-sentence
-// three times in the option help. A test renders the page and looks for
-// each of these, so a file renamed without this list is a failure rather
-// than a section quietly lost.
+/// The headings those three files open with. A man page wants them as
+/// sections rather than as capitalised lines inside one, and taking them
+/// from here rather than matching on shape keeps a heading from being
+/// invented out of ordinary prose, KNOWN LIMITS appears mid-sentence
+/// three times in the option help. A test renders the page and looks for
+/// each of these, so a file renamed without this list is a failure rather
+/// than a section quietly lost.
 const TRAILING_HEADINGS: [&str; 4] =
     ["EXAMPLES", "TIMESTAMP FORMATS", "KNOWN LIMITS", "EXIT STATUS"];
 
-// The command line csvdt accepts, with the help for each option. The manual
-// page and --list-options are rendered from it too, so all three describe
-// this build.
+/// The command line csvdt accepts, with the help for each option. The manual
+/// page and --list-options are rendered from it too, so all three describe
+/// this build.
 fn build_command() -> clap::Command {
     // The bundled IANA database version is part of the tool's identity: it
     // determines every -l/--local result, so output can be tied back to a
@@ -1005,8 +1075,8 @@ fn build_command() -> clap::Command {
         })
 }
 
-// Reads the command line, and answers --help, --version, --list-options and
-// --generate-man there and then: each ends the run once it is written.
+/// Reads the command line, and answers --help, --version, --list-options and
+/// --generate-man there and then: each ends the run once it is written.
 pub(crate) fn arguments() -> Result<ArgumentFlags, Box<dyn Error>> {
     let command = build_command();
     // Parsed from a clone so the Command itself survives to be introspected
@@ -1044,8 +1114,8 @@ pub(crate) fn arguments() -> Result<ArgumentFlags, Box<dyn Error>> {
     flags_from(&matches)
 }
 
-// Writes what --list-options or --generate-man asks for and ends the run;
-// returns without a word when neither was given.
+/// Writes what --list-options or --generate-man asks for and ends the run;
+/// returns without a word when neither was given.
 fn answer_about_program(command: &clap::Command, matches: &clap::ArgMatches) {
     // Answered before anything else, and before any input is opened: this is
     // how a wrapper discovers the options, so it must work on a bare invocation.
@@ -1096,8 +1166,8 @@ fn answer_about_program(command: &clap::Command, matches: &clap::ArgMatches) {
     }
 }
 
-// The flags a run is given, from a command line clap has accepted, with each
-// value checked and resolved here, before any input is opened.
+/// The flags a run is given, from a command line clap has accepted, with each
+/// value checked and resolved here, before any input is opened.
 fn flags_from(matches: &clap::ArgMatches) -> Result<ArgumentFlags, Box<dyn Error>> {
     let mut args = ArgumentFlags::default();
     if let Some(value) = matches.get_one::<std::path::PathBuf>("input_file") {
@@ -1274,7 +1344,7 @@ fn flags_from(matches: &clap::ArgMatches) -> Result<ArgumentFlags, Box<dyn Error
     Ok(args)
 }
 
-// The name a message should use for a character with no useful printable form.
+/// The name a message should use for a character with no useful printable form.
 pub(crate) fn describe_character(character: char) -> String {
     match character {
         '\n' => "a newline".to_string(),
@@ -1288,12 +1358,12 @@ pub(crate) fn describe_character(character: char) -> String {
     }
 }
 
-// Refuses delimiter and comment characters that cannot do the job asked of
-// them, as opposed to ones that merely look unusual. Each of these would be
-// accepted and then produce output that cannot be read back, or drop rows,
-// the same quiet wrongness -o refuses an impossible offset for.
-//
-// A tab is not among them: that is how TSV is read and written.
+/// Refuses delimiter and comment characters that cannot do the job asked of
+/// them, as opposed to ones that merely look unusual. Each of these would be
+/// accepted and then produce output that cannot be read back, or drop rows,
+/// the same quiet wrongness -o refuses an impossible offset for.
+///
+/// A tab is not among them: that is how TSV is read and written.
 pub(crate) fn check_special_characters(args: &ArgumentFlags) -> Result<(), Box<dyn Error>> {
     let invalid = |message: String| -> Box<dyn Error> {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, message))

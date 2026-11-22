@@ -1,16 +1,16 @@
-// Unit tests for what the command-line tests in tests/cli.rs cannot reach.
+//! Unit tests for what the command-line tests in tests/cli.rs cannot reach.
 
 use clap::builder::PossibleValue;
 use crate::{cli::*, edit::*, input::*, report::*, timestamp::*, zone::*};
 
-// A paragraph ends at a blank line, and a blank line is not always
-// "\n\n". git hands a Windows checkout the corpus with CRLF endings,
-// where it is "\r\n\r\n" and the shorter pattern is nowhere in the
-// file, so -h would print the whole introduction there, the durations
-// paragraph included.
-//
-// Asked here because it cannot be asked of the binary: this checkout has
-// one set of endings, and the question is about the other.
+/// A paragraph ends at a blank line, and a blank line is not always
+/// "\n\n". git hands a Windows checkout the corpus with CRLF endings,
+/// where it is "\r\n\r\n" and the shorter pattern is nowhere in the
+/// file, so -h would print the whole introduction there, the durations
+/// paragraph included.
+///
+/// Asked here because it cannot be asked of the binary: this checkout has
+/// one set of endings, and the question is about the other.
 #[test]
 fn a_paragraph_ends_at_a_blank_line_whatever_ended_the_lines() {
     assert_eq!(super::first_paragraph("One.\n\nTwo.\n"), "One.\n");
@@ -22,11 +22,11 @@ fn a_paragraph_ends_at_a_blank_line_whatever_ended_the_lines() {
     assert_eq!(super::first_paragraph("Only.\n"), "Only.\n");
 }
 
-// Folding a summary must not put an option name at the start of a line:
-// in the description column that reads as the start of a new entry, to
-// someone skimming and to anything parsing the output. Mending a bad
-// break after making it can bring a second option name to the line
-// start, or push a line past the column everything else was folded to.
+/// Folding a summary must not put an option name at the start of a line:
+/// in the description column that reads as the start of a new entry, to
+/// someone skimming and to anything parsing the output. Mending a bad
+/// break after making it can bring a second option name to the line
+/// start, or push a line past the column everything else was folded to.
 #[test]
 fn a_folded_line_never_begins_with_an_option_name() {
     let text = "The run finished, and values that did not convert are \
@@ -46,11 +46,11 @@ fn a_folded_line_never_begins_with_an_option_name() {
     }
 }
 
-// Padding comes off the end of a line; the line ending does not.
-//
-// The carriage return is the case that matters: on Windows the corpus is checked out CRLF, so a blank line inside
-// an option's long help is ten spaces and a CR. A trim that knew only
-// spaces and tabs would stop at the CR and leave all ten.
+/// Padding comes off the end of a line; the line ending does not.
+///
+/// The carriage return is the case that matters: on Windows the corpus is checked out CRLF, so a blank line inside
+/// an option's long help is ten spaces and a CR. A trim that knew only
+/// spaces and tabs would stop at the CR and leave all ten.
 #[test]
 fn padding_comes_off_the_line_and_the_ending_stays() {
     assert_eq!(super::without_trailing_padding("a   \nb\t\nc  "), "a\nb\nc");
@@ -70,6 +70,7 @@ fn padding_comes_off_the_line_and_the_ending_stays() {
 
 use super::*;
 
+/// The options of a run given none.
 fn default_args() -> ArgumentFlags {
     ArgumentFlags {
         insert_position: InsertPosition::After,
@@ -77,10 +78,12 @@ fn default_args() -> ArgumentFlags {
     }
 }
 
+/// A record, header or data, holding FIELDS.
 fn record(fields: &[&str]) -> csv::StringRecord {
     csv::StringRecord::from(fields.to_vec())
 }
 
+/// The fields of RECORD, to compare against a list.
 fn as_vec(record: &csv::StringRecord) -> Vec<&str> {
     record.iter().collect()
 }
@@ -109,6 +112,7 @@ fn a_directory_is_reported_as_one_on_either_platform() {
 
 // ---- abbreviated option values ---------------------------------------
 
+/// The names of the values clap accepts.
 fn names(values: &[PossibleValue]) -> Vec<String> {
     values.iter().map(|value| value.get_name().to_string()).collect()
 }
@@ -162,9 +166,9 @@ fn an_ambiguous_or_unknown_value_resolves_to_nothing() {
 
 #[test]
 fn every_value_clap_accepts_also_resolves() {
-    // Guards against clap accepting a value that then matches nothing.
-    // Every accepted form of all four value lists has to resolve,
-    // so no option can gain a value it does not then act on.
+    /// Guards against clap accepting a value that then matches nothing.
+    /// Every accepted form of all four value lists has to resolve,
+    /// so no option can gain a value it does not then act on.
     fn check<T: Copy>(choices: &Choices<T>) {
         for accepted in names(&abbreviated_values(choices)) {
             assert!(
@@ -181,8 +185,8 @@ fn every_value_clap_accepts_also_resolves() {
 
 // ---- process_headers / process_record: one row per case ---------------
 
-// The options for a case that converts column 1 of the row, writing its
-// result at `position`.
+/// The options for a case that converts column 1 of the row, writing its
+/// result at `position`.
 fn converting(set: fn(&mut ArgumentFlags), position: InsertPosition) -> ArgumentFlags {
     let mut args = default_args();
     set(&mut args);
@@ -191,39 +195,50 @@ fn converting(set: fn(&mut ArgumentFlags), position: InsertPosition) -> Argument
     args
 }
 
+/// The default options with SET applied to them.
 fn flags(set: impl FnOnce(&mut ArgumentFlags)) -> ArgumentFlags {
     let mut args = default_args();
     set(&mut args);
     args
 }
 
+/// Asks for -s.
+fn split(args: &mut ArgumentFlags) {
+    args.action = Action::Split;
+}
+
+/// Asks for -r.
+fn rfc3339(args: &mut ArgumentFlags) {
+    args.action = Action::ToRfc3339;
+}
+
+/// Asks for -u.
 fn to_utc(args: &mut ArgumentFlags) {
     args.action = Action::ToUtc;
 }
 
+/// Asks for -l, in the zone chrono reads from TZ.
+fn local(args: &mut ArgumentFlags) {
+    args.action = Action::ToLocal(None);
+}
+
+/// Asks for the row-over-row -d.
+fn duration(args: &mut ArgumentFlags) {
+    args.action = Action::Duration { second: None };
+}
+
+/// Asks for -o to -06:00.
 fn to_offset(args: &mut ArgumentFlags) {
     args.action = Action::ToOffset(FixedOffset::west_opt(6 * 3600).unwrap());
 }
 
-// One case: its label, the options, the row read and the row written, or
-// None where the run must refuse it with an error.
+/// One case: its label, the options, the row read and the row written, or
+/// None where the run must refuse it with an error.
 type Case<'a> = (&'a str, ArgumentFlags, Vec<&'a str>, Option<Vec<&'a str>>);
 
 #[test]
 fn process_headers_names_what_each_action_adds() {
     use InsertPosition::{After, Before, Replace};
-    fn split(args: &mut ArgumentFlags) {
-        args.action = Action::Split;
-    }
-    fn rfc3339(args: &mut ArgumentFlags) {
-        args.action = Action::ToRfc3339;
-    }
-    fn local(args: &mut ArgumentFlags) {
-        args.action = Action::ToLocal(None);
-    }
-    fn duration(args: &mut ArgumentFlags) {
-        args.action = Action::Duration { second: None };
-    }
     // Two-column --duration: the row-over-row column pair, written at -i.
     let paired = |position, insert_column| {
         flags(|args| {
@@ -424,12 +439,12 @@ fn process_headers_names_what_each_action_adds() {
     }
 }
 
-// A row as written, and the timestamp carried into the next.
+/// A row as written, and the timestamp carried into the next.
 type ProcessedRecord = (csv::StringRecord, Option<DateTime<FixedOffset>>);
 
-// Convenience wrapper for the cases below, which assert on a whole
-// StringRecord. The streaming path writes the borrowed field list
-// straight out instead.
+/// Convenience wrapper for the cases below, which assert on a whole
+/// StringRecord. The streaming path writes the borrowed field list
+/// straight out instead.
 fn process_record(
     record: &csv::StringRecord,
     args: &ArgumentFlags,
@@ -441,16 +456,10 @@ fn process_record(
     Ok((csv::StringRecord::from(fields), cache))
 }
 
-// No row-over-row cache goes in, and none comes out, for any case here.
+/// No row-over-row cache goes in, and none comes out, for any case here.
 #[test]
 fn process_record_writes_what_each_action_makes_of_a_row() {
     use InsertPosition::{After, Before, Replace};
-    fn split(args: &mut ArgumentFlags) {
-        args.action = Action::Split;
-    }
-    fn rfc3339(args: &mut ArgumentFlags) {
-        args.action = Action::ToRfc3339;
-    }
     let huge = i64::MAX.to_string();
     let cases: Vec<Case> = vec![
         (
@@ -812,9 +821,9 @@ fn parse_offset_rejects_garbage() {
     assert!(parse_offset("").is_err());
 }
 
-// An offset is taken by its shape alone. Glued onto a timestamp and read
-// with it, a fraction of a second or a trailing blank passed as part of
-// the timestamp and left the offset behind it accepted.
+/// An offset is taken by its shape alone. Glued onto a timestamp and read
+/// with it, a fraction of a second or a trailing blank passed as part of
+/// the timestamp and left the offset behind it accepted.
 #[test]
 fn parse_offset_takes_nothing_but_an_offset() {
     for given in [
@@ -1207,6 +1216,7 @@ fn record_duration_two_column_out_of_bound_second_column_is_a_clean_error() {
 // what they answer at the boundary is the whole of their job, and going
 // through a conversion to ask makes the boundary harder to place.
 
+/// The UTC instant at the start of the hour given.
 fn utc_at(year: i32, month: u32, day: u32, hour: u32) -> DateTime<chrono::Utc> {
     use chrono::TimeZone;
     chrono::Utc.with_ymd_and_hms(year, month, day, hour, 0, 0).unwrap()
@@ -1433,7 +1443,7 @@ fn remove_columns_takes_its_list_highest_index_first() {
     assert!(every.is_empty());
 }
 
-// FIELDS in --arrange's order, as apply_row_edit writes them.
+/// FIELDS in --arrange's order, as apply_row_edit writes them.
 fn arranged<'a>(fields: &[&'a str], order: &[usize], listed: &[usize]) -> Vec<&'a str> {
     let row = csv::StringRecord::from(fields.to_vec());
     let mut out = Vec::new();
@@ -1519,6 +1529,7 @@ fn posix_tz_rules_are_told_apart_from_zone_names() {
 
 // ---- report_tally --------------------------------------------------------
 
+/// A tally of CONVERTED values, FAILED of them parse_err.
 fn tally(converted: u64, failed: u64) -> Tally {
     Tally { converted, failed, ..Default::default() }
 }
@@ -1549,6 +1560,8 @@ fn report_tally_fails_only_when_nothing_converted() {
 
 // ---- Tally::record_written -----------------------------------------------
 
+/// The options for a run with COMMENT as the comment character and STYLE as
+/// --quote.
 fn commented_args(comment: Option<char>, style: &str) -> ArgumentFlags {
     ArgumentFlags {
         read_as_comment: comment,
@@ -1619,6 +1632,7 @@ fn record_written_remembers_when_the_header_is_one_of_them() {
     assert!(!safe.commented_header);
 }
 
+/// The options for a run writing DELIMITER with STYLE as --quote.
 fn delimited_args(delimiter: Option<char>, style: &str) -> ArgumentFlags {
     ArgumentFlags {
         output_delimiter: delimiter,
@@ -1706,19 +1720,20 @@ fn only_two_styles_leave_a_leading_comment_character_bare() {
 
 // ---- the cost of one more row --------------------------------------------
 
-// Counts the allocations made on the calling thread, so a test can ask
-// what a row costs without timing anything. Per thread because the test
-// harness runs tests side by side, and a shared count would take in
-// whatever the others allocate.
+/// Counts the allocations made on the calling thread, so a test can ask
+/// what a row costs without timing anything. Per thread because the test
+/// harness runs tests side by side, and a shared count would take in
+/// whatever the others allocate.
 struct CountingAllocator;
 
 thread_local! {
+    /// The count, for this thread.
     static ALLOCATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-// SAFETY: every call is handed straight to the system allocator; the count
-// beside it touches a const-initialised thread-local, which allocates
-// nothing itself.
+/// SAFETY: every call is handed straight to the system allocator; the count
+/// beside it touches a const-initialised thread-local, which allocates
+/// nothing itself.
 unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
         let _ = ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
@@ -1733,7 +1748,7 @@ unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
 #[global_allocator]
 static COUNTING: CountingAllocator = CountingAllocator;
 
-// The allocations process_stream makes over ROWS rows of twelve fields.
+/// The allocations process_stream makes over ROWS rows of twelve fields.
 fn allocations_over(rows: usize, args: &ArgumentFlags) -> u64 {
     let input = "1,2,3,4,5,6,7,8,9,10,11,12\n".repeat(rows);
     let reader = configure_reader(args).from_reader(input.as_bytes());
@@ -1743,11 +1758,11 @@ fn allocations_over(rows: usize, args: &ArgumentFlags) -> u64 {
     ALLOCATIONS.with(std::cell::Cell::get) - before
 }
 
-// A row costs a fixed few allocations, whatever the quoting style and
-// however many fields it has: the checks made on each written field
-// compare settings resolved at startup rather than work them out again.
-// Measured as the difference between two input sizes, so what a run
-// costs once, the buffers and the reader, cancels out.
+/// A row costs a fixed few allocations, whatever the quoting style and
+/// however many fields it has: the checks made on each written field
+/// compare settings resolved at startup rather than work them out again.
+/// Measured as the difference between two input sizes, so what a run
+/// costs once, the buffers and the reader, cancels out.
 #[test]
 fn one_more_row_costs_a_fixed_few_allocations() {
     for (_, style) in QUOTINGS {
@@ -1762,8 +1777,8 @@ fn one_more_row_costs_a_fixed_few_allocations() {
 }
 // ---- reading and writing as the input arrives ----------------------------
 
-// A reader that hands over CHUNK once and then fails the test if it is
-// asked again, standing for a pipe with nothing more to give yet.
+/// A reader that hands over CHUNK once and then fails the test if it is
+/// asked again, standing for a pipe with nothing more to give yet.
 struct OneChunk(Option<&'static [u8]>);
 
 impl std::io::Read for OneChunk {
@@ -1774,14 +1789,14 @@ impl std::io::Read for OneChunk {
     }
 }
 
-// The UTF-16 probe settles for the first read that gives it eight bytes,
-// rather than waiting on a pipe for all 512.
+/// The UTF-16 probe settles for the first read that gives it eight bytes,
+/// rather than waiting on a pipe for all 512.
 #[test]
 fn the_encoding_probe_does_not_wait_for_more_than_it_needs() {
     assert!(reject_utf16(OneChunk(Some(b"2024-01-01T00:00:00Z\n"))).is_ok());
 }
 
-// A writer that counts how many times it is handed bytes.
+/// A writer that counts how many times it is handed bytes.
 struct CountedWrites(std::rc::Rc<std::cell::Cell<usize>>);
 
 impl std::io::Write for CountedWrites {
@@ -1795,8 +1810,8 @@ impl std::io::Write for CountedWrites {
     }
 }
 
-// On a terminal each row is written as it is made; elsewhere the rows
-// wait in the writer's buffer.
+/// On a terminal each row is written as it is made; elsewhere the rows
+/// wait in the writer's buffer.
 #[test]
 fn rows_reach_a_terminal_one_at_a_time() {
     for (flush_each_record, expected) in [(true, 3), (false, 0)] {
@@ -1811,10 +1826,10 @@ fn rows_reach_a_terminal_one_at_a_time() {
 
 // ---- the POSIX rule check ------------------------------------------------
 
-// chrono replaces a rule it cannot read with the machine's own zone, whose
-// offsets can include the rule's standard one by chance: Stockholm's
-// summer +02:00 is Jerusalem's standard offset. Only both of the rule's
-// offsets showing means chrono read it.
+/// chrono replaces a rule it cannot read with the machine's own zone, whose
+/// offsets can include the rule's standard one by chance: Stockholm's
+/// summer +02:00 is Jerusalem's standard offset. Only both of the rule's
+/// offsets showing means chrono read it.
 #[test]
 fn a_rule_is_read_only_when_both_its_offsets_show() {
     let stockholm = [3600, 7200];

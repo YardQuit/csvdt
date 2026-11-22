@@ -1,39 +1,40 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 
+/// A command that runs the csvdt binary under test.
 fn csvdt() -> Command {
     Command::cargo_bin("csvdt").unwrap()
 }
 
-// --help with its whitespace collapsed.
-//
-// What the help promises is that it says a thing, not that it says it on one
-// line: the corpus is wrapped by hand, so a phrase sits across a line break
-// whenever the wrapping moves. Two tests learned that the hard way and
-// collapsed the whitespace themselves; a third and fourth did not, and failed
-// on a rewrap with the sentence still present and still saying the same
-// thing: reporting on formatting while claiming to report on content.
+/// --help with its whitespace collapsed.
+///
+/// What the help promises is that it says a thing, not that it says it on one
+/// line: the corpus is wrapped by hand, so a phrase sits across a line break
+/// whenever the wrapping moves. Two tests learned that the hard way and
+/// collapsed the whitespace themselves; a third and fourth did not, and failed
+/// on a rewrap with the sentence still present and still saying the same
+/// thing: reporting on formatting while claiming to report on content.
 fn help_words() -> String {
     let help = csvdt().arg("--help").output().unwrap();
     let help = String::from_utf8(help.stdout).expect("--help should be UTF-8");
     help.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-// The output of one help flag.
+/// The output of one help flag.
 fn help_output(flag: &str) -> String {
     let help = csvdt().arg(flag).output().unwrap();
     String::from_utf8(help.stdout).expect("help should be UTF-8")
 }
 
-// Every option in a help listing, as long name to description, with the
-// description put back on one line.
-//
-// An entry begins at the left, near enough: '-H, --has-header' sits at two
-// columns and '--round-seconds', having no short form, at six. Everything
-// clap wraps into the description column is indented far past that, which
-// is what tells a continuation line from the next entry, including the
-// value tables in the long form, whose rows begin with an option name of
-// their own and would otherwise read as entries.
+/// Every option in a help listing, as long name to description, with the
+/// description put back on one line.
+///
+/// An entry begins at the left, near enough: '-H, --has-header' sits at two
+/// columns and '--round-seconds', having no short form, at six. Everything
+/// clap wraps into the description column is indented far past that, which
+/// is what tells a continuation line from the next entry, including the
+/// value tables in the long form, whose rows begin with an option name of
+/// their own and would otherwise read as entries.
 fn option_entries(text: &str) -> std::collections::BTreeMap<String, String> {
     let mut entries = std::collections::BTreeMap::new();
     let mut current = String::new();
@@ -90,9 +91,9 @@ fn option_entries(text: &str) -> std::collections::BTreeMap<String, String> {
     entries
 }
 
-// A description without the notes clap appends, which it appends to both
-// forms alike and so cannot tell them apart. Only those two: a column
-// reference like '[0...]' is the help's own prose and stays.
+/// A description without the notes clap appends, which it appends to both
+/// forms alike and so cannot tell them apart. Only those two: a column
+/// reference like '[0...]' is the help's own prose and stays.
 fn without_clap_notes(description: &str) -> String {
     let mut text = description.trim_end();
     while text.ends_with(']') {
@@ -185,20 +186,21 @@ fn reads_from_a_file_argument_instead_of_stdin() {
         .stdout("a,b\n1,2\n");
 }
 
+/// A directory of this test run's own under the temporary directory.
 fn tempfile_dir() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("csvdt-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
 
-// Point a run's temporary directory at DIR, whichever variable this platform
-// reads for it.
-//
-// std::env::temp_dir asks TMPDIR on Unix and TMP then TEMP on Windows, so
-// setting only TMPDIR moves nothing on Windows: the run spools to the real
-// system directory, and a test asserting its own directory stayed empty
-// passes without having tested anything. Two did, on the one platform where
-// the spool has never been watched.
+/// Point a run's temporary directory at DIR, whichever variable this platform
+/// reads for it.
+///
+/// std::env::temp_dir asks TMPDIR on Unix and TMP then TEMP on Windows, so
+/// setting only TMPDIR moves nothing on Windows: the run spools to the real
+/// system directory, and a test asserting its own directory stayed empty
+/// passes without having tested anything. Two did, on the one platform where
+/// the spool has never been watched.
 fn with_temp_dir(
     command: assert_cmd::Command,
     dir: &std::path::Path,
@@ -208,11 +210,11 @@ fn with_temp_dir(
     command
 }
 
-// A file name need not be UTF-8 on Unix, and nor need the temporary
-// directory. The input path, the --fill-log path and the spool's path are
-// carried as the operating system gives them: the input and the log were
-// refused by the argument parser, and the spool was reopened by a name made
-// into text, which pointed at a file that does not exist.
+/// A file name need not be UTF-8 on Unix, and nor need the temporary
+/// directory. The input path, the --fill-log path and the spool's path are
+/// carried as the operating system gives them: the input and the log were
+/// refused by the argument parser, and the spool was reopened by a name made
+/// into text, which pointed at a file that does not exist.
 #[cfg(unix)]
 #[test]
 fn paths_that_are_not_utf8_are_read_and_written() {
@@ -242,9 +244,9 @@ fn paths_that_are_not_utf8_are_read_and_written() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// The --fill-log destination is asked about before standard input is copied
-// to a spool, so a log that cannot be written is reported before the run
-// reads a pipe to its end, not after.
+/// The --fill-log destination is asked about before standard input is copied
+/// to a spool, so a log that cannot be written is reported before the run
+/// reads a pipe to its end, not after.
 #[test]
 fn an_unwritable_fill_log_is_reported_before_the_input_is_spooled() {
     let dir = tempfile_dir().join("fill-log-before-spool");
@@ -261,9 +263,9 @@ fn an_unwritable_fill_log_is_reported_before_the_input_is_spooled() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// A fifo as the --fill-log destination is written to like any file. The
-// check that the log is neither the input nor the output opened it to read,
-// and a fifo opened to read waits for a writer: csvdt, which was waiting.
+/// A fifo as the --fill-log destination is written to like any file. The
+/// check that the log is neither the input nor the output opened it to read,
+/// and a fifo opened to read waits for a writer: csvdt, which was waiting.
 #[cfg(unix)]
 #[test]
 fn a_fifo_as_the_fill_log_is_written_without_waiting_on_itself() {
@@ -288,8 +290,8 @@ fn a_fifo_as_the_fill_log_is_written_without_waiting_on_itself() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// --peek writes to a terminal, so a field's escape sequences and bidi
-// overrides are shown by code point rather than passed through to be run.
+/// --peek writes to a terminal, so a field's escape sequences and bidi
+/// overrides are shown by code point rather than passed through to be run.
 #[test]
 fn peek_shows_control_and_bidi_characters_by_code_point() {
     csvdt()
@@ -580,11 +582,11 @@ fn a_conversion_that_leaves_rfc3339s_year_range_is_marked_not_written() {
     }
 }
 
-// Year 0000 is no year of the calendar RFC3339 uses, and the help says the
-// range is 0001 through 9999 for reading as well as writing. Every action
-// that reads a timestamp marks it the same way, including the two that write
-// no timestamp of their own: -s copied it into its date column and -d
-// measured a span from it.
+/// Year 0000 is no year of the calendar RFC3339 uses, and the help says the
+/// range is 0001 through 9999 for reading as well as writing. Every action
+/// that reads a timestamp marks it the same way, including the two that write
+/// no timestamp of their own: -s copied it into its date column and -d
+/// measured a span from it.
 #[test]
 fn year_zero_is_parse_err_under_every_action_that_reads_a_timestamp() {
     let rows = "0000-01-01T00:00:00Z,2024-01-01T00:00:00Z\n\
@@ -803,8 +805,8 @@ fn offset_rejects_a_malformed_target_offset() {
         .stderr(predicate::str::contains("+02:00, -0600, or Z"));
 }
 
-// The offset is read by its shape, so a fraction of a second or a trailing
-// blank in front of or after it is refused rather than read past.
+/// The offset is read by its shape, so a fraction of a second or a trailing
+/// blank in front of or after it is refused rather than read past.
 #[test]
 fn offset_refuses_a_target_with_anything_around_it() {
     for target in ["0,.5Z", "0,.123+02:00", "0,+01:00 "] {
@@ -818,7 +820,7 @@ fn offset_refuses_a_target_with_anything_around_it() {
     }
 }
 
-// A two-column -d that will not parse is quoted whole, not from the comma on.
+/// A two-column -d that will not parse is quoted whole, not from the comma on.
 #[test]
 fn duration_quotes_the_whole_value_it_could_not_read() {
     for value in ["1,0,", "1,x", "x,1", "1,"] {
@@ -1214,15 +1216,15 @@ fn each_trim_mode_touches_the_half_of_the_file_it_names() {
 
 #[test]
 fn trimming_takes_every_whitespace_unicode_knows_including_the_stubborn_one() {
-    // The help says whitespace without saying whose. It is Unicode's, not
-    // the space bar's, and the one worth knowing about is the non-breaking
-    // space: it is usually there on purpose (a thousands separator in a
-    // good many locales, or a space something was typeset with) and it
-    // goes like any other.
-    //
-    // Written as bytes rather than as a character, so that what is being
-    // asked about is legible in the test rather than being a space that
-    // looks like every other space in this file.
+    /// The help says whitespace without saying whose. It is Unicode's, not
+    /// the space bar's, and the one worth knowing about is the non-breaking
+    /// space: it is usually there on purpose (a thousands separator in a
+    /// good many locales, or a space something was typeset with) and it
+    /// goes like any other.
+    ///
+    /// Written as bytes rather than as a character, so that what is being
+    /// asked about is legible in the test rather than being a space that
+    /// looks like every other space in this file.
     const NBSP: &str = "\u{00a0}";
 
     for (name, field) in [
@@ -1482,18 +1484,18 @@ fn nonnumeric_cannot_quote_a_number_holding_the_output_delimiter_and_says_so() {
 
 #[test]
 fn the_help_names_every_delimiter_a_number_can_hold_and_no_others() {
-    // KNOWN LIMITS gives the set as the float syntax: any digit, '.', '-',
-    // '+', 'e' or 'E', and the letters of inf, infinity and nan in either
-    // case: twenty-seven characters, and every other delimiter safe under
-    // this style. That set is csv-core's numeric test rather than ours, so an
-    // upgrade there could widen or narrow it and leave the help describing a
-    // different program. This asks the binary instead of trusting the prose.
-    //
-    // The vocabulary is one row of numbers, each written bare by 'nonnumeric'
-    // and between them holding every character a number can: if a candidate
-    // delimiter is one of them it appears in this row, and the run must say
-    // so. If it is not, the row is safe bare and the run must stay quiet,
-    // which is what makes the negative half mean anything.
+    /// KNOWN LIMITS gives the set as the float syntax: any digit, '.', '-',
+    /// '+', 'e' or 'E', and the letters of inf, infinity and nan in either
+    /// case: twenty-seven characters, and every other delimiter safe under
+    /// this style. That set is csv-core's numeric test rather than ours, so an
+    /// upgrade there could widen or narrow it and leave the help describing a
+    /// different program. This asks the binary instead of trusting the prose.
+    ///
+    /// The vocabulary is one row of numbers, each written bare by 'nonnumeric'
+    /// and between them holding every character a number can: if a candidate
+    /// delimiter is one of them it appears in this row, and the run must say
+    /// so. If it is not, the row is safe bare and the run must stay quiet,
+    /// which is what makes the negative half mean anything.
     const NUMBERS: [&str; 11] = [
         "0123456789", "5.5", "-5", "+5", "1e5", "1E5",
         "inf", "infinity", "nan", "INFINITY", "NAN",
@@ -2395,29 +2397,29 @@ fn the_manual_page_is_rendered_from_the_options_themselves() {
 
 #[test]
 fn the_help_files_fit_the_column_the_manual_page_leaves_them() {
-    // man indents an option's help by 14 columns and a section's by 7, and
-    // the help files are laid out by hand, so their own width decides
-    // whether the page fits an 80-column terminal. 64 leaves room for the
-    // deeper of the two indents plus the margin groff keeps.
-    //
-    // This is what stops the tables being readable in --help and wrapped to
-    // pieces in man. It is a property of the source, so it is asked of the
-    // source: rendering cannot answer it without a roff, and CI has one only
-    // inside the RPM build.
+    /// man indents an option's help by 14 columns and a section's by 7, and
+    /// the help files are laid out by hand, so their own width decides
+    /// whether the page fits an 80-column terminal. 64 leaves room for the
+    /// deeper of the two indents plus the margin groff keeps.
+    ///
+    /// This is what stops the tables being readable in --help and wrapped to
+    /// pieces in man. It is a property of the source, so it is asked of the
+    /// source: rendering cannot answer it without a roff, and CI has one only
+    /// inside the RPM build.
     const LIMIT: usize = 64;
-    // Where the 64 comes from, so that raising it fails here rather than in
-    // the page. Reasoning from the 7-column indent a section's body gets
-    // would allow 72, but a line in an option's help sits 14 in, and a marked
-    // line is held with '.br', which leaves filling on, so roff wraps a line
-    // too long for the terminal and then justifies what it wrapped. A
-    // '--peek' example widened to 72 reaches an 80-column page as
-    //
-    //     $       csvdt       -H       -p        --peek        sales.csv
-    //     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    //
-    // and nothing failed, because the corpus had never used the width it was
-    // told it could. A constant with its reasoning left in prose is a
-    // constant the next reader may raise; this is the reasoning as an assert.
+    /// Where the 64 comes from, so that raising it fails here rather than in
+    /// the page. Reasoning from the 7-column indent a section's body gets
+    /// would allow 72, but a line in an option's help sits 14 in, and a marked
+    /// line is held with '.br', which leaves filling on, so roff wraps a line
+    /// too long for the terminal and then justifies what it wrapped. A
+    /// '--peek' example widened to 72 reaches an 80-column page as
+    ///
+    ///     $       csvdt       -H       -p        --peek        sales.csv
+    ///     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ///
+    /// and nothing failed, because the corpus had never used the width it was
+    /// told it could. A constant with its reasoning left in prose is a
+    /// constant the next reader may raise; this is the reasoning as an assert.
     const MAN_OPTION_INDENT: usize = 14;
     const TERMINAL: usize = 80;
     assert!(
@@ -2835,16 +2837,16 @@ fn the_manual_page_takes_the_long_help_not_the_summary() {
 
 #[test]
 fn no_part_of_the_help_runs_on_as_a_wall_of_text() {
-    // Long help is read on a terminal, a screenful at a time, and prose
-    // with nowhere to rest is skipped rather than read. EXAMPLES ran 47
-    // lines with its eight commands packed against the prose between them,
-    // TIMESTAMP FORMATS gave RFC3339 38 unbroken lines covering seven
-    // separate things, and --peek and KNOWN LIMITS were as bad.
-    //
-    // The ceiling is a little above the longest block that survived the
-    // breaking up, so it fails on a new wall rather than on the existing
-    // text. What it cannot judge is whether a break falls in a sensible
-    // place; it only says that one exists.
+    /// Long help is read on a terminal, a screenful at a time, and prose
+    /// with nowhere to rest is skipped rather than read. EXAMPLES ran 47
+    /// lines with its eight commands packed against the prose between them,
+    /// TIMESTAMP FORMATS gave RFC3339 38 unbroken lines covering seven
+    /// separate things, and --peek and KNOWN LIMITS were as bad.
+    ///
+    /// The ceiling is a little above the longest block that survived the
+    /// breaking up, so it fails on a new wall rather than on the existing
+    /// text. What it cannot judge is whether a break falls in a sensible
+    /// place; it only says that one exists.
     const CEILING: usize = 30;
 
     let help = help_output("--help");
@@ -3334,18 +3336,18 @@ fn the_manual_page_keeps_the_line_breaks_the_help_was_written_with() {
     }
 }
 
-// The text compiled into the binary is LF, whatever platform checked it out.
-//
-// src/help and src/man are pulled in with include_str!, so a checkout's line
-// endings are the bytes --help prints and the page is rendered from. Windows
-// checks text out with CRLF unless .gitattributes says otherwise, and the day
-// it did, a blank line inside an option's long help was ten spaces and a
-// carriage return, which the trim that takes trailing padding off walked
-// straight past, leaving 59 lines of whitespace in --help on windows-latest
-// and none anywhere else.
-//
-// This is that root cause rather than its symptom: it fails on a checkout
-// that brought CRLF in, whether or not anything downstream copes.
+/// The text compiled into the binary is LF, whatever platform checked it out.
+///
+/// src/help and src/man are pulled in with include_str!, so a checkout's line
+/// endings are the bytes --help prints and the page is rendered from. Windows
+/// checks text out with CRLF unless .gitattributes says otherwise, and the day
+/// it did, a blank line inside an option's long help was ten spaces and a
+/// carriage return, which the trim that takes trailing padding off walked
+/// straight past, leaving 59 lines of whitespace in --help on windows-latest
+/// and none anywhere else.
+///
+/// This is that root cause rather than its symptom: it fails on a checkout
+/// that brought CRLF in, whether or not anything downstream copes.
 #[test]
 fn the_text_compiled_into_the_binary_has_no_carriage_returns() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -3375,18 +3377,18 @@ fn the_text_compiled_into_the_binary_has_no_carriage_returns() {
     assert!(read > 30, "only {read} files were read, so this proves little");
 }
 
-// Nothing csvdt says about itself ends a line with a space.
-//
-// clap indents every line of an option's long help by ten columns, blank
-// lines included, so a blank line inside one arrived as ten spaces and a
-// newline: 83 lines of --help were whitespace and nothing else. Invisible on
-// a terminal, and litter in a file, a diff or a paste.
-//
-// --list-options is exempt from the trailing-space half, and only that half.
-// Its format is tab-separated fields and the last of them is empty for an
-// option that takes no value, so those lines end in a tab because the field
-// is there and empty: a wrapper splitting on tabs counts on it. It is still
-// held to having no line that is whitespace alone.
+/// Nothing csvdt says about itself ends a line with a space.
+///
+/// clap indents every line of an option's long help by ten columns, blank
+/// lines included, so a blank line inside one arrived as ten spaces and a
+/// newline: 83 lines of --help were whitespace and nothing else. Invisible on
+/// a terminal, and litter in a file, a diff or a paste.
+///
+/// --list-options is exempt from the trailing-space half, and only that half.
+/// Its format is tab-separated fields and the last of them is empty for an
+/// option that takes no value, so those lines end in a tab because the field
+/// is there and empty: a wrapper splitting on tabs counts on it. It is still
+/// held to having no line that is whitespace alone.
 #[test]
 fn what_csvdt_says_about_itself_has_no_trailing_whitespace() {
     let printed = |argument: &str| {
@@ -3428,15 +3430,15 @@ fn what_csvdt_says_about_itself_has_no_trailing_whitespace() {
     }
 }
 
-// The verbatim gutter marks a block in the help files as text laid out on
-// purpose: a command to copy, a sample of output, a diagram whose columns
-// line up. It decides what the page holds as written and what it lets roff
-// fill, and it is meant for the renderer, never for a reader.
-//
-// Two things have to hold, and they pull against each other. The gutter must
-// reach none of the three things csvdt prints, and every line it marks must
-// reach the page exactly as it was written, so a strip that took too much,
-// or a pass that filled a marked block, fails here.
+/// The verbatim gutter marks a block in the help files as text laid out on
+/// purpose: a command to copy, a sample of output, a diagram whose columns
+/// line up. It decides what the page holds as written and what it lets roff
+/// fill, and it is meant for the renderer, never for a reader.
+///
+/// Two things have to hold, and they pull against each other. The gutter must
+/// reach none of the three things csvdt prints, and every line it marks must
+/// reach the page exactly as it was written, so a strip that took too much,
+/// or a pass that filled a marked block, fails here.
 #[test]
 fn the_verbatim_gutter_marks_the_page_and_never_shows_in_it() {
     let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/help");
@@ -3702,18 +3704,18 @@ fn the_value_tables_were_not_rewrapped_into_prose() {
 
 #[test]
 fn every_known_limit_still_has_a_heading_to_find_it_by() {
-    // KNOWN LIMITS is the longest thing in the help, and the only way into
-    // it is its section headings. Rewrapping the corpus treated them as
-    // ordinary words and pulled each one onto the end of the paragraph
-    // before it, so all fifteen disappeared at once:
-    //
-    //   ...only in the help for the option each one belongs to. INPUT MUST
-    //   BE UTF-8 A byte-order mark is stripped if present. Anything else...
-    //
-    // Nothing said a word: every section was still present, still in order,
-    // still saying the same thing, and unfindable in --help and in man
-    // alike. The headings are listed here so that a wrap that swallows one
-    // has to say so.
+    /// KNOWN LIMITS is the longest thing in the help, and the only way into
+    /// it is its section headings. Rewrapping the corpus treated them as
+    /// ordinary words and pulled each one onto the end of the paragraph
+    /// before it, so all fifteen disappeared at once:
+    ///
+    ///   ...only in the help for the option each one belongs to. INPUT MUST
+    ///   BE UTF-8 A byte-order mark is stripped if present. Anything else...
+    ///
+    /// Nothing said a word: every section was still present, still in order,
+    /// still saying the same thing, and unfindable in --help and in man
+    /// alike. The headings are listed here so that a wrap that swallows one
+    /// has to say so.
     const HEADINGS: [&str; 15] = [
         "INPUT MUST BE UTF-8",
         "THE INPUT FILE CANNOT ALSO BE THE OUTPUT",
@@ -4357,11 +4359,11 @@ fn flexible_fix_output_is_rectangular() {
         }));
 }
 
-// The log --fill-log writes, read back.
-//
-// Each of these names the destination and reads the file, rather than
-// asking stderr, because the file is what an analyst is given and the
-// header line is part of what they are given.
+/// The log --fill-log writes, read back.
+///
+/// Each of these names the destination and reads the file, rather than
+/// asking stderr, because the file is what an analyst is given and the
+/// header line is part of what they are given.
 fn fill_log_of(arguments: &[&str], input: &str, name: &str) -> String {
     let path = tempfile_dir().join(name);
     let _ = std::fs::remove_file(&path);
@@ -5511,15 +5513,15 @@ fn every_option_is_either_welcome_with_peek_or_refused_by_it() {
     )
     .expect("the option list should be UTF-8");
 
-    // What --peek reads the file with, plus the two that say which record is
-    // the header. Everything else writes, and has no CSV here to write to.
-    //
-    // Each comes with an input the option changes the reading of, and what
-    // --peek must show for it. Exit 0 is not the question: an option accepted
-    // and then ignored would pass that, and being accepted is worth nothing
-    // here: the whole promise is that the columns numbered are the ones a
-    // run would see, which only holds if the option applied. So the same input
-    // is peeked at again without it, and the two must differ.
+    /// What --peek reads the file with, plus the two that say which record is
+    /// the header. Everything else writes, and has no CSV here to write to.
+    ///
+    /// Each comes with an input the option changes the reading of, and what
+    /// --peek must show for it. Exit 0 is not the question: an option accepted
+    /// and then ignored would pass that, and being accepted is worth nothing
+    /// here: the whole promise is that the columns numbered are the ones a
+    /// run would see, which only holds if the option applied. So the same input
+    /// is peeked at again without it, and the two must differ.
     const WELCOME: [(&str, &[&str], &str, &str); 6] = [
         // With -H the first record is the header, so what is shown is the
         // first data row instead of it.
@@ -5534,8 +5536,8 @@ fn every_option_is_either_welcome_with_peek_or_refused_by_it() {
          "0    1\na,b  c\n"),
         ("--comment", &["--comment", "#"], "#note\na,b\n", "0  1\na  b\n"),
     ];
-    // A value that any of them will accept, so a refusal is the conflict with
-    // --peek rather than a value the option would have rejected anyway.
+    /// A value that any of them will accept, so a refusal is the conflict with
+    /// --peek rather than a value the option would have rejected anyway.
     const VALUES: [(&str, &str); 16] = [
         ("--flexible", "widest"), ("--insert", "0,replace"),
         ("--rfc3339", "0"), ("--utc", "0"), ("--local", "0"),
@@ -5647,7 +5649,7 @@ fn peek_reads_no_more_of_the_file_than_it_shows() {
 
 // ---- --list-options: the machine-readable option contract ----------------
 
-// Splits --list-options' output into its records, dropping the comments.
+/// Splits --list-options' output into its records, dropping the comments.
 fn option_list() -> Vec<Vec<String>> {
     let output = csvdt().arg("--list-options").output().unwrap();
     assert!(output.status.success(), "--list-options failed");
@@ -6885,9 +6887,9 @@ fn widest_does_not_spool_a_file_it_can_simply_read_twice() {
     assert!(left.is_empty(), "should not have spooled: {:?}", left);
 }
 
-// Creates a fifo and writes csv into it from its own thread, because opening a
-// fifo to read blocks until a writer arrives. Returns the join handle so the
-// caller can wait for the write to finish.
+/// Creates a fifo and writes csv into it from its own thread, because opening a
+/// fifo to read blocks until a writer arrives. Returns the join handle so the
+/// caller can wait for the write to finish.
 #[cfg(unix)]
 fn fifo_writer(
     fifo: std::path::PathBuf,
@@ -7309,23 +7311,23 @@ fn local_refuses_a_tz_that_is_not_a_zone_it_knows() {
 
 #[test]
 fn no_conversion_but_local_reads_the_zone() {
-    // The page's ENVIRONMENT section promises the zone reaches -l and reaches
-    // nothing else: "-u, -o, -d, -s and -r work from the offset the record
-    // already carries, and so give the same answer on any machine". That
-    // sentence is what lets an answer be quoted somewhere it will be checked
-    // on another machine, which is the use this program is written for.
-    //
-    // Every other TZ test here asks what -l does with a zone. None asked that
-    // the rest ignore it, so a conversion that started reading the host's
-    // zone would have broken the promise silently, and plausibly, since the
-    // result would still be a well-formed timestamp with a well-formed
-    // offset, the same shape of quiet mistake as a misspelt zone under -l.
-    //
-    // Eight settings, because they do not take one path: a name csvdt looks
-    // up in the bundled database, a POSIX rule string chrono parses, and no
-    // value at all. Half-hour and quarter-hour zones among them, so a
-    // conversion reading the zone is off by something a whole-hour zone
-    // could hide against the offsets in the fixtures.
+    /// The page's ENVIRONMENT section promises the zone reaches -l and reaches
+    /// nothing else: "-u, -o, -d, -s and -r work from the offset the record
+    /// already carries, and so give the same answer on any machine". That
+    /// sentence is what lets an answer be quoted somewhere it will be checked
+    /// on another machine, which is the use this program is written for.
+    ///
+    /// Every other TZ test here asks what -l does with a zone. None asked that
+    /// the rest ignore it, so a conversion that started reading the host's
+    /// zone would have broken the promise silently, and plausibly, since the
+    /// result would still be a well-formed timestamp with a well-formed
+    /// offset, the same shape of quiet mistake as a misspelt zone under -l.
+    ///
+    /// Eight settings, because they do not take one path: a name csvdt looks
+    /// up in the bundled database, a POSIX rule string chrono parses, and no
+    /// value at all. Half-hour and quarter-hour zones among them, so a
+    /// conversion reading the zone is off by something a whole-hour zone
+    /// could hide against the offsets in the fixtures.
     const ZONES: [Option<&str>; 8] = [
         Some("UTC"),
         Some("Asia/Kolkata"),        // +05:30
@@ -7348,9 +7350,9 @@ fn no_conversion_but_local_reads_the_zone() {
         String::from_utf8(output.stdout).expect("csvdt should write UTF-8")
     };
 
-    // A timestamp carrying Z, one carrying an offset of its own, one from
-    // before any of these zones had their modern rules, one landing in the
-    // hour Europe changes over, and epoch seconds, which only -r reads.
+    /// A timestamp carrying Z, one carrying an offset of its own, one from
+    /// before any of these zones had their modern rules, one landing in the
+    /// hour Europe changes over, and epoch seconds, which only -r reads.
     const ONE: [&str; 5] = [
         "ts,b\n2026-07-25T12:00:00Z,x\n",
         "ts,b\n2026-07-25T12:00:00+02:00,x\n",
@@ -8068,8 +8070,8 @@ fn known_limits_name_the_cr_only_comment_trap() {
 
 // ---- TZ forms that are not zone names ------------------------------------
 
-// TZ carries no weight on Windows, which takes its zone from the system,
-// so the rule form is a Unix question and so are its refusals.
+/// TZ carries no weight on Windows, which takes its zone from the system,
+/// so the rule form is a Unix question and so are its refusals.
 #[cfg(unix)]
 #[test]
 fn posix_tz_rules_this_build_cannot_read_are_refused() {
@@ -8353,8 +8355,8 @@ fn a_bare_field_that_begins_with_a_single_quote_is_counted_as_a_misread() {
         .stderr(predicate::str::contains("1 row(s) hold a field"));
 }
 
-// TZ carries no weight on Windows, which takes its zone from the system, so
-// the rule form is a Unix question and so are its refusals.
+/// TZ carries no weight on Windows, which takes its zone from the system, so
+/// the rule form is a Unix question and so are its refusals.
 #[cfg(unix)]
 #[test]
 fn a_tz_abbreviation_too_short_for_posix_is_not_read_as_a_rule() {
@@ -8527,10 +8529,10 @@ fn every_fatal_message_names_the_program_it_came_from() {
     );
 }
 
-// Whether this machine has a device that answers every write with ENOSPC.
-// Linux and the BSDs do; a container built without it does not, and the
-// tests that need one say so rather than passing on a machine that could not
-// have run them.
+/// Whether this machine has a device that answers every write with ENOSPC.
+/// Linux and the BSDs do; a container built without it does not, and the
+/// tests that need one say so rather than passing on a machine that could not
+/// have run them.
 #[cfg(unix)]
 fn dev_full() -> Option<std::fs::File> {
     std::fs::OpenOptions::new().write(true).open("/dev/full").ok()
@@ -8801,16 +8803,16 @@ fn a_standard_input_that_cannot_be_read_is_refused_rather_than_read_as_empty() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// Runs BINARY with ARGUMENTS over FILE, with the shell redirecting onto that
-// same file, and gives back what the run said and what the file holds after.
-//
-// Through a shell on purpose: the hazard is the shell opening the redirection
-// before csvdt is started, which is what empties the file, and no amount of
-// Command::stdout reproduces that ordering.
-//
-// A batch file on Windows rather than 'cmd /C', whose quoting rules for a
-// command line holding quoted paths are their own subject. Written out and
-// run, the redirection is unambiguous and the test is about csvdt.
+/// Runs BINARY with ARGUMENTS over FILE, with the shell redirecting onto that
+/// same file, and gives back what the run said and what the file holds after.
+///
+/// Through a shell on purpose: the hazard is the shell opening the redirection
+/// before csvdt is started, which is what empties the file, and no amount of
+/// Command::stdout reproduces that ordering.
+///
+/// A batch file on Windows rather than 'cmd /C', whose quoting rules for a
+/// command line holding quoted paths are their own subject. Written out and
+/// run, the redirection is unambiguous and the test is about csvdt.
 #[cfg(unix)]
 fn through_a_shell(
     binary: &std::path::Path,

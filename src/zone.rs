@@ -1,12 +1,12 @@
-// The zone -l/--local converts into, from TZ or from the system.
+//! The zone -l/--local converts into, from TZ or from the system.
 
 use std::error::Error;
 
-// Whether a TZ value spells POSIX rules rather than naming a zone. POSIX
-// writes an abbreviation of three or more letters, or a bracketed form like
-// "<+04>", followed immediately by its offset: "EST5EDT,M3.2.0,M11.1.0",
-// "UTC+3", "GMT0BST,M3.5.0/1,M10.5.0". A zone name never carries a digit or a
-// sign in that position, which is what separates rules from a misspelt name.
+/// Whether a TZ value spells POSIX rules rather than naming a zone. POSIX
+/// writes an abbreviation of three or more letters, or a bracketed form like
+/// "<+04>", followed immediately by its offset: "EST5EDT,M3.2.0,M11.1.0",
+/// "UTC+3", "GMT0BST,M3.5.0/1,M10.5.0". A zone name never carries a digit or a
+/// sign in that position, which is what separates rules from a misspelt name.
 pub(crate) fn is_posix_tz_rule(value: &str) -> bool {
     let after_abbreviation = if let Some(bracketed) = value.strip_prefix('<') {
         match bracketed.find('>') {
@@ -23,12 +23,12 @@ pub(crate) fn is_posix_tz_rule(value: &str) -> bool {
     matches!(after_abbreviation.chars().next(), Some('+' | '-' | '0'..='9'))
 }
 
-// The offsets a POSIX rule declares, standard then daylight when it has one,
-// in seconds east of UTC, or None if the rule is not shaped the way POSIX
-// says. A daylight name with no offset of its own is an hour ahead. POSIX
-// writes the sign the other way round from everyone else: the value is what
-// must be added to local time to reach UTC, so "EST5" is UTC-5 and "IST-2"
-// is UTC+2.
+/// The offsets a POSIX rule declares, standard then daylight when it has one,
+/// in seconds east of UTC, or None if the rule is not shaped the way POSIX
+/// says. A daylight name with no offset of its own is an hour ahead. POSIX
+/// writes the sign the other way round from everyone else: the value is what
+/// must be added to local time to reach UTC, so "EST5" is UTC-5 and "IST-2"
+/// is UTC+2.
 pub(crate) fn posix_rule_offsets(value: &str) -> Option<(i32, Option<i32>)> {
     let (standard, rest) = posix_offset(after_posix_abbreviation(value)?)?;
     if rest.is_empty() || rest.starts_with(',') {
@@ -42,6 +42,8 @@ pub(crate) fn posix_rule_offsets(value: &str) -> Option<(i32, Option<i32>)> {
     Some((standard, Some(daylight)))
 }
 
+/// What follows the zone abbreviation at the start of a POSIX rule, plain
+/// or bracketed, or None for a bracket that is never closed.
 pub(crate) fn after_posix_abbreviation(value: &str) -> Option<&str> {
     match value.strip_prefix('<') {
         Some(bracketed) => Some(&bracketed[bracketed.find('>')? + 1..]),
@@ -49,8 +51,8 @@ pub(crate) fn after_posix_abbreviation(value: &str) -> Option<&str> {
     }
 }
 
-// The offset at the start of TAIL, in seconds east of UTC, and what follows
-// it. POSIX writes offsets west of UTC, hence the negation.
+/// The offset at the start of TAIL, in seconds east of UTC, and what follows
+/// it. POSIX writes offsets west of UTC, hence the negation.
 pub(crate) fn posix_offset(tail: &str) -> Option<(i32, &str)> {
     let (sign, rest) = match tail.strip_prefix('-') {
         Some(rest) => (-1, rest),
@@ -73,22 +75,22 @@ pub(crate) fn posix_offset(tail: &str) -> Option<(i32, &str)> {
     Some((-sign * (hours * 3600 + minutes * 60 + seconds), &rest[length..]))
 }
 
-// Whether chrono made sense of the POSIX rule in TZ, judged by whether it
-// agrees with the rule about standard time.
-//
-// chrono reads the rule itself, and where it cannot, a transition time
-// past 24:00, which real zones publish; Asia/Jerusalem's own footer is
-// IST-2IDT,M3.4.4/26,M10.5.0, it falls back to UTC without a word. Left
-// alone, `-l` would answer +00:00 for a rule naming a zone hours away and
-// exit 0, the same quiet mistake the unknown-name refusal exists to stop.
-//
-// Two probes six months apart, because whichever of them falls in standard
-// time must carry the offset the rule declares, and which one that is
-// depends on the hemisphere. A rule chrono cannot read is replaced by UTC or
-// by the system's own zone, whose offset can match by chance, so a rule with
-// daylight saving must show both of its offsets. A zone whose standard offset
-// really is UTC cannot be told apart from a rule chrono dropped, but then the
-// standard half of the answer is right either way.
+/// Whether chrono made sense of the POSIX rule in TZ, judged by whether it
+/// agrees with the rule about standard time.
+///
+/// chrono reads the rule itself, and where it cannot, a transition time
+/// past 24:00, which real zones publish; Asia/Jerusalem's own footer is
+/// IST-2IDT,M3.4.4/26,M10.5.0, it falls back to UTC without a word. Left
+/// alone, `-l` would answer +00:00 for a rule naming a zone hours away and
+/// exit 0, the same quiet mistake the unknown-name refusal exists to stop.
+///
+/// Two probes six months apart, because whichever of them falls in standard
+/// time must carry the offset the rule declares, and which one that is
+/// depends on the hemisphere. A rule chrono cannot read is replaced by UTC or
+/// by the system's own zone, whose offset can match by chance, so a rule with
+/// daylight saving must show both of its offsets. A zone whose standard offset
+/// really is UTC cannot be told apart from a rule chrono dropped, but then the
+/// standard half of the answer is right either way.
 pub(crate) fn chrono_reads_posix_rule(standard: i32, daylight: Option<i32>) -> bool {
     use chrono::{Offset, TimeZone};
     let offsets: Vec<i32> = [1u32, 7].iter().filter_map(|month| {
@@ -98,33 +100,33 @@ pub(crate) fn chrono_reads_posix_rule(standard: i32, daylight: Option<i32>) -> b
     offsets_follow_rule(&offsets, standard, daylight)
 }
 
-// Whether the OFFSETS chrono gave at the two probes are the rule's own: the
-// standard offset, and the daylight one when the rule has one. Apart from
-// chrono_reads_posix_rule so the decision can be tested without depending on
-// the zone of the machine the tests run on, which is what chrono falls back to.
+/// Whether the OFFSETS chrono gave at the two probes are the rule's own: the
+/// standard offset, and the daylight one when the rule has one. Apart from
+/// chrono_reads_posix_rule so the decision can be tested without depending on
+/// the zone of the machine the tests run on, which is what chrono falls back to.
 pub(crate) fn offsets_follow_rule(offsets: &[i32], standard: i32, daylight: Option<i32>) -> bool {
     offsets.contains(&standard) && daylight.is_none_or(|offset| offsets.contains(&offset))
 }
 
-// Resolves the zone -l works in, from TZ or from the platform, once at
-// startup rather than per row.
-//
-// The zone is looked up in the IANA database bundled with the binary
-// (chrono-tz) instead of read from the host's tzdata files. That keeps a
-// conversion reproducible: the same input gives the same output on any
-// machine, whatever tzdata the operating system happens to carry, which
-// matters when the result may be relied on as evidence. It also sidesteps a
-// defect in chrono's own tzdata reader, which never applies Morocco's
-// daylight-saving rule and so reports Africa/Casablanca and Africa/El_Aaiun
-// an hour early year-round.
-//
-// Ok(Some) is a zone found in the bundled database. Ok(None) means the value
-// does not name a zone and is left to chrono's own reading, POSIX rules, or
-// the path form glibc allows. Err refuses a value that is neither, because
-// otherwise a misspelt zone would fall through to UTC and `-l` would report
-// +00:00 as though it were the zone that was meant. That is the same quiet
-// mistake `-o` refuses, and it is worse here, since a plausible timestamp
-// carries no sign of it.
+/// Resolves the zone -l works in, from TZ or from the platform, once at
+/// startup rather than per row.
+///
+/// The zone is looked up in the IANA database bundled with the binary
+/// (chrono-tz) instead of read from the host's tzdata files. That keeps a
+/// conversion reproducible: the same input gives the same output on any
+/// machine, whatever tzdata the operating system happens to carry, which
+/// matters when the result may be relied on as evidence. It also sidesteps a
+/// defect in chrono's own tzdata reader, which never applies Morocco's
+/// daylight-saving rule and so reports Africa/Casablanca and Africa/El_Aaiun
+/// an hour early year-round.
+///
+/// Ok(Some) is a zone found in the bundled database. Ok(None) means the value
+/// does not name a zone and is left to chrono's own reading, POSIX rules, or
+/// the path form glibc allows. Err refuses a value that is neither, because
+/// otherwise a misspelt zone would fall through to UTC and `-l` would report
+/// +00:00 as though it were the zone that was meant. That is the same quiet
+/// mistake `-o` refuses, and it is worse here, since a plausible timestamp
+/// carries no sign of it.
 pub(crate) fn local_timezone() -> Result<Option<chrono_tz::Tz>, Box<dyn Error>> {
     let mut from_tz = true;
     let name = match std::env::var("TZ") {

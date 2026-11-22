@@ -1,13 +1,13 @@
-// What an action makes of each row, and of the header.
+//! What an action makes of each row, and of the header.
 
 use std::error::Error;
 use chrono::{DateTime, FixedOffset};
 use crate::cli::*;
 use crate::timestamp::*;
 
-// A column an action names that the record it is measured against does not
-// have. A type of its own, so the caller that knows which record that was
-// can recognise it and say so; see locate_out_of_bound.
+/// A column an action names that the record it is measured against does not
+/// have. A type of its own, so the caller that knows which record that was
+/// can recognise it and say so; see locate_out_of_bound.
 #[derive(Debug)]
 pub(crate) struct OutOfBound;
 
@@ -19,15 +19,16 @@ impl std::fmt::Display for OutOfBound {
 
 impl Error for OutOfBound {}
 
+/// The error a column past the end of a record gives.
 pub(crate) fn out_of_bound() -> Box<dyn Error> {
     Box::new(OutOfBound)
 }
 
-// Attaches which record an out-of-bound column was measured against, in the
-// same terms the CSV reader's own errors use: "record 3 (line: 4)" for a data
-// row, "the header" for the header. The bare message names neither the
-// record nor its width, which matters most in a ragged file, where finding
-// the one short row is the task. Any other error is handed back as it was.
+/// Attaches which record an out-of-bound column was measured against, in the
+/// same terms the CSV reader's own errors use: "record 3 (line: 4)" for a data
+/// row, "the header" for the header. The bare message names neither the
+/// record nor its width, which matters most in a ragged file, where finding
+/// the one short row is the task. Any other error is handed back as it was.
 pub(crate) fn locate_out_of_bound(
     error: Box<dyn Error>, record: &csv::StringRecord, header: bool,
 ) -> Box<dyn Error> {
@@ -45,10 +46,10 @@ pub(crate) fn locate_out_of_bound(
         format!("{OutOfBound}: {} has {} field(s), counted from 0", location, record.len())))
 }
 
-// Clamps -i's column into a valid index for this record instead of
-// producing an out-of-bound error: negative (or otherwise too low) becomes
-// the first column, too high becomes the last, -i's target can never be
-// out of bound.
+/// Clamps -i's column into a valid index for this record instead of
+/// producing an out-of-bound error: negative (or otherwise too low) becomes
+/// the first column, too high becomes the last, -i's target can never be
+/// out of bound.
 pub(crate) fn clamp_insert_column(value: i64, len: usize) -> usize {
     if len == 0 {
         return 0;
@@ -66,9 +67,9 @@ pub(crate) fn clamp_insert_column(value: i64, len: usize) -> usize {
     }
 }
 
-// Puts VALUES into `fields` around `column`: ahead of it, over it, or behind
-// it, as `position` says, in the order given. Shared by every action that
-// writes one or two fields, so the before/replace/after dispatch exists once.
+/// Puts VALUES into `fields` around `column`: ahead of it, over it, or behind
+/// it, as `position` says, in the order given. Shared by every action that
+/// writes one or two fields, so the before/replace/after dispatch exists once.
 pub(crate) fn insert_fields<'a>(
     fields: &mut Vec<&'a str>,
     column: usize,
@@ -83,21 +84,21 @@ pub(crate) fn insert_fields<'a>(
     fields.splice(range, values.iter().copied());
 }
 
-// Drops every column in `columns` from `fields`. `columns` must be ordered
-// highest index first (as --remove's parsing guarantees), so each removal
-// leaves the positions of those still to come untouched.
+/// Drops every column in `columns` from `fields`. `columns` must be ordered
+/// highest index first (as --remove's parsing guarantees), so each removal
+/// leaves the positions of those still to come untouched.
 pub(crate) fn remove_columns(fields: &mut Vec<&str>, columns: &[usize]) {
     for &column in columns {
         fields.remove(column);
     }
 }
 
-// Fills `fields` with ROW in --arrange's order: the columns it names first,
-// in the order given, then every column it didn't name, keeping their
-// original relative order. Nothing is dropped and nothing is duplicated, so
-// the row always comes out the same width it went in. Built straight from the
-// record rather than filled in input order and then permuted, which would
-// need a second buffer to read from.
+/// Fills `fields` with ROW in --arrange's order: the columns it names first,
+/// in the order given, then every column it didn't name, keeping their
+/// original relative order. Nothing is dropped and nothing is duplicated, so
+/// the row always comes out the same width it went in. Built straight from the
+/// record rather than filled in input order and then permuted, which would
+/// need a second buffer to read from.
 pub(crate) fn arrange_into<'a>(
     fields: &mut Vec<&'a str>,
     row: &'a csv::StringRecord,
@@ -114,16 +115,20 @@ pub(crate) fn arrange_into<'a>(
     }
 }
 
-pub(crate) fn process_headers(headers: &csv::StringRecord, args: &ArgumentFlags) -> Result<csv::StringRecord, Box<dyn Error>> {
+/// The header as the output carries it, with the action's new columns named.
+pub(crate) fn process_headers(
+    headers: &csv::StringRecord,
+    args: &ArgumentFlags,
+) -> Result<csv::StringRecord, Box<dyn Error>> {
     let edit = plan_header_edit(headers.len(), args)?;
     let mut fields = Vec::with_capacity(headers.len() + 2);
     apply_row_edit(headers, args, &edit, &mut fields);
     Ok(csv::StringRecord::from(fields))
 }
 
-// What the action makes of the header: the same edit a data row gets, with
-// the new columns' names in place of their values. A name carries a '>' or
-// '<' pointing at the column it was made from, unless it replaces it.
+/// What the action makes of the header: the same edit a data row gets, with
+/// the new columns' names in place of their values. A name carries a '>' or
+/// '<' pointing at the column it was made from, unless it replaces it.
 pub(crate) fn plan_header_edit(len: usize, args: &ArgumentFlags) -> Result<RowEdit, Box<dyn Error>> {
     check_bounds(args, len)?;
     let target = insert_target(args, len);
@@ -149,9 +154,9 @@ pub(crate) fn plan_header_edit(len: usize, args: &ArgumentFlags) -> Result<RowEd
     })
 }
 
-// Refuses a record too narrow for a column the action names. Asked of the
-// header and of every data row alike, and of every column before any is
-// touched, so a row is either edited fully or reported, never left half done.
+/// Refuses a record too narrow for a column the action names. Asked of the
+/// header and of every data row alike, and of every column before any is
+/// touched, so a row is either edited fully or reported, never left half done.
 pub(crate) fn check_bounds(args: &ArgumentFlags, len: usize) -> Result<(), Box<dyn Error>> {
     let within = |column: usize| match column < len {
         true => Ok(()),
@@ -170,30 +175,48 @@ pub(crate) fn check_bounds(args: &ArgumentFlags, len: usize) -> Result<(), Box<d
     }
 }
 
-// The one edit an action makes to a row: which column it targets and the
-// value(s) written there. Computed separately from applying it, because the
-// owned Strings have to live in the *caller's* frame: that's what lets the
-// field list borrow them and go straight to the CSV writer, with no
-// intermediate StringRecord copy per row (see process_stream).
+/// The one edit an action makes to a row: which column it targets and the
+/// value(s) written there. Computed separately from applying it, because the
+/// owned Strings have to live in the *caller's* frame: that's what lets the
+/// field list borrow them and go straight to the CSV writer, with no
+/// intermediate StringRecord copy per row (see process_stream).
 pub(crate) enum RowEdit {
+    /// The row as it was read.
     Passthrough,
-    Single { target: usize, value: String },
-    Pair { target: usize, first: String, second: String },
+    /// One value written at a column.
+    Single {
+        /// Where the value goes.
+        target: usize,
+        /// The value, or the parse_err marker.
+        value: String,
+    },
+    /// Two values written side by side at a column, as -s writes its date
+    /// and time.
+    Pair {
+        /// Where the pair goes.
+        target: usize,
+        /// The first value.
+        first: String,
+        /// The second value.
+        second: String,
+    },
+    /// The --remove columns dropped.
     Remove,
+    /// The columns in -a/--arrange's order.
     Arrange,
 }
 
 impl RowEdit {
-    // Whether a conversion ran for this row at all. --remove and -a/--arrange
-    // move fields about without reading one, so there is nothing that could
-    // have failed; nor is there with no action given.
+    /// Whether a conversion ran for this row at all. --remove and -a/--arrange
+    /// move fields about without reading one, so there is nothing that could
+    /// have failed; nor is there with no action given.
     pub(crate) fn is_conversion(&self) -> bool {
         matches!(self, RowEdit::Single { .. } | RowEdit::Pair { .. })
     }
 
-    // Whether the conversion could not produce a result for this row. Asked of
-    // the edit rather than counted at each place that writes the marker, so a
-    // conversion added later cannot forget to be counted.
+    /// Whether the conversion could not produce a result for this row. Asked of
+    /// the edit rather than counted at each place that writes the marker, so a
+    /// conversion added later cannot forget to be counted.
     pub(crate) fn is_parse_error(&self) -> bool {
         match self {
             RowEdit::Single { value, .. } => value == PARSE_ERR,
@@ -205,9 +228,9 @@ impl RowEdit {
     }
 }
 
-// Resolves where the action's result goes in this row: -i's column, clamped
-// into the row, or without -i the action's own column, which for the
-// two-column --duration is the second.
+/// Resolves where the action's result goes in this row: -i's column, clamped
+/// into the row, or without -i the action's own column, which for the
+/// two-column --duration is the second.
 pub(crate) fn insert_target(args: &ArgumentFlags, len: usize) -> usize {
     let fallback = match args.action {
         Action::Duration { second: Some(second) } => second,
@@ -219,13 +242,13 @@ pub(crate) fn insert_target(args: &ArgumentFlags, len: usize) -> usize {
     }
 }
 
-// An edit for one row, and the timestamp the row-over-row --duration carries
-// into the next.
+/// An edit for one row, and the timestamp the row-over-row --duration carries
+/// into the next.
 pub(crate) type PlannedEdit = (RowEdit, Option<DateTime<FixedOffset>>);
 
-// Parses the row and works out what to write, without touching the field
-// list. Returns the edit plus the row-over-row duration cache to carry into
-// the next row.
+/// Parses the row and works out what to write, without touching the field
+/// list. Returns the edit plus the row-over-row duration cache to carry into
+/// the next row.
 pub(crate) fn plan_row_edit(
     record: &csv::StringRecord,
     args: &ArgumentFlags,
@@ -319,10 +342,10 @@ pub(crate) fn plan_row_edit(
     Ok((edit, dt_cache))
 }
 
-// Fills `fields` with the row's final contents: the record's own fields,
-// borrowed, with `edit` applied. Every &str borrows either the record or the
-// edit, so nothing is copied here. The header is built the same way, from
-// the edit plan_header_edit makes of it.
+/// Fills `fields` with the row's final contents: the record's own fields,
+/// borrowed, with `edit` applied. Every &str borrows either the record or the
+/// edit, so nothing is copied here. The header is built the same way, from
+/// the edit plan_header_edit makes of it.
 pub(crate) fn apply_row_edit<'a>(
     record: &'a csv::StringRecord,
     args: &'a ArgumentFlags,

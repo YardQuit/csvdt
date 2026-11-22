@@ -1,3 +1,7 @@
+//! csvdt converts the timestamps in CSV files and rearranges their columns.
+//! This file holds the entry point and the run; each module beside it
+//! says what it holds.
+
 mod cli;
 mod edit;
 mod fill_log;
@@ -22,46 +26,46 @@ use fill_log::*;
 use edit::*;
 use report::*;
 
-// Writes one line to stderr, accepting that it may not arrive. Everything
-// said on stderr is commentary on a result that already stands: a warning
-// beside a successful run, or the reason for an exit status the caller reads
-// either way. eprintln! panics when stderr is closed or full, which would turn
-// those runs into exit 101 with the message lost too.
+/// Writes one line to stderr, accepting that it may not arrive. Everything
+/// said on stderr is commentary on a result that already stands: a warning
+/// beside a successful run, or the reason for an exit status the caller reads
+/// either way. eprintln! panics when stderr is closed or full, which would turn
+/// those runs into exit 101 with the message lost too.
 pub(crate) fn note(message: &str) {
     use std::io::Write;
     let _ = writeln!(std::io::stderr(), "{message}");
 }
 
-// The last thing a failing run says, named the way every other diagnostic
-// here is. Anonymity costs nothing on a terminal, where the command just
-// typed is the line above; everywhere else it costs the only thing that
-// makes a line actionable. `csvdt big.csv | sort` with stderr in a log would
-// otherwise leave "No space left on device (os error 28)" with nothing saying
-// which half of the pipeline ran out of room.
+/// The last thing a failing run says, named the way every other diagnostic
+/// here is. Anonymity costs nothing on a terminal, where the command just
+/// typed is the line above; everywhere else it costs the only thing that
+/// makes a line actionable. `csvdt big.csv | sort` with stderr in a log would
+/// otherwise leave "No space left on device (os error 28)" with nothing saying
+/// which half of the pipeline ran out of room.
 pub(crate) fn fatal(message: &str) {
     note(&format!("csvdt: {message}"));
 }
 
-// Writes one of the answers csvdt gives about itself (the option list, the
-// manual page) and ends the run where it could not be written.
-//
-// A closed pipe stays the caller's business: `csvdt --list-options | head -1`
-// is a reasonable thing to do and nothing has gone wrong. Every other failure
-// is reported, so that `csvdt --generate-man > page.1` on a full disk does not
-// succeed for the empty file it leaves behind. A package build reads that
-// status and installs what is there.
+/// Writes one of the answers csvdt gives about itself (the option list, the
+/// manual page) and ends the run where it could not be written.
+///
+/// A closed pipe stays the caller's business: `csvdt --list-options | head -1`
+/// is a reasonable thing to do and nothing has gone wrong. Every other failure
+/// is reported, so that `csvdt --generate-man > page.1` on a full disk does not
+/// succeed for the empty file it leaves behind. A package build reads that
+/// status and installs what is there.
 pub(crate) fn answer(bytes: &[u8]) {
     use std::io::Write;
     let mut stdout = std::io::stdout();
     answered(stdout.write_all(bytes).and_then(|()| stdout.flush()));
 }
 
-// Takes the padding off the end of a line and leaves the line ending alone.
-//
-// A carriage return is part of the ending, not padding. On Windows the help
-// corpus is checked out with CRLF unless something says otherwise, so a blank
-// line inside an option's long help arrives as ten spaces and a CR. A trim
-// that stopped at the CR would leave all ten spaces in the output.
+/// Takes the padding off the end of a line and leaves the line ending alone.
+///
+/// A carriage return is part of the ending, not padding. On Windows the help
+/// corpus is checked out with CRLF unless something says otherwise, so a blank
+/// line inside an option's long help arrives as ten spaces and a CR. A trim
+/// that stopped at the CR would leave all ten spaces in the output.
 pub(crate) fn without_trailing_padding(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for (index, line) in text.split('\n').enumerate() {
@@ -78,22 +82,22 @@ pub(crate) fn without_trailing_padding(text: &str) -> String {
     out
 }
 
-// Writes what clap renders for --help, -h and --version.
-//
-// clap's own printer leaves trailing spaces on help lines. Every line of an
-// option's long help is indented ten columns, blank lines included, so a
-// blank line inside one arrives as ten spaces and a newline. That is
-// invisible on a terminal and litter in a file, a diff or a paste.
-//
-// The bytes are still clap's. StyledStr::ansi() hands back the same string
-// clap's own printer writes, and it goes out through the same
-// anstream::AutoStream at the same ColorChoice, the default, Auto, which
-// is what this Command asks for by never asking. So colour is decided by
-// clap's rules exactly as before, on a terminal and not through a pipe, and
-// the stream is the one clap would have picked: help and version to standard
-// output, and anything else that renders like help to standard error.
-//
-// Only the trailing spaces differ.
+/// Writes what clap renders for --help, -h and --version.
+///
+/// clap's own printer leaves trailing spaces on help lines. Every line of an
+/// option's long help is indented ten columns, blank lines included, so a
+/// blank line inside one arrives as ten spaces and a newline. That is
+/// invisible on a terminal and litter in a file, a diff or a paste.
+///
+/// The bytes are still clap's. StyledStr::ansi() hands back the same string
+/// clap's own printer writes, and it goes out through the same
+/// anstream::AutoStream at the same ColorChoice, the default, Auto, which
+/// is what this Command asks for by never asking. So colour is decided by
+/// clap's rules exactly as before, on a terminal and not through a pipe, and
+/// the stream is the one clap would have picked: help and version to standard
+/// output, and anything else that renders like help to standard error.
+///
+/// Only the trailing spaces differ.
 pub(crate) fn say_as_clap_would(error: &clap::Error) -> std::io::Result<()> {
     use std::io::Write;
     let rendered = error.render();
@@ -116,9 +120,9 @@ pub(crate) fn say_as_clap_would(error: &clap::Error) -> std::io::Result<()> {
     }
 }
 
-// The same policy as answer(), for an answer written by the function above.
-// What is left to decide is what a failed write means, and that is this, the
-// same as for the answers csvdt writes directly.
+/// The same policy as answer(), for an answer written by the function above.
+/// What is left to decide is what a failed write means, and that is this, the
+/// same as for the answers csvdt writes directly.
 pub(crate) fn answered(written: std::io::Result<()>) {
     match written {
         Ok(()) => (),
@@ -130,6 +134,8 @@ pub(crate) fn answered(written: std::io::Result<()>) {
     }
 }
 
+/// Checks standard output, reads the command line, and runs, ending with
+/// status 100 for a refused argument and 1 for a failed run.
 fn main() {
     // Asked before anything is parsed, so that every route to standard output
     // is covered by one question rather than each having to remember it.
@@ -166,10 +172,10 @@ fn main() {
     }
 }
 
-// Whether an error is, or wraps, the far end of the output having closed.
-// The csv crate wraps io errors of its own, and the writer is flushed through
-// it, so the cause chain has to be walked rather than the top-level type
-// inspected.
+/// Whether an error is, or wraps, the far end of the output having closed.
+/// The csv crate wraps io errors of its own, and the writer is flushed through
+/// it, so the cause chain has to be walked rather than the top-level type
+/// inspected.
 pub(crate) fn is_broken_pipe(error: &(dyn Error + 'static)) -> bool {
     let mut cause = Some(error);
     while let Some(err) = cause {
@@ -187,6 +193,8 @@ pub(crate) fn is_broken_pipe(error: &(dyn Error + 'static)) -> bool {
     false
 }
 
+/// Runs the conversion the options describe, from the input to standard
+/// output, and reports what it wrote.
 pub(crate) fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
     // Rows are written as they are made when somebody is watching, the way
     // the C library line-buffers a terminal, so a slow input shows up as it
@@ -323,6 +331,8 @@ pub(crate) fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Reads every record, pads and edits it as asked, and writes it, logging
+/// what a filling mode did. Returns the tally the run reports at its end.
 pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
     mut reader: csv::Reader<R>,
     writer: &mut csv::Writer<W>,
@@ -484,16 +494,16 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
     Ok(tally)
 }
 
-// Rows longer than the reference width cannot be made rectangular by padding,
-// and shortening them would throw fields away.
-//
-// Which mode is running decides what to say, because the two reach this for
-// opposite reasons. Under 'fix' the width came from the first record and a
-// wider row later is ordinary: that is the documented limit of a single
-// pass. Under 'widest' the width came from a pass over the whole input, so no
-// row can be too wide for it: getting here at all means the file is not the
-// one that was counted, which the message has to say, since 'widest' promises
-// exactly the thing that appears to have failed.
+/// Rows longer than the reference width cannot be made rectangular by padding,
+/// and shortening them would throw fields away.
+///
+/// Which mode is running decides what to say, because the two reach this for
+/// opposite reasons. Under 'fix' the width came from the first record and a
+/// wider row later is ordinary: that is the documented limit of a single
+/// pass. Under 'widest' the width came from a pass over the whole input, so no
+/// row can be too wide for it: getting here at all means the file is not the
+/// one that was counted, which the message has to say, since 'widest' promises
+/// exactly the thing that appears to have failed.
 pub(crate) fn row_wider_than_reference(row_len: usize, width: usize, mode: FillMode) -> Box<dyn Error> {
     let message = match mode {
         FillMode::Widest => format!(

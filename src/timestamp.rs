@@ -1,63 +1,63 @@
-// Reading and writing RFC3339 timestamps and ISO 8601 durations.
+//! Reading and writing RFC3339 timestamps and ISO 8601 durations.
 
 use chrono::{DateTime, Datelike, FixedOffset, Timelike};
 
-// The marker every conversion writes in place of a result it could not
-// produce. One word for all of them, which is what makes `grep -c parse_err`
-// the answer to "did anything fail", see KNOWN LIMITS.
+/// The marker every conversion writes in place of a result it could not
+/// produce. One word for all of them, which is what makes `grep -c parse_err`
+/// the answer to "did anything fail", see KNOWN LIMITS.
 pub(crate) const PARSE_ERR: &str = "parse_err";
 
-// Whether a moment can be written as RFC3339 at all. Its date-fullyear is
-// four digits, so 9999 is the last year there is; chrono reaches far further
-// (to +/-262143) and falls back to ISO 8601's expanded form outside that,
-// which is a different format wearing the same shape.
-//
-// The floor is 0001 rather than 0000, which is the one place this range is
-// narrower than four digits allow. There is no year zero: the Gregorian and
-// Julian calendars run 1 BC straight into AD 1, and ISO 8601 only writes 0000
-// for 1 BC by prior agreement between the parties exchanging the data. RFC3339
-// makes no such agreement, so a 0000 in a file is a value from outside the
-// calendar the rest of the column is in, far more likely a sentinel or a
-// miscounted epoch than a date anybody recorded.
-//
-// The year is read from the value as it will be rendered, not from its UTC
-// year, because a conversion can carry it over the edge without moving the
-// instant: 9999-12-31T23:59:59+00:00 is year 10000 on a +14:00 clock while
-// still 9999 in UTC. Generic over the zone for that reason: -u renders in
-// UTC, -o in a fixed offset, -l in a named zone, and all three have to be
-// asked about the calendar they will actually print.
+/// Whether a moment can be written as RFC3339 at all. Its date-fullyear is
+/// four digits, so 9999 is the last year there is; chrono reaches far further
+/// (to +/-262143) and falls back to ISO 8601's expanded form outside that,
+/// which is a different format wearing the same shape.
+///
+/// The floor is 0001 rather than 0000, which is the one place this range is
+/// narrower than four digits allow. There is no year zero: the Gregorian and
+/// Julian calendars run 1 BC straight into AD 1, and ISO 8601 only writes 0000
+/// for 1 BC by prior agreement between the parties exchanging the data. RFC3339
+/// makes no such agreement, so a 0000 in a file is a value from outside the
+/// calendar the rest of the column is in, far more likely a sentinel or a
+/// miscounted epoch than a date anybody recorded.
+///
+/// The year is read from the value as it will be rendered, not from its UTC
+/// year, because a conversion can carry it over the edge without moving the
+/// instant: 9999-12-31T23:59:59+00:00 is year 10000 on a +14:00 clock while
+/// still 9999 in UTC. Generic over the zone for that reason: -u renders in
+/// UTC, -o in a fixed offset, -l in a named zone, and all three have to be
+/// asked about the calendar they will actually print.
 pub(crate) fn is_rfc3339_year<Zone: chrono::TimeZone>(datetime: &DateTime<Zone>) -> bool {
     (1..=9999).contains(&datetime.year())
 }
 
-// Whether the offset a moment will be rendered with can be written as RFC3339
-// at all. Its time-offset is "+"/"-" HH ":" MM, whole minutes, with nowhere
-// to put a seconds part.
-//
-// Only -l can produce one that is not, and it does so from ordinary data. A
-// zone's offset before it adopted standard time is the local mean time of the
-// place, which is whatever fraction of an hour its longitude works out to:
-// Europe/Amsterdam +00:17:30, America/New_York -04:56:02. Nor is that only
-// ancient history, Africa/Monrovia kept -00:44:30 until January 1972, inside
-// the range of real logs.
-//
-// chrono renders those by rounding the offset to the nearest minute while the
-// clock time keeps its seconds, so the two halves of the result disagree:
-// 1971-06-01T12:00:00Z would come out as 1971-06-01T11:15:30-00:45, which
-// reads back as 12:00:30Z. A timestamp naming a different instant from the one
-// it was made from is the quiet wrong answer this tool exists to avoid, so
-// such a value is marked instead, and the input is still there beside it.
+/// Whether the offset a moment will be rendered with can be written as RFC3339
+/// at all. Its time-offset is "+"/"-" HH ":" MM, whole minutes, with nowhere
+/// to put a seconds part.
+///
+/// Only -l can produce one that is not, and it does so from ordinary data. A
+/// zone's offset before it adopted standard time is the local mean time of the
+/// place, which is whatever fraction of an hour its longitude works out to:
+/// Europe/Amsterdam +00:17:30, America/New_York -04:56:02. Nor is that only
+/// ancient history, Africa/Monrovia kept -00:44:30 until January 1972, inside
+/// the range of real logs.
+///
+/// chrono renders those by rounding the offset to the nearest minute while the
+/// clock time keeps its seconds, so the two halves of the result disagree:
+/// 1971-06-01T12:00:00Z would come out as 1971-06-01T11:15:30-00:45, which
+/// reads back as 12:00:30Z. A timestamp naming a different instant from the one
+/// it was made from is the quiet wrong answer this tool exists to avoid, so
+/// such a value is marked instead, and the input is still there beside it.
 pub(crate) fn is_rfc3339_offset<Zone: chrono::TimeZone>(datetime: &DateTime<Zone>) -> bool {
     use chrono::Offset;
     datetime.offset().fix().local_minus_utc() % 60 == 0
 }
 
-// Renders a converted moment as RFC3339, or the parse_err marker when the
-// conversion has taken it outside the format. Writing chrono's expanded form
-// instead would put a value in an RFC3339 column that is not RFC3339, cannot be
-// read back, and gives no sign of the boundary it crossed. The same goes for a
-// sub-minute offset, which chrono renders by rounding the offset alone and so
-// moves the instant.
+/// Renders a converted moment as RFC3339, or the parse_err marker when the
+/// conversion has taken it outside the format. Writing chrono's expanded form
+/// instead would put a value in an RFC3339 column that is not RFC3339, cannot be
+/// read back, and gives no sign of the boundary it crossed. The same goes for a
+/// sub-minute offset, which chrono renders by rounding the offset alone and so
+/// moves the instant.
 pub(crate) fn to_rfc3339_in_range<Zone: chrono::TimeZone>(datetime: DateTime<Zone>) -> String
 where
     Zone::Offset: std::fmt::Display,
@@ -68,12 +68,12 @@ where
     }
 }
 
-// Parses an RFC3339 timestamp, tolerating a trailing numeric offset that's
-// missing its colon (e.g. "+0000" or "-0530" instead of "+00:00"/"-05:30").
-// Such timestamps are common in data exported from tools that follow
-// RFC2822/ISO 8601's looser offset format instead of strict RFC3339. The
-// strict parse is tried first and used as-is when it succeeds, so
-// well-formed input pays no extra cost.
+/// Parses an RFC3339 timestamp, tolerating a trailing numeric offset that's
+/// missing its colon (e.g. "+0000" or "-0530" instead of "+00:00"/"-05:30").
+/// Such timestamps are common in data exported from tools that follow
+/// RFC2822/ISO 8601's looser offset format instead of strict RFC3339. The
+/// strict parse is tried first and used as-is when it succeeds, so
+/// well-formed input pays no extra cost.
 pub(crate) fn parse_rfc3339_lenient(value: &str) -> Result<DateTime<FixedOffset>, chrono::ParseError> {
     // Surrounding whitespace is skipped here rather than trimmed out of the
     // field, so a file written with ", " separators converts without --trim
@@ -109,9 +109,9 @@ pub(crate) fn parse_rfc3339_lenient(value: &str) -> Result<DateTime<FixedOffset>
     }
 }
 
-// The error parse_rfc3339_lenient gives for a value chrono reads but this tool
-// refuses. Made by parsing an empty string, since chrono gives no way to
-// construct one.
+/// The error parse_rfc3339_lenient gives for a value chrono reads but this tool
+/// refuses. Made by parsing an empty string, since chrono gives no way to
+/// construct one.
 pub(crate) fn refused() -> chrono::ParseError {
     match chrono::DateTime::parse_from_rfc3339("") {
         Err(error) => error,
@@ -119,25 +119,25 @@ pub(crate) fn refused() -> chrono::ParseError {
     }
 }
 
-// Whether a value wearing :60 is somewhere a leap second can be.
-//
-// chrono reads a :60 seconds field on any minute at all and folds it onto the
-// second that follows, so 2024-06-15T14:00:60Z and 14:00:60Z's neighbour
-// 14:01:00Z arrive as one instant: -d between them is PT0S, and no conversion
-// can tell them apart. That makes a damaged value: :60 is what a formatter
-// that rounds 59.5 up without carrying writes, read as a different instant
-// than the one it names, quietly, where this tool's rule is to mark what it
-// cannot answer faithfully. Written back out wearing :60, it would also not be
-// RFC3339 on an ordinary minute: standard readers refuse it.
-//
-// A leap second is the last second of a UTC month and is simultaneous
-// everywhere, so the test is on the instant rather than on the clock face the
-// record happens to carry: 2017-01-01T05:29:60+05:30 is the real one at the
-// end of 2016 and is kept, while 2016-12-31T23:59:60+02:00 reads 23:59:60 on
-// its own clock but lands mid-evening in UTC and is not. Structural rather
-// than a table of the leap seconds IERS has declared: a table would refuse
-// every future one until the binary was rebuilt, and the format itself
-// permits them.
+/// Whether a value wearing :60 is somewhere a leap second can be.
+///
+/// chrono reads a :60 seconds field on any minute at all and folds it onto the
+/// second that follows, so 2024-06-15T14:00:60Z and 14:00:60Z's neighbour
+/// 14:01:00Z arrive as one instant: -d between them is PT0S, and no conversion
+/// can tell them apart. That makes a damaged value: :60 is what a formatter
+/// that rounds 59.5 up without carrying writes, read as a different instant
+/// than the one it names, quietly, where this tool's rule is to mark what it
+/// cannot answer faithfully. Written back out wearing :60, it would also not be
+/// RFC3339 on an ordinary minute: standard readers refuse it.
+///
+/// A leap second is the last second of a UTC month and is simultaneous
+/// everywhere, so the test is on the instant rather than on the clock face the
+/// record happens to carry: 2017-01-01T05:29:60+05:30 is the real one at the
+/// end of 2016 and is kept, while 2016-12-31T23:59:60+02:00 reads 23:59:60 on
+/// its own clock but lands mid-evening in UTC and is not. Structural rather
+/// than a table of the leap seconds IERS has declared: a table would refuse
+/// every future one until the binary was rebuilt, and the format itself
+/// permits them.
 pub(crate) fn leap_second_is_possible(stamp: DateTime<FixedOffset>) -> bool {
     // chrono carries a leap second as :59 with a nanosecond field run past a
     // whole second, which is the only way to recognise one after parsing.
@@ -148,6 +148,7 @@ pub(crate) fn leap_second_is_possible(stamp: DateTime<FixedOffset>) -> bool {
     utc.hour() == 23 && utc.minute() == 59 && is_last_day_of_month(utc.date_naive())
 }
 
+/// Whether DATE is the last day of its month.
 pub(crate) fn is_last_day_of_month(date: chrono::NaiveDate) -> bool {
     match date.succ_opt() {
         Some(next) => next.month() != date.month(),
@@ -156,9 +157,9 @@ pub(crate) fn is_last_day_of_month(date: chrono::NaiveDate) -> bool {
     }
 }
 
-// How many digits follow the first '.', which in anything RFC3339-shaped is
-// the start of the fractional seconds, no other part of the format holds a
-// dot. A value where it is something else entirely fails to parse either way.
+/// How many digits follow the first '.', which in anything RFC3339-shaped is
+/// the start of the fractional seconds, no other part of the format holds a
+/// dot. A value where it is something else entirely fails to parse either way.
 pub(crate) fn fractional_digits(value: &str) -> usize {
     match value.find('.') {
         None => 0,
@@ -169,10 +170,10 @@ pub(crate) fn fractional_digits(value: &str) -> usize {
     }
 }
 
-// If `value` ends in a 4-digit numeric offset with no colon (e.g. "+0000"),
-// returns it with a colon inserted (e.g. "+00:00"). Returns None for
-// anything else, including offsets that already have a colon, or a "Z"
-// suffix, so it never touches already-valid RFC3339 strings.
+/// If `value` ends in a 4-digit numeric offset with no colon (e.g. "+0000"),
+/// returns it with a colon inserted (e.g. "+00:00"). Returns None for
+/// anything else, including offsets that already have a colon, or a "Z"
+/// suffix, so it never touches already-valid RFC3339 strings.
 pub(crate) fn insert_offset_colon(value: &str) -> Option<String> {
     if value.len() < 5 {
         return None;
@@ -202,11 +203,11 @@ pub(crate) fn insert_offset_colon(value: &str) -> Option<String> {
     }
 }
 
-// Formats a duration as an ISO 8601 duration string: P[n]DT[n]H[n]M[n]S.
-// Zero-valued components are omitted (a bare "P" with nothing after it
-// would be invalid, so an all-zero duration renders as "PT0S"). Not the
-// same as chrono::TimeDelta's own Display, which dumps the whole duration
-// as a single raw-seconds "PT<n>S" instead of breaking it into d/h/m/s.
+/// Formats a duration as an ISO 8601 duration string: `P[n]DT[n]H[n]M[n]S`.
+/// Zero-valued components are omitted (a bare "P" with nothing after it
+/// would be invalid, so an all-zero duration renders as "PT0S"). Not the
+/// same as chrono::TimeDelta's own Display, which dumps the whole duration
+/// as a single raw-seconds `PT<n>S` instead of breaking it into d/h/m/s.
 pub(crate) fn format_iso8601_duration(delta: chrono::TimeDelta, round_seconds: bool) -> String {
     // The difference is taken low-to-high at both call sites, but that does
     // not make it non-negative: chrono orders timestamps by their clock
