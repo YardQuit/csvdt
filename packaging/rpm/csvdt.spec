@@ -100,9 +100,10 @@ another package, and shows the result in a second buffer.
 
 The help it shows and the arguments it completes come from the binary itself,
 so a csvdt that gains an option is usable from Emacs with no change to this
-package. Three options are named, and only because a region run cannot be
-worked out without knowing which flag says the first record is a header, and
-which two set the quote and the delimiter that decide where a record begins.
+package. Four options are named, and only because a region run cannot be
+worked out without knowing which flag says the first record is a header,
+which two set the quote and the delimiter that decide where a record begins,
+and which one names a comment character, under which a region run is refused.
 
 %prep
 %autosetup -n %{crate}-%{version} -a1

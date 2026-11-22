@@ -29,8 +29,9 @@
 ;; Four options are named, in defcustoms, because a region run cannot be
 ;; worked out without them: which flag says the first record is a header,
 ;; which two set the quote and the delimiter, since where a record begins
-;; depends on both, and which names a comment character.  The tests check that each is an option csvdt
-;; still reports and that no other option name appears in this file.
+;; depends on both, and which names a comment character.  The tests check
+;; that each is an option csvdt still reports and that no other option name
+;; appears in this file.
 ;;
 ;; A run happens in the background: the selected text is written to a
 ;; temporary file in pieces, csvdt is started on the file, and the result is

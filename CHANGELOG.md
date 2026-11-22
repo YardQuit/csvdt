@@ -6,9 +6,53 @@ The front end for the Tuatara editor lives with Tuatara's own packages, in
 [Tuatara-Editor/tuatara-packages](https://github.com/Tuatara-Editor/tuatara-packages),
 loaded with `(load-package "csvdt" :source "tuatara-packages")`: csvdt run
 over a buffer, a selection or Tuatara's banked lines, with the same rules as
-the Emacs one about whole records and the header, and the same three option
-names and no others. It runs csvdt as a background job, so a long run leaves
-the editor free and `M-x stop-job` ends it.
+the Emacs one about whole records and the header, and the header, quote and
+delimiter option names and no others. It runs csvdt as a background job, so
+a long run leaves the editor free and `M-x stop-job` ends it.
+
+### Changed
+
+- `-` as FILE reads standard input, as leaving FILE out does. A file named
+  `-` is given as `./-`.
+- Year 0000 is outside the calendar for every action: `-s` and `-d` now write
+  `parse_err` for it, as `-u`, `-l` and `-o` already did.
+- The `--offset` target is read by its shape alone, `Z` or `+HH:MM`, so a
+  fraction of a second or trailing blanks in it are refused.
+- `--peek` shows control characters and bidirectional formatting characters by
+  code point instead of passing them to the terminal.
+- Rows reach a terminal as they are converted, so `tail -f log.csv | csvdt`
+  shows each row when it arrives. Output to a pipe or a file is buffered as
+  before.
+- Plain runs take about half the time they did: the `--quote` and `--trim`
+  styles are worked out once at start-up instead of for every field.
+- The out-of-bound message names the record for every action and for the
+  header, not only for `-a`, and `-d` quotes the whole value it could not read.
+- The Emacs front end runs csvdt in the background, so Emacs stays free during
+  a long run; a failed run is reported in the echo area. Placing many selected
+  ranges takes one pass over the buffer instead of one per range. With
+  `--comment` in the arguments a region run is refused, and the new option
+  `csvdt-comment-options` lists the names that count.
+
+### Fixed
+
+- The fill log's line numbers are right after comment lines, blank lines,
+  quoted fields holding newlines and in CRLF files; the out-of-bound message
+  uses the same numbers.
+- `--fill-log` naming a FIFO no longer hangs, and a bad fill-log destination
+  is refused before standard input is copied to the spool.
+- File names, `--fill-log` paths and a `TMPDIR` that are not UTF-8 work.
+- The spool file's name carries a random part, so another account cannot
+  claim it first.
+- On Windows the fill log is refused when it is the input or the output, as on
+  Unix.
+
+### Building
+
+- `Cargo.lock` is committed and every build uses `--locked`. The monthly build
+  updates only chrono-tz, which carries the time zone database, and refuses to
+  publish if any other crate moved. `cargo audit` runs on every change to the
+  lock and before each monthly build; `.github/audit-ignore` lists the
+  advisories that do not apply, each with its reason.
 
 ## 1.0.0
 

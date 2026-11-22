@@ -98,7 +98,7 @@ checks that would otherwise have had nothing to compare.
 `readme_examples.py` exists because transcripts drift: a message that gained
 the `csvdt: ` prefix, a `--version` string no build printed, an `Error: `
 prefix the message lacks. It fails on each of them edited back in, and on a
-message changed in `src/main.rs` and left alone in the README.
+message changed in `src/` and left alone in the README.
 
 `emacs_compat.el` is the loosest of them and says so in its own comments. The
 version comes from the earliest NEWS mention of a name, which is wrong in both

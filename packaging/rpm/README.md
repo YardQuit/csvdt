@@ -211,7 +211,7 @@ clap_mangen puts everything after the options into a section it calls `EXTRA`.
 The three topics in there carry their own headings, so those are promoted to
 real sections: the page ends `TIMESTAMP FORMATS`, `KNOWN LIMITS`,
 `EXIT STATUS`. `tests/cli.rs` renders the page and looks for each of them, so a
-heading renamed in `src/help/` without the list in `src/main.rs` being updated
+heading renamed in `src/help/` without the list in `src/cli.rs` being updated
 fails a test rather than quietly losing a section.
 
 The spec's `%check` repeats those greps against the page it just rendered,

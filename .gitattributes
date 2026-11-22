@@ -17,7 +17,7 @@
 # written with, and the rule above would take them away.
 #
 # There is none today. Every CRLF case in the tests and the checks is built in
-# code (tests/cli.rs, src/main.rs, and three of the checks all write \r\n
+# code (tests/cli.rs, src/tests.rs, and three of the checks all write \r\n
 # themselves) which is where a fixture about line endings belongs, because
 # no checkout can reach it there. If one is ever written to disk instead,
 # exempt that path here:
