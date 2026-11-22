@@ -1011,12 +1011,35 @@ fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
 // a three-row table arriving as five, with the numbering above nothing. Shown
 // as the two characters instead, which is what the field holds as far as a
 // column number is concerned.
+//
+// Every other control character, and the marks that reorder text drawn
+// right to left, is shown by its code point, as \u{1b}. The table goes to a
+// terminal, and a field holding an escape sequence would otherwise be run by
+// it: a file can recolour the screen, retitle the window, or, with a bidi
+// override, show a field in an order other than the one it holds.
 fn peek_field(field: &str) -> String {
-    field
-        .replace('\\', "\\\\")
-        .replace('\t', "\\t")
-        .replace('\r', "\\r")
-        .replace('\n', "\\n")
+    let mut shown = String::with_capacity(field.len());
+    for character in field.chars() {
+        match character {
+            '\\' => shown.push_str("\\\\"),
+            '\t' => shown.push_str("\\t"),
+            '\r' => shown.push_str("\\r"),
+            '\n' => shown.push_str("\\n"),
+            _ if character.is_control() || is_bidi_control(character) => {
+                shown.push_str(&format!("\\u{{{:x}}}", u32::from(character)));
+            },
+            _ => shown.push(character),
+        }
+    }
+    shown
+}
+
+// Whether a character is one of Unicode's bidirectional formatting
+// characters: the embeddings and overrides, the isolates, and the three
+// marks. None of them draws anything; they change the order the characters
+// around them are drawn in.
+fn is_bidi_control(character: char) -> bool {
+    matches!(character, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 // Numbers the columns above the rows, padded so each number sits over its

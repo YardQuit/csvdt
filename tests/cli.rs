@@ -288,6 +288,18 @@ fn a_fifo_as_the_fill_log_is_written_without_waiting_on_itself() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+// --peek writes to a terminal, so a field's escape sequences and bidi
+// overrides are shown by code point rather than passed through to be run.
+#[test]
+fn peek_shows_control_and_bidi_characters_by_code_point() {
+    csvdt()
+        .arg("--peek")
+        .write_stdin("\u{1b}]0;title\u{7},a\u{202e}b,c\u{7f}\n")
+        .assert()
+        .success()
+        .stdout("0                    1           2\n\\u{1b}]0;title\\u{7}  a\\u{202e}b  c\\u{7f}\n");
+}
+
 // ---- column actions: split / rfc3339 / utc / local / duration / remove ---
 // Every action takes its column number as its own argument (e.g. -s1),
 // glued or space-separated. -i is independent: "-i <col> <mode>".

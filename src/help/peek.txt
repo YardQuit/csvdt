@@ -33,6 +33,12 @@ draws it. A tab, carriage return or newline inside a field is
 shown as '\t', '\r' or '\n' rather than breaking the table into
 more rows than it has.
 
+Any other control character, and the characters that reorder
+right-to-left text, is shown by its code point, an escape as
+'\u{1b}', so the table is drawn as the file holds it rather than
+run by the terminal. A backslash is shown doubled, so neither
+form can be mistaken for the field's own text.
+
 Reads the file the way a run would: '--read-delimiter',
 '--comment', '--single-quote' and '--trim' all apply, so the
 columns are the ones a run would see. Uneven records are shown
