@@ -317,11 +317,11 @@ takes about two seconds for the same size. So it is memory,
 above, that a damaged file spends -- not time.
 
 An ordinary file of a few hundred megabytes is the other way
-about. Memory stays flat, about 10 MB whatever the size, and
+about. Memory stays flat, about 6 MB whatever the size, and
 time is the only thing that grows with it: measured, 256 MB of
-rows takes some three seconds to reformat and four to convert a
-column. Both figures are one machine's and yours will differ;
-the proportion is the part that holds anywhere.
+rows takes under a second to reformat and about a second to
+convert a column. Both figures are one machine's and yours will
+differ; the proportion is the part that holds anywhere.
 
 The one thing streaming rules out is knowing about the whole
 file before writing, which is why --flexible=fix pads only to

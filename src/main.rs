@@ -21,6 +21,30 @@ enum FillMode {
     Widest,
 }
 
+// How --quote has the writer quote fields. Resolved from the option's word
+// once, at startup, so the checks made on every written field compare an enum
+// rather than lowercasing and matching the word again.
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+enum Quoting {
+    Always,
+    #[default]
+    Necessary,
+    Never,
+    NonNumeric,
+}
+
+impl Quoting {
+    // The csv crate's setting for this style.
+    fn style(self) -> csv::QuoteStyle {
+        match self {
+            Quoting::Always => csv::QuoteStyle::Always,
+            Quoting::Necessary => csv::QuoteStyle::Necessary,
+            Quoting::Never => csv::QuoteStyle::Never,
+            Quoting::NonNumeric => csv::QuoteStyle::NonNumeric,
+        }
+    }
+}
+
 // Where -i puts a converted column relative to the column it is given.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 enum InsertPosition {
@@ -55,13 +79,13 @@ struct ArgumentFlags {
     action_duration: bool,                // -d --duration <col>[,<col2>]
     round_seconds: bool,                  // --round-seconds
     action_offset: Option<FixedOffset>,   // -o --offset <col> <offset>: the offset parsed from the second value
-    whitespace_trim: String,              // --trim
+    whitespace_trim: csv::Trim,           // --trim
     input_delimiter: Option<char>,        // --read-delimiter
     input_quotes: bool,                   // --single-quotes
     read_as_comment: Option<char>,        // --comment
     fill_log: Option<String>,             // --fill-log's destination; "-" is stderr
     output_delimiter: Option<char>,       // --print-delimiter
-    output_quotes: String,                // --quote
+    output_quotes: Quoting,               // --quote
 }
 
 // Writes one line to stderr, accepting that it may not arrive. Everything
@@ -411,13 +435,27 @@ impl<R: std::io::Read> std::io::Read for EndInNewline<R> {
     }
 }
 
-// The full forms --trim and --quote accept. Both may be abbreviated, and both
-// are matched case-insensitively, from this one list each. A second hand-written
-// copy at the point of use could drift from it: if one copy lowercased and the
-// other did not, '--trim ALL' would pass clap, match nothing, and silently mean
-// '--trim none'.
-const TRIM_VALUES: [&str; 4] = ["all", "fields", "headers", "none"];
-const QUOTE_VALUES: [&str; 4] = ["always", "necessary", "never", "nonnumeric"];
+// The words --trim, --quote, --flexible and -i's position accept, each beside
+// what it stands for. All may be abbreviated, and all are matched
+// case-insensitively, from this one table each: clap's list of accepted values
+// and the meaning of each are both read from it, so the two cannot drift
+// apart. A second hand-written copy at the point of use could: if one copy
+// lowercased and the other did not, '--trim ALL' would pass clap, match
+// nothing, and silently mean '--trim none'.
+type Choices<T> = [(&'static str, T)];
+
+const TRIMS: [(&str, csv::Trim); 4] = [
+    ("all", csv::Trim::All),
+    ("fields", csv::Trim::Fields),
+    ("headers", csv::Trim::Headers),
+    ("none", csv::Trim::None),
+];
+const QUOTINGS: [(&str, Quoting); 4] = [
+    ("always", Quoting::Always),
+    ("necessary", Quoting::Necessary),
+    ("never", Quoting::Never),
+    ("nonnumeric", Quoting::NonNumeric),
+];
 // -i/--insert's position word. Not a clap value_parser: -i takes
 // "column,position" as one value, so the word is parsed out of it by hand.
 const POSITIONS: [(&str, InsertPosition); 3] = [
@@ -425,19 +463,22 @@ const POSITIONS: [(&str, InsertPosition); 3] = [
     ("replace", InsertPosition::Replace),
     ("after", InsertPosition::After),
 ];
-const POSITION_VALUES: [&str; 3] = [POSITIONS[0].0, POSITIONS[1].0, POSITIONS[2].0];
-const FLEXIBLE_VALUES: [&str; 3] = ["keep", "fix", "widest"];
+const FLEXIBLE_MODES: [(&str, FillMode); 3] = [
+    ("keep", FillMode::Off),
+    ("fix", FillMode::FirstRecord),
+    ("widest", FillMode::Widest),
+];
 
 // Every abbreviation of these values clap should accept: each prefix that only
 // one of them has. A prefix two of them share is left out, so 'n' is refused
 // rather than resolved to whichever of never/necessary/nonnumeric comes first.
-fn abbreviated_values(values: &[&'static str]) -> Vec<PossibleValue> {
+fn abbreviated_values<T>(choices: &Choices<T>) -> Vec<PossibleValue> {
     let unambiguous = |prefix: &str| {
-        values.iter().filter(|full| full.starts_with(prefix)).count() == 1
+        choices.iter().filter(|(full, _)| full.starts_with(prefix)).count() == 1
     };
 
     let mut possible = Vec::new();
-    for value in values {
+    for (value, _) in choices {
         possible.push(PossibleValue::new(*value));
         possible.extend(
             (1..value.len())
@@ -449,13 +490,14 @@ fn abbreviated_values(values: &[&'static str]) -> Vec<PossibleValue> {
     possible
 }
 
-// Which full form a given value stands for. Only prefixes of exactly one full
-// form are accepted above, so matching on the prefix cannot be ambiguous.
-fn resolve_value(values: &[&'static str], given: &str) -> Option<&'static str> {
+// What a given value stands for. Only prefixes of exactly one full form are
+// accepted above, so matching on the prefix cannot be ambiguous. Asked once
+// per option at startup, never per row.
+fn resolve_value<T: Copy>(choices: &Choices<T>, given: &str) -> Option<T> {
     let given = given.to_lowercase();
-    let mut matching = values.iter().filter(|full| full.starts_with(&given));
+    let mut matching = choices.iter().filter(|(full, _)| full.starts_with(&given));
     match (matching.next(), matching.next()) {
-        (Some(full), None) if !given.is_empty() => Some(full),
+        (Some(&(_, meaning)), None) if !given.is_empty() => Some(meaning),
         _ => None,
     }
 }
@@ -472,15 +514,7 @@ fn configure_reader(args: &ArgumentFlags) -> csv::ReaderBuilder {
         .has_headers(args.has_headers)
         .flexible(args.flexible_record || args.peek);
 
-    // Unrecognised is not reachable through clap, which accepts only the values
-    // above; the reader's own default stands if it ever is.
-    match resolve_value(&TRIM_VALUES, &args.whitespace_trim) {
-        Some("fields") => { reader_builder.trim(csv::Trim::Fields); },
-        Some("headers") => { reader_builder.trim(csv::Trim::Headers); },
-        Some("none") => { reader_builder.trim(csv::Trim::None); },
-        Some("all") => { reader_builder.trim(csv::Trim::All); },
-        _ => {},
-    }
+    reader_builder.trim(args.whitespace_trim);
 
     if let Some(value) = args.input_delimiter {
         reader_builder.delimiter(value as u8);
@@ -871,13 +905,7 @@ fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
         writer_builder.delimiter(b',');
     }
 
-    match resolve_value(&QUOTE_VALUES, &args.output_quotes) {
-        Some("always") => { writer_builder.quote_style(csv::QuoteStyle::Always); },
-        Some("never") => { writer_builder.quote_style(csv::QuoteStyle::Never); },
-        Some("nonnumeric") => { writer_builder.quote_style(csv::QuoteStyle::NonNumeric); },
-        Some("necessary") => { writer_builder.quote_style(csv::QuoteStyle::Necessary); },
-        _ => {},
-    }
+    writer_builder.quote_style(args.output_quotes.style());
 
     // Standard output was asked about in main, before any of this was
     // parsed. Standard input is asked here, where it is known whether the run
@@ -2189,11 +2217,11 @@ impl RowEdit {
 // else, so --comment '-' over a field like -5 is written bare. That numeric
 // test is csv-core's own is_non_numeric, asked directly rather than mirrored,
 // so this answer cannot drift from what the writer actually does.
-fn writer_leaves_comment_bare(field: &str, style: &str) -> bool {
-    match resolve_value(&QUOTE_VALUES, style) {
-        Some("never") => true,
-        Some("nonnumeric") => !csv_core::is_non_numeric(field.as_bytes()),
-        _ => false,
+fn writer_leaves_comment_bare(field: &str, style: Quoting) -> bool {
+    match style {
+        Quoting::Never => true,
+        Quoting::NonNumeric => !csv_core::is_non_numeric(field.as_bytes()),
+        Quoting::Always | Quoting::Necessary => false,
     }
 }
 
@@ -2215,7 +2243,7 @@ fn writer_leaves_comment_bare(field: &str, style: &str) -> bool {
 // own is_non_numeric, asked directly rather than mirrored, so the answer
 // cannot drift from what the writer actually does.
 fn writer_splits_on_delimiter(field: &str, args: &ArgumentFlags) -> bool {
-    if resolve_value(&QUOTE_VALUES, &args.output_quotes) != Some("nonnumeric") {
+    if args.output_quotes != Quoting::NonNumeric {
         return false;
     }
     field.contains(args.output_delimiter.unwrap_or(','))
@@ -2236,11 +2264,11 @@ fn writer_splits_on_delimiter(field: &str, args: &ArgumentFlags) -> bool {
 // writer is configured with above, restated here because csv-core does not
 // expose its decision.
 fn single_quote_misreads(field: &str, args: &ArgumentFlags) -> bool {
-    let quoted = match resolve_value(&QUOTE_VALUES, &args.output_quotes) {
-        Some("always") => true,
-        Some("never") => false,
-        Some("nonnumeric") => csv_core::is_non_numeric(field.as_bytes()),
-        _ => field.contains(args.output_delimiter.unwrap_or(','))
+    let quoted = match args.output_quotes {
+        Quoting::Always => true,
+        Quoting::Never => false,
+        Quoting::NonNumeric => csv_core::is_non_numeric(field.as_bytes()),
+        Quoting::Necessary => field.contains(args.output_delimiter.unwrap_or(','))
             || field.contains('"')
             || field.contains('\r')
             || field.contains('\n')
@@ -2323,7 +2351,7 @@ impl Tally {
         if !first.starts_with(comment) {
             return;
         }
-        if writer_leaves_comment_bare(first, &args.output_quotes) {
+        if writer_leaves_comment_bare(first, args.output_quotes) {
             self.commented_out += 1;
             self.commented_header |= header;
         }
@@ -2669,9 +2697,7 @@ fn apply_row_edit<'a>(
 // It becomes an InsertPosition here, once, so a typo is a clean startup error
 // and the row loop works with the enum alone.
 fn parse_position_word(word: &str) -> Result<InsertPosition, Box<dyn Error>> {
-    resolve_value(&POSITION_VALUES, word)
-        .and_then(|full| POSITIONS.iter().find(|(name, _)| *name == full))
-        .map(|&(_, position)| position)
+    resolve_value(&POSITIONS, word)
         .ok_or_else(|| {
             Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -2994,7 +3020,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .require_equals(true)
                 .default_missing_value("keep")
                 .ignore_case(true)
-                .value_parser(abbreviated_values(&FLEXIBLE_VALUES))
+                .value_parser(abbreviated_values(&FLEXIBLE_MODES))
                 .required(false)
         )
 
@@ -3218,7 +3244,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .required(false)
                 .ignore_case(true)
                 .default_value("none")
-                .value_parser(abbreviated_values(&TRIM_VALUES)),
+                .value_parser(abbreviated_values(&TRIMS)),
         )
 
         .arg(
@@ -3291,7 +3317,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .required(false)
                 .ignore_case(true)
                 .default_value("necessary")
-                .value_parser(abbreviated_values(&QUOTE_VALUES))
+                .value_parser(abbreviated_values(&QUOTINGS))
         )
 
         .arg(
@@ -3460,8 +3486,10 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         args.input_file = value.to_string();
     }
 
+    // Unrecognised is not reachable through clap, which accepts only the
+    // values in the tables; the default stands if it ever is.
     if let Some(value) = matches.get_one::<String>("trim") {
-        args.whitespace_trim = value.to_string();
+        args.whitespace_trim = resolve_value(&TRIMS, value).unwrap_or_default();
     }
 
     if let Some(value) = matches.get_one::<String>("read_delimiter") {
@@ -3600,7 +3628,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
     }
 
     if let Some(value) = matches.get_one::<String>("quotes") {
-            args.output_quotes = value.to_lowercase().to_string();
+        args.output_quotes = resolve_value(&QUOTINGS, value).unwrap_or_default();
     }
 
     args.has_headers = matches.get_flag("has_header");
@@ -3611,11 +3639,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         args.flexible_record = true;
         // Resolved rather than matched literally, so -f=FIX cannot pass clap
         // and then land on the fallback.
-        args.fill_mode = match resolve_value(&FLEXIBLE_VALUES, mode) {
-            Some("fix") => FillMode::FirstRecord,
-            Some("widest") => FillMode::Widest,
-            _ => FillMode::Off,
-        };
+        args.fill_mode = resolve_value(&FLEXIBLE_MODES, mode).unwrap_or_default();
     }
 
     check_special_characters(&args)?;
@@ -3707,8 +3731,8 @@ fn check_special_characters(args: &ArgumentFlags) -> Result<(), Box<dyn Error>> 
     // stays accepted.
     if let Some(comment) = args.read_as_comment {
         let write_delimiter = args.output_delimiter.unwrap_or(',');
-        let style = resolve_value(&QUOTE_VALUES, &args.output_quotes);
-        let empty_field_written_bare = !matches!(style, Some("always") | Some("nonnumeric"));
+        let style = args.output_quotes;
+        let empty_field_written_bare = !matches!(style, Quoting::Always | Quoting::NonNumeric);
         let collision = if comment == read_delimiter {
             Some("also the delimiter being read, so every row whose first field \
                   is empty would be taken for a comment and dropped")
@@ -3720,7 +3744,7 @@ fn check_special_characters(args: &ArgumentFlags) -> Result<(), Box<dyn Error>> 
                   first field is empty would start with it and be lost to any \
                   reader using the same '--comment'. '--quote always' writes \
                   such a field as \"\" and can print this delimiter")
-        } else if comment == '"' && style != Some("never") {
+        } else if comment == '"' && style != Quoting::Never {
             Some("also the quote character used for writing, so every printed \
                   row starting with a quoted field would be lost to any reader \
                   using the same '--comment'")
@@ -3859,7 +3883,7 @@ mod tests {
         // 'n' is left out: necessary, never and nonnumeric all start with it,
         // and resolving it to one of them would be a guess.
         assert_eq!(
-            names(&abbreviated_values(&QUOTE_VALUES)),
+            names(&abbreviated_values(&QUOTINGS)),
             vec![
                 "always", "a", "al", "alw", "alwa", "alway",
                 "necessary", "nec", "nece", "neces", "necess", "necessa", "necessar",
@@ -3872,7 +3896,7 @@ mod tests {
         // These four differ from the first letter, so every prefix belongs to
         // exactly one of them.
         assert_eq!(
-            names(&abbreviated_values(&TRIM_VALUES)),
+            names(&abbreviated_values(&TRIMS)),
             vec![
                 "all", "a", "al",
                 "fields", "f", "fi", "fie", "fiel", "field",
@@ -3885,10 +3909,10 @@ mod tests {
     #[test]
     fn a_value_resolves_whatever_its_case_and_however_short() {
         for given in ["all", "ALL", "All", "a", "AL"] {
-            assert_eq!(resolve_value(&TRIM_VALUES, given), Some("all"), "{given}");
+            assert_eq!(resolve_value(&TRIMS, given), Some(csv::Trim::All), "{given}");
         }
-        assert_eq!(resolve_value(&QUOTE_VALUES, "NEV"), Some("never"));
-        assert_eq!(resolve_value(&QUOTE_VALUES, "nonnumeric"), Some("nonnumeric"));
+        assert_eq!(resolve_value(&QUOTINGS, "NEV"), Some(Quoting::Never));
+        assert_eq!(resolve_value(&QUOTINGS, "nonnumeric"), Some(Quoting::NonNumeric));
     }
 
     #[test]
@@ -3897,7 +3921,7 @@ mod tests {
         // through the command line: the point is that if the two ever part
         // company, the result is no match rather than a wrong one.
         for given in ["n", "ne", "", "x", "alll", "fieldss"] {
-            assert_eq!(resolve_value(&QUOTE_VALUES, given), None, "{given}");
+            assert_eq!(resolve_value(&QUOTINGS, given), None, "{given}");
         }
     }
 
@@ -3906,17 +3930,18 @@ mod tests {
         // Guards against clap accepting a value that then matches nothing.
         // Every accepted form of all four value lists has to resolve,
         // so no option can gain a value it does not then act on.
-        let lists: [&[&'static str]; 4] = [
-            &TRIM_VALUES, &QUOTE_VALUES, &POSITION_VALUES, &FLEXIBLE_VALUES,
-        ];
-        for values in lists {
-            for accepted in names(&abbreviated_values(values)) {
+        fn check<T: Copy>(choices: &Choices<T>) {
+            for accepted in names(&abbreviated_values(choices)) {
                 assert!(
-                    resolve_value(values, &accepted).is_some(),
+                    resolve_value(choices, &accepted).is_some(),
                     "clap accepts {accepted:?}, which resolves to nothing",
                 );
             }
         }
+        check(&TRIMS);
+        check(&QUOTINGS);
+        check(&POSITIONS);
+        check(&FLEXIBLE_MODES);
     }
 
     // ---- process_headers / process_record: one row per case ---------------
@@ -5280,7 +5305,7 @@ mod tests {
     fn commented_args(comment: Option<char>, style: &str) -> ArgumentFlags {
         ArgumentFlags {
             read_as_comment: comment,
-            output_quotes: style.to_string(),
+            output_quotes: resolve_value(&QUOTINGS, style).expect("a quoting style"),
             ..default_args()
         }
     }
@@ -5350,7 +5375,7 @@ mod tests {
     fn delimited_args(delimiter: Option<char>, style: &str) -> ArgumentFlags {
         ArgumentFlags {
             output_delimiter: delimiter,
-            output_quotes: style.to_string(),
+            output_quotes: resolve_value(&QUOTINGS, style).expect("a quoting style"),
             ..default_args()
         }
     }
@@ -5412,23 +5437,80 @@ mod tests {
         // delimiter, and 'always' always did. The two gaps are the styles the
         // writer cannot quote under: 'never' by definition, and 'nonnumeric'
         // when the field is a number, since that style consults nothing else.
-        assert!(!writer_leaves_comment_bare("#x", "necessary"));
-        assert!(!writer_leaves_comment_bare("#x", "always"));
-        assert!(writer_leaves_comment_bare("#x", "never"));
+        assert!(!writer_leaves_comment_bare("#x", Quoting::Necessary));
+        assert!(!writer_leaves_comment_bare("#x", Quoting::Always));
+        assert!(writer_leaves_comment_bare("#x", Quoting::Never));
 
         // --comment '-' over numeric data: -5 is a number, so 'nonnumeric'
         // writes it bare; -5x is not, so it is quoted and safe.
-        assert!(writer_leaves_comment_bare("-5", "nonnumeric"));
-        assert!(!writer_leaves_comment_bare("-5x", "nonnumeric"));
-        assert!(!writer_leaves_comment_bare("#x", "nonnumeric"));
+        assert!(writer_leaves_comment_bare("-5", Quoting::NonNumeric));
+        assert!(!writer_leaves_comment_bare("-5x", Quoting::NonNumeric));
+        assert!(!writer_leaves_comment_bare("#x", Quoting::NonNumeric));
 
         // "Number" is csv-core's own is_non_numeric, asked directly, and its
         // reading is a float parse, so scientific notation and even the
         // infinities count as numbers and are written bare. Pinned because
         // these are the cases where a hand-rolled "is it a number" would
         // guess differently.
-        assert!(writer_leaves_comment_bare("-1e5", "nonnumeric"));
-        assert!(writer_leaves_comment_bare("-inf", "nonnumeric"));
-        assert!(writer_leaves_comment_bare("-5.", "nonnumeric"));
+        assert!(writer_leaves_comment_bare("-1e5", Quoting::NonNumeric));
+        assert!(writer_leaves_comment_bare("-inf", Quoting::NonNumeric));
+        assert!(writer_leaves_comment_bare("-5.", Quoting::NonNumeric));
+    }
+
+    // ---- the cost of one more row --------------------------------------------
+
+    // Counts the allocations made on the calling thread, so a test can ask
+    // what a row costs without timing anything. Per thread because the test
+    // harness runs tests side by side, and a shared count would take in
+    // whatever the others allocate.
+    struct CountingAllocator;
+
+    thread_local! {
+        static ALLOCATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+
+    // SAFETY: every call is handed straight to the system allocator; the count
+    // beside it touches a const-initialised thread-local, which allocates
+    // nothing itself.
+    unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            let _ = ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
+            unsafe { std::alloc::System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: std::alloc::Layout) {
+            unsafe { std::alloc::System.dealloc(pointer, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static COUNTING: CountingAllocator = CountingAllocator;
+
+    // The allocations process_stream makes over ROWS rows of twelve fields.
+    fn allocations_over(rows: usize, args: &ArgumentFlags) -> u64 {
+        let input = "1,2,3,4,5,6,7,8,9,10,11,12\n".repeat(rows);
+        let reader = configure_reader(args).from_reader(input.as_bytes());
+        let mut writer = csv::Writer::from_writer(std::io::sink());
+        let before = ALLOCATIONS.with(std::cell::Cell::get);
+        process_stream(reader, &mut writer, args, None, None).expect("the run succeeds");
+        ALLOCATIONS.with(std::cell::Cell::get) - before
+    }
+
+    // A row costs a fixed few allocations, whatever the quoting style and
+    // however many fields it has: the checks made on each written field
+    // compare settings resolved at startup rather than work them out again.
+    // Measured as the difference between two input sizes, so what a run
+    // costs once, the buffers and the reader, cancels out.
+    #[test]
+    fn one_more_row_costs_a_fixed_few_allocations() {
+        for (_, style) in QUOTINGS {
+            let args = ArgumentFlags {
+                output_quotes: style,
+                input_quotes: true,
+                ..default_args()
+            };
+            let per_row = (allocations_over(2000, &args) - allocations_over(1000, &args)) / 1000;
+            assert!(per_row <= 2, "{style:?}: {per_row} allocations per row of twelve fields");
+        }
     }
 }
