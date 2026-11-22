@@ -919,6 +919,19 @@ fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
     // again; standard input cannot be rewound, so it is copied to a temporary
     // file first. Either way the counting pass finishes before anything is
     // written, so stdout only ever sees fully padded rows.
+    // Opened before the input is copied to a spool or counted, so a
+    // destination that cannot be written is reported before the run does its
+    // work rather than after: a widest run over a large pipe would otherwise
+    // copy the whole of it before finding out it had nowhere to report.
+    let mut fill_log = match &args.fill_log {
+        Some(destination) => {
+            refuse_fill_log_that_is_the_input_or_the_output(
+                destination, args.input_file.as_deref())?;
+            Some(FillLog::open(destination)?)
+        },
+        None => None,
+    };
+
     // A named input that cannot be read twice is spooled just as standard
     // input is. Only Widest reads twice, so nothing else pays for this. Held
     // until the end of the run, when its Drop removes the temporary file; the
@@ -936,18 +949,6 @@ fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
         .or(args.input_file.as_deref());
 
     let tally;
-    // Opened before the counting pass, so a destination that cannot be
-    // written is reported before the run does its work rather than after: a
-    // widest run over a large file would otherwise read the whole of it
-    // before finding out it had nowhere to report.
-    let mut fill_log = match &args.fill_log {
-        Some(destination) => {
-            refuse_fill_log_that_is_the_input_or_the_output(
-                destination, args.input_file.as_deref())?;
-            Some(FillLog::open(destination)?)
-        },
-        None => None,
-    };
     let scanned_width = match (source, args.fill_mode) {
         (Some(path), FillMode::Widest) => Some(scan_widest_record(&args, path)?),
         _ => None,

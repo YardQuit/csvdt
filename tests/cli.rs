@@ -242,6 +242,25 @@ fn paths_that_are_not_utf8_are_read_and_written() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+// The --fill-log destination is asked about before standard input is copied
+// to a spool, so a log that cannot be written is reported before the run
+// reads a pipe to its end, not after.
+#[test]
+fn an_unwritable_fill_log_is_reported_before_the_input_is_spooled() {
+    let dir = tempfile_dir().join("fill-log-before-spool");
+    std::fs::create_dir_all(&dir).unwrap();
+    with_temp_dir(csvdt(), &dir.join("no-such-directory"))
+        .args(["-f=widest", "--fill-log"])
+        .arg(dir.join("no-such-directory").join("log.csv"))
+        .write_stdin("a\n1,2\n")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("for '--fill-log'"))
+        .stderr(predicate::str::contains("temporary file").not());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // ---- column actions: split / rfc3339 / utc / local / duration / remove ---
 // Every action takes its column number as its own argument (e.g. -s1),
 // glued or space-separated. -i is independent: "-i <col> <mode>".
