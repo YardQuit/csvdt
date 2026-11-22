@@ -45,6 +45,36 @@ impl Quoting {
     }
 }
 
+// The one action a run carries out on each row, with what it needs beyond
+// the column it reads, which is ArgumentFlags::selected_column. clap refuses
+// two actions together, so one value says which it is.
+#[derive(Default, Debug, Clone)]
+enum Action {
+    // No action: the rows are written as they were read, reformatted.
+    #[default]
+    Passthrough,
+    // -s/--split: the timestamp's date and time, as two columns.
+    Split,
+    // -r/--rfc3339: epoch seconds to RFC3339.
+    ToRfc3339,
+    // -u/--utc.
+    ToUtc,
+    // -l/--local, in the zone resolved at startup; None leaves the zone to
+    // chrono, which reads a POSIX rule in TZ itself.
+    ToLocal(Option<chrono_tz::Tz>),
+    // -o/--offset, to the offset given.
+    ToOffset(FixedOffset),
+    // -d/--duration: from the previous row's timestamp, or, with a second
+    // column, between the two columns of the same row.
+    Duration { second: Option<usize> },
+    // --remove: the columns to drop, highest index first, so dropping one
+    // never shifts another still to come.
+    Remove(Vec<usize>),
+    // -a/--arrange: the columns to put first, in the order given, and the
+    // same set sorted, so whether a column was named is a binary search.
+    Arrange { order: Vec<usize>, listed: Vec<usize> },
+}
+
 // Where -i puts a converted column relative to the column it is given.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 enum InsertPosition {
@@ -62,23 +92,11 @@ struct ArgumentFlags {
     output_header: bool,                  // -p --print-header
     flexible_record: bool,                // -f --flexible
     fill_mode: FillMode,                  // --flexible's mode
+    action: Action,                       // the one action asked for, if any
     selected_column: usize,               // the action's own (first) column
-    second_column: Option<usize>,         // --duration's second column, when given
     insert_column: Option<i64>,           // -i's column; None means "use the action's own"
     insert_position: InsertPosition,      // -i's before/after/replace word; default after
-    action_to_rfc3339: bool,              // -r --rfc3339 <col>
-    action_to_utc: bool,                  // -u --utc <col>
-    action_to_local: bool,                // -l --local <col>
-    local_timezone: Option<chrono_tz::Tz>,// -l's resolved zone; None = use chrono's own
-    action_split: bool,                   // -s --split <col>
-    action_remove: bool,                  // --remove <col>[,<col>...]
-    remove_columns: Vec<usize>,           // --remove's columns, high index first
-    action_arrange: bool,               // -R --arrange <col>[,<col>...]
-    arrange_columns: Vec<usize>,        // -R's columns, in the order given
-    arrange_listed: Vec<usize>,         // the same set, sorted, for membership tests
-    action_duration: bool,                // -d --duration <col>[,<col2>]
     round_seconds: bool,                  // --round-seconds
-    action_offset: Option<FixedOffset>,   // -o --offset <col> <offset>: the offset parsed from the second value
     whitespace_trim: csv::Trim,           // --trim
     input_delimiter: Option<char>,        // --read-delimiter
     input_quotes: bool,                   // --single-quotes
@@ -1679,24 +1697,19 @@ fn clamp_insert_column(value: i64, len: usize) -> usize {
     }
 }
 
-// Puts the values for `position` into `fields` around `column`: `before` ahead
-// of it, `replace` over it, or `after` behind it, each in the order given.
-// Shared by every action that writes one or two fields, so the
-// before/replace/after dispatch exists once. The three value lists differ in
-// the header row, where the new names carry a '>' or '<' to show which way
-// they point, and are the same in a data row.
+// Puts VALUES into `fields` around `column`: ahead of it, over it, or behind
+// it, as `position` says, in the order given. Shared by every action that
+// writes one or two fields, so the before/replace/after dispatch exists once.
 fn insert_fields<'a>(
     fields: &mut Vec<&'a str>,
     column: usize,
     position: InsertPosition,
-    before: &[&'a str],
-    replace: &[&'a str],
-    after: &[&'a str],
+    values: &[&'a str],
 ) {
-    let (range, values) = match position {
-        InsertPosition::Before => (column..column, before),
-        InsertPosition::Replace => (column..column + 1, replace),
-        InsertPosition::After => (column + 1..column + 1, after),
+    let range = match position {
+        InsertPosition::Before => column..column,
+        InsertPosition::Replace => column..column + 1,
+        InsertPosition::After => column + 1..column + 1,
     };
     fields.splice(range, values.iter().copied());
 }
@@ -1710,24 +1723,26 @@ fn remove_columns(fields: &mut Vec<&str>, columns: &[usize]) {
     }
 }
 
-// Returns `fields` in --arrange's order: the columns it names first, in the
-// order given, then every column it didn't name, keeping their original
-// relative order. Nothing is dropped and nothing is duplicated, so the row
-// always comes out the same width it went in.
-//
-// `listed` is the same set of columns as `order` but sorted, so deciding
-// whether a column was named is a binary search rather than a scan.
-fn arranged<'a>(fields: &[&'a str], order: &[usize], listed: &[usize]) -> Vec<&'a str> {
-    let mut out: Vec<&'a str> = Vec::with_capacity(fields.len());
+// Fills `fields` with ROW in --arrange's order: the columns it names first,
+// in the order given, then every column it didn't name, keeping their
+// original relative order. Nothing is dropped and nothing is duplicated, so
+// the row always comes out the same width it went in. Built straight from the
+// record rather than filled in input order and then permuted, which would
+// need a second buffer to read from.
+fn arrange_into<'a>(
+    fields: &mut Vec<&'a str>,
+    row: &'a csv::StringRecord,
+    order: &[usize],
+    listed: &[usize],
+) {
     for &column in order {
-        out.push(fields[column]);
+        fields.push(&row[column]);
     }
-    for (index, field) in fields.iter().enumerate() {
+    for (index, field) in row.iter().enumerate() {
         if listed.binary_search(&index).is_err() {
-            out.push(field);
+            fields.push(field);
         }
     }
-    out
 }
 
 // Parses an RFC3339 timestamp, tolerating a trailing numeric offset that's
@@ -2191,83 +2206,59 @@ fn format_iso8601_duration(delta: chrono::TimeDelta, round_seconds: bool) -> Str
 }
 
 fn process_headers(headers: &csv::StringRecord, args: &ArgumentFlags) -> Result<csv::StringRecord, Box<dyn Error>> {
-    let mut vecbuff: Vec<&str> = headers.iter().collect();
-    let len = vecbuff.len();
-    let position = args.insert_position;
+    let edit = plan_header_edit(headers.len(), args)?;
+    let mut fields = Vec::with_capacity(headers.len() + 2);
+    apply_row_edit(headers, args, &edit, &mut fields);
+    Ok(csv::StringRecord::from(fields))
+}
 
-    if args.action_split {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let target = insert_target(args, args.selected_column, len);
-        insert_fields(&mut vecbuff, target, position,
-            &["split_date>", "split_time>"],
-            &["split_date", "split_time"],
-            &["<split_date", "<split_time"]);
-        return Ok(csv::StringRecord::from(vecbuff));
+// What the action makes of the header: the same edit a data row gets, with
+// the new columns' names in place of their values. A name carries a '>' or
+// '<' pointing at the column it was made from, unless it replaces it.
+fn plan_header_edit(len: usize, args: &ArgumentFlags) -> Result<RowEdit, Box<dyn Error>> {
+    check_bounds(args, len)?;
+    let target = insert_target(args, len);
+    let name = |base: &str| match args.insert_position {
+        InsertPosition::Before => format!("{base}>"),
+        InsertPosition::Replace => base.to_string(),
+        InsertPosition::After => format!("<{base}"),
+    };
+    let single = |base: &str| RowEdit::Single { target, value: name(base) };
+    Ok(match &args.action {
+        Action::Passthrough => RowEdit::Passthrough,
+        Action::Remove(_) => RowEdit::Remove,
+        Action::Arrange { .. } => RowEdit::Arrange,
+        Action::Split => RowEdit::Pair {
+            target, first: name("split_date"), second: name("split_time"),
+        },
+        Action::ToRfc3339 => single("to_rfc3339"),
+        Action::ToUtc => single("to_utc"),
+        Action::ToLocal(_) => single("to_local"),
+        Action::ToOffset(_) => single("to_offset"),
+        Action::Duration { second: Some(_) } => single("row_duration"),
+        Action::Duration { second: None } => single("duration"),
+    })
+}
+
+// Refuses a record too narrow for a column the action names. Asked of the
+// header and of every data row alike, and of every column before any is
+// touched, so a row is either edited fully or reported, never left half done.
+fn check_bounds(args: &ArgumentFlags, len: usize) -> Result<(), Box<dyn Error>> {
+    let within = |column: usize| match column < len {
+        true => Ok(()),
+        false => Err(out_of_bound()),
+    };
+    match &args.action {
+        Action::Passthrough => Ok(()),
+        Action::Remove(columns) | Action::Arrange { order: columns, .. } => {
+            columns.iter().try_for_each(|&column| within(column))
+        },
+        Action::Duration { second } => {
+            within(args.selected_column)?;
+            second.map_or(Ok(()), within)
+        },
+        _ => within(args.selected_column),
     }
-
-    if args.action_to_rfc3339 {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let target = insert_target(args, args.selected_column, len);
-        insert_fields(&mut vecbuff, target, position, &["to_rfc3339>"], &["to_rfc3339"], &["<to_rfc3339"]);
-        return Ok(csv::StringRecord::from(vecbuff));
-    }
-
-    if args.action_to_utc {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let target = insert_target(args, args.selected_column, len);
-        insert_fields(&mut vecbuff, target, position, &["to_utc>"], &["to_utc"], &["<to_utc"]);
-        return Ok(csv::StringRecord::from(vecbuff));
-    }
-
-    if args.action_to_local {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let target = insert_target(args, args.selected_column, len);
-        insert_fields(&mut vecbuff, target, position, &["to_local>"], &["to_local"], &["<to_local"]);
-        return Ok(csv::StringRecord::from(vecbuff));
-    }
-
-    if args.action_offset.is_some() {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let target = insert_target(args, args.selected_column, len);
-        insert_fields(&mut vecbuff, target, position, &["to_offset>"], &["to_offset"], &["<to_offset"]);
-        return Ok(csv::StringRecord::from(vecbuff));
-    }
-
-    if args.action_duration {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let fallback = match args.second_column {
-            Some(second) => {
-                if second >= len { return Err(out_of_bound()); }
-                second
-            },
-            None => args.selected_column,
-        };
-        let target = insert_target(args, fallback, len);
-        if args.second_column.is_some() {
-            insert_fields(&mut vecbuff, target, position, &["row_duration>"], &["row_duration"], &["<row_duration"]);
-        } else {
-            insert_fields(&mut vecbuff, target, position, &["duration>"], &["duration"], &["<duration"]);
-        }
-        return Ok(csv::StringRecord::from(vecbuff));
-    }
-
-    if args.action_arrange {
-        for &column in &args.arrange_columns {
-            if column >= len { return Err(out_of_bound()); }
-        }
-        let reordered = arranged(&vecbuff, &args.arrange_columns, &args.arrange_listed);
-        return Ok(csv::StringRecord::from(reordered));
-    }
-
-    if args.action_remove {
-        for &column in &args.remove_columns {
-            if column >= len { return Err(out_of_bound()); }
-        }
-        remove_columns(&mut vecbuff, &args.remove_columns);
-        return Ok(csv::StringRecord::from(vecbuff));
-    }
-
-    Ok(csv::StringRecord::from(vecbuff))
 }
 
 // The one edit an action makes to a row: which column it targets and the
@@ -2582,9 +2573,14 @@ fn report_tally(tally: &Tally, comment: Option<char>, delimiter: char)
     Ok(())
 }
 
-// Resolves -i's column for this row, falling back to the action's own
-// default column when -i wasn't given.
-fn insert_target(args: &ArgumentFlags, fallback: usize, len: usize) -> usize {
+// Resolves where the action's result goes in this row: -i's column, clamped
+// into the row, or without -i the action's own column, which for the
+// two-column --duration is the second.
+fn insert_target(args: &ArgumentFlags, len: usize) -> usize {
+    let fallback = match args.action {
+        Action::Duration { second: Some(second) } => second,
+        _ => args.selected_column,
+    };
     match args.insert_column {
         Some(value) => clamp_insert_column(value, len),
         None => fallback,
@@ -2599,107 +2595,73 @@ fn plan_row_edit(
     args: &ArgumentFlags,
     dt_cache: Option<DateTime<FixedOffset>>,
 ) -> Result<(RowEdit, Option<DateTime<FixedOffset>>), Box<dyn Error>> {
-    let len = record.len();
+    check_bounds(args, record.len())?;
+    let target = insert_target(args, record.len());
     let parse_err = || String::from(PARSE_ERR);
+    let timestamp = || parse_rfc3339_lenient(&record[args.selected_column]);
+    let single = |value| RowEdit::Single { target, value };
 
-    if args.action_split {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let target = insert_target(args, args.selected_column, len);
-        let (first, second) = match parse_rfc3339_lenient(&record[args.selected_column]) {
-            Ok(datetime) => (
-                format!("{}", datetime.date_naive()),
-                // %.f keeps a fraction the source carried and prints nothing
-                // when there is none, as RFC3339 output does. Whole seconds
-                // would drop it silently, which no other conversion here
-                // does: -d keeps it unless --round-seconds asks otherwise, and
-                // -u/-l/-o write back whatever came in.
-                format!("{}", datetime.format("%H:%M:%S%.f %Z")),
-            ),
-            Err(_) => (parse_err(), parse_err()),
-        };
-        return Ok((RowEdit::Pair { target, first, second }, dt_cache));
-    }
-
-    if args.action_to_rfc3339 {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let target = insert_target(args, args.selected_column, len);
+    let edit = match &args.action {
+        Action::Passthrough => RowEdit::Passthrough,
+        Action::Remove(_) => RowEdit::Remove,
+        Action::Arrange { .. } => RowEdit::Arrange,
+        Action::Split => {
+            let (first, second) = match timestamp() {
+                Ok(datetime) => (
+                    format!("{}", datetime.date_naive()),
+                    // %.f keeps a fraction the source carried and prints
+                    // nothing when there is none, as RFC3339 output does.
+                    // Whole seconds would drop it silently, which no other
+                    // conversion here does: -d keeps it unless
+                    // --round-seconds asks otherwise, and -u/-l/-o write
+                    // back whatever came in.
+                    format!("{}", datetime.format("%H:%M:%S%.f %Z")),
+                ),
+                Err(_) => (parse_err(), parse_err()),
+            };
+            RowEdit::Pair { target, first, second }
+        },
         // Trimmed for the same reason parse_rfc3339_lenient is.
-        let value = match record[args.selected_column].trim().parse::<i64>() {
+        Action::ToRfc3339 => single(match record[args.selected_column].trim().parse::<i64>() {
             Ok(timestamp) => match chrono::DateTime::from_timestamp(timestamp, 0) {
                 // chrono reaches far further than RFC3339 does, and formats a
                 // year outside four digits in ISO 8601's expanded form
-                // ("+57534-06-16T...", "-0001-12-31T..."). That is not RFC3339,
-                // which this option promises: csvdt cannot read it back, and
-                // nor can anything else expecting the format. Epoch
-                // milliseconds handed to an option expecting seconds land here,
-                // which is a mistake worth reporting rather than answering with
-                // a timestamp no one can use.
+                // ("+57534-06-16T...", "-0001-12-31T..."). That is not
+                // RFC3339, which this option promises: csvdt cannot read it
+                // back, and nor can anything else expecting the format. Epoch
+                // milliseconds handed to an option expecting seconds land
+                // here, which is a mistake worth reporting rather than
+                // answering with a timestamp no one can use.
                 Some(datetime) if is_rfc3339_year(&datetime) => datetime.to_rfc3339(),
                 _ => parse_err(),
             },
             Err(_) => parse_err(),
-        };
-        return Ok((RowEdit::Single { target, value }, dt_cache));
-    }
-
-    if args.action_to_utc {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let target = insert_target(args, args.selected_column, len);
-        let value = match parse_rfc3339_lenient(&record[args.selected_column]) {
-            Ok(datetime) => to_rfc3339_in_range(
-                datetime.with_timezone(&chrono::Utc)),
+        }),
+        Action::ToUtc => single(match timestamp() {
+            Ok(datetime) => to_rfc3339_in_range(datetime.with_timezone(&chrono::Utc)),
             Err(_) => parse_err(),
-        };
-        return Ok((RowEdit::Single { target, value }, dt_cache));
-    }
-
-    if args.action_to_local {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let target = insert_target(args, args.selected_column, len);
-        let value = match parse_rfc3339_lenient(&record[args.selected_column]) {
-            Ok(datetime) => match args.local_timezone {
-                Some(zone) => to_rfc3339_in_range(datetime.with_timezone(&zone)),
-                // TZ held a POSIX rule string rather than a zone name; let
-                // chrono parse it the way it always has.
-                None => to_rfc3339_in_range(
-                    datetime.with_timezone(&chrono::Local)),
-            },
+        }),
+        Action::ToLocal(zone) => single(match (timestamp(), zone) {
+            (Ok(datetime), Some(zone)) => to_rfc3339_in_range(datetime.with_timezone(zone)),
+            // TZ held a POSIX rule string rather than a zone name; let
+            // chrono parse it the way it always has.
+            (Ok(datetime), None) => to_rfc3339_in_range(datetime.with_timezone(&chrono::Local)),
+            (Err(_), _) => parse_err(),
+        }),
+        Action::ToOffset(offset) => single(match timestamp() {
+            Ok(datetime) => to_rfc3339_in_range(datetime.with_timezone(offset)),
             Err(_) => parse_err(),
-        };
-        return Ok((RowEdit::Single { target, value }, dt_cache));
-    }
-
-    if let Some(offset) = args.action_offset {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-        let target = insert_target(args, args.selected_column, len);
-        let value = match parse_rfc3339_lenient(&record[args.selected_column]) {
-            Ok(datetime) => to_rfc3339_in_range(datetime.with_timezone(&offset)),
-            Err(_) => parse_err(),
-        };
-        return Ok((RowEdit::Single { target, value }, dt_cache));
-    }
-
-    if args.action_duration {
-        if args.selected_column >= len { return Err(out_of_bound()); }
-
-        if let Some(second_column) = args.second_column {
-            if second_column >= len { return Err(out_of_bound()); }
-            let target = insert_target(args, second_column, len);
-            let value = match (
-                parse_rfc3339_lenient(&record[args.selected_column]),
-                parse_rfc3339_lenient(&record[second_column]),
-            ) {
-                (Ok(dt_a), Ok(dt_b)) => {
-                    let duration = if dt_a > dt_b { dt_a - dt_b } else { dt_b - dt_a };
+        }),
+        Action::Duration { second: Some(second) } => {
+            single(match (timestamp(), parse_rfc3339_lenient(&record[*second])) {
+                (Ok(first), Ok(second)) => {
+                    let duration = if first > second { first - second } else { second - first };
                     format_iso8601_duration(duration, args.round_seconds)
                 },
                 _ => parse_err(),
-            };
-            return Ok((RowEdit::Single { target, value }, dt_cache));
-        }
-
-        let target = insert_target(args, args.selected_column, len);
-        match parse_rfc3339_lenient(&record[args.selected_column]) {
+            })
+        },
+        Action::Duration { second: None } => match timestamp() {
             Ok(datetime) => {
                 // No previous row yet (first row, or every row so far failed
                 // to parse) means there's nothing to measure against, so the
@@ -2709,86 +2671,47 @@ fn plan_row_edit(
                 // exports write a null date) look like "no previous row" and
                 // silently report PT0S.
                 let previous = dt_cache.unwrap_or(datetime);
-                let duration = if datetime > previous {
-                    datetime - previous
-                } else {
-                    previous - datetime
-                };
+                let duration = if datetime > previous { datetime - previous } else { previous - datetime };
                 let value = format_iso8601_duration(duration, args.round_seconds);
-                return Ok((RowEdit::Single { target, value }, Some(datetime)));
+                return Ok((single(value), Some(datetime)));
             },
             // A row we can't parse leaves the cache untouched, so the next
             // parseable row still measures against the last real timestamp.
-            Err(_) => {
-                let value = parse_err();
-                return Ok((RowEdit::Single { target, value }, dt_cache));
-            },
-        }
-    }
-
-    if args.action_arrange {
-        for &column in &args.arrange_columns {
-            if column >= len { return Err(out_of_bound()); }
-        }
-        return Ok((RowEdit::Arrange, dt_cache));
-    }
-
-    if args.action_remove {
-        // Every named column is checked before any is dropped, so a row is
-        // either edited fully or reported as out of bound, never left
-        // half-removed.
-        for &column in &args.remove_columns {
-            if column >= len { return Err(out_of_bound()); }
-        }
-        return Ok((RowEdit::Remove, dt_cache));
-    }
-
-    Ok((RowEdit::Passthrough, dt_cache))
+            Err(_) => single(parse_err()),
+        },
+    };
+    Ok((edit, dt_cache))
 }
 
 // Fills `fields` with the row's final contents: the record's own fields,
 // borrowed, with `edit` applied. Every &str borrows either the record or the
-// edit, so nothing is copied here.
+// edit, so nothing is copied here. The header is built the same way, from
+// the edit plan_header_edit makes of it.
 fn apply_row_edit<'a>(
     record: &'a csv::StringRecord,
-    args: &ArgumentFlags,
+    args: &'a ArgumentFlags,
     edit: &'a RowEdit,
     fields: &mut Vec<&'a str>,
 ) {
     let position = args.insert_position;
     fields.clear();
-
-    // Handled before the common fill: the output row is built straight from
-    // the record in the new order, rather than filled in input order and then
-    // permuted, which would need a second buffer to read from.
-    if let RowEdit::Arrange = edit {
-        for &column in &args.arrange_columns {
-            fields.push(&record[column]);
-        }
-        for (index, field) in record.iter().enumerate() {
-            if args.arrange_listed.binary_search(&index).is_err() {
-                fields.push(field);
-            }
-        }
-        return;
-    }
-
-    fields.extend(record.iter());
-    match edit {
-        RowEdit::Passthrough => {},
-        RowEdit::Single { target, value } => {
-            let value = [value.as_str()];
-            insert_fields(fields, *target, position, &value, &value, &value);
+    match (edit, &args.action) {
+        (RowEdit::Arrange, Action::Arrange { order, listed }) => {
+            arrange_into(fields, record, order, listed);
         },
-        RowEdit::Pair { target, first, second } => {
-            let pair = [first.as_str(), second.as_str()];
-            insert_fields(fields, *target, position, &pair, &pair, &pair);
+        (RowEdit::Remove, Action::Remove(columns)) => {
+            fields.extend(record.iter());
+            remove_columns(fields, columns);
         },
-        RowEdit::Remove => {
-            remove_columns(fields, &args.remove_columns);
+        (RowEdit::Single { target, value }, _) => {
+            fields.extend(record.iter());
+            insert_fields(fields, *target, position, &[value.as_str()]);
         },
-        // Built and returned above, before the common fill.
-        RowEdit::Arrange => unreachable!(),
+        (RowEdit::Pair { target, first, second }, _) => {
+            fields.extend(record.iter());
+            insert_fields(fields, *target, position, &[first.as_str(), second.as_str()]);
+        },
+        _ => fields.extend(record.iter()),
     }
 }
 
@@ -3148,6 +3071,22 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .required(false)
                 .requires("actions_req"),
         )
+        // The actions, of which a run takes one: clap refuses any two
+        // together, with the same message it gives for any other conflict.
+        .group(clap::ArgGroup::new("action")
+             .args([
+                 "action_split",
+                 "action_to_rfc3339",
+                 "action_to_utc",
+                 "action_to_local",
+                 "action_duration",
+                 "action_offset",
+                 "action_remove",
+                 "action_arrange",
+             ])
+             .multiple(false),
+        )
+        // The actions that write a converted column, which -i places.
         .group(clap::ArgGroup::new("actions_req")
              .args([
                  "action_split",
@@ -3170,15 +3109,6 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .long("rfc3339")
                 .num_args(1)
                 .required(false)
-                .conflicts_with_all([
-                    "action_to_utc",
-                    "action_to_local",
-                    "action_split",
-                    "action_duration",
-                    "action_offset",
-                    "action_remove",
-                    "action_arrange"
-                ])
         )
 
         .arg(
@@ -3191,15 +3121,6 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .long("utc")
                 .num_args(1)
                 .required(false)
-                .conflicts_with_all([
-                    "action_to_rfc3339",
-                    "action_to_local",
-                    "action_split",
-                    "action_duration",
-                    "action_offset",
-                    "action_remove",
-                    "action_arrange"
-                ])
         )
 
         .arg(
@@ -3212,15 +3133,6 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .long("local")
                 .num_args(1)
                 .required(false)
-                .conflicts_with_all([
-                    "action_to_utc",
-                    "action_to_rfc3339",
-                    "action_split",
-                    "action_duration",
-                    "action_offset",
-                    "action_remove",
-                    "action_arrange"
-                ])
         )
 
         .arg(
@@ -3233,15 +3145,6 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .long("offset")
                 .num_args(1)
                 .required(false)
-                .conflicts_with_all([
-                    "action_to_utc",
-                    "action_to_local",
-                    "action_to_rfc3339",
-                    "action_split",
-                    "action_duration",
-                    "action_remove",
-                    "action_arrange"
-                ])
         )
 
         .arg(
@@ -3254,15 +3157,6 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .long("split")
                 .num_args(1)
                 .required(false)
-                .conflicts_with_all([
-                    "action_to_utc",
-                    "action_to_local",
-                    "action_to_rfc3339",
-                    "action_duration",
-                    "action_offset",
-                    "action_remove",
-                    "action_arrange"
-                ])
         )
 
         .arg(
@@ -3275,15 +3169,6 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .long("duration")
                 .num_args(1)
                 .required(false)
-                .conflicts_with_all([
-                    "action_to_utc",
-                    "action_to_local",
-                    "action_to_rfc3339",
-                    "action_split",
-                    "action_offset",
-                    "action_remove",
-                    "action_arrange"
-                ])
         )
 
         .arg(
@@ -3305,15 +3190,6 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .long("remove")
                 .num_args(1)
                 .required(false)
-                .conflicts_with_all([
-                    "action_to_utc",
-                    "action_to_local",
-                    "action_to_rfc3339",
-                    "action_split",
-                    "action_duration",
-                    "action_offset",
-                    "action_arrange",
-                ])
         )
 
         .arg(
@@ -3326,15 +3202,6 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 .long("arrange")
                 .num_args(1)
                 .required(false)
-                .conflicts_with_all([
-                    "action_to_utc",
-                    "action_to_local",
-                    "action_to_rfc3339",
-                    "action_split",
-                    "action_duration",
-                    "action_offset",
-                    "action_remove",
-                ])
         )
 
         .arg(
@@ -3445,6 +3312,9 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 // sees. So the options that decide what a record *is* are
                 // welcome, and the ones that write are refused, there is
                 // no CSV here for them to act on.
+                // The actions are named one by one rather than as their
+                // group, so clap names the one given in its message rather
+                // than listing all eight.
                 .conflicts_with_all([
                     "action_to_rfc3339",
                     "action_to_utc",
@@ -3617,29 +3487,27 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
     }
 
     if let Some(value) = matches.get_one::<String>("action_split") {
-        args.action_split = true;
+        args.action = Action::Split;
         args.selected_column = parse_column("--split", value)?;
     }
 
     if let Some(value) = matches.get_one::<String>("action_to_rfc3339") {
-        args.action_to_rfc3339 = true;
+        args.action = Action::ToRfc3339;
         args.selected_column = parse_column("--rfc3339", value)?;
     }
 
     if let Some(value) = matches.get_one::<String>("action_to_utc") {
-        args.action_to_utc = true;
+        args.action = Action::ToUtc;
         args.selected_column = parse_column("--utc", value)?;
     }
 
     if let Some(value) = matches.get_one::<String>("action_to_local") {
-        args.action_to_local = true;
         args.selected_column = parse_column("--local", value)?;
         // Resolved once here rather than per row.
-        args.local_timezone = local_timezone()?;
+        args.action = Action::ToLocal(local_timezone()?);
     }
 
     if let Some(value) = matches.get_one::<String>("action_remove") {
-        args.action_remove = true;
         let mut columns = parse_column_list("--remove", value)?;
         // Refused rather than quietly deduplicated. Removing one column twice
         // is not what the list says, and --arrange refuses a repeat, so the
@@ -3652,11 +3520,10 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         // Sorted highest first so removing one never shifts the position of
         // another still to come.
         columns.sort_unstable_by(|a, b| b.cmp(a));
-        args.remove_columns = columns;
+        args.action = Action::Remove(columns);
     }
 
     if let Some(value) = matches.get_one::<String>("action_arrange") {
-        args.action_arrange = true;
         let columns = parse_column_list("--arrange", value)?;
         if let Some(column) = repeated_column(&columns) {
             return Err(repeated_column_error(
@@ -3667,12 +3534,11 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         // itself keeps the order given, that order *is* the output order.
         let mut listed = columns.clone();
         listed.sort_unstable();
-        args.arrange_columns = columns;
-        args.arrange_listed = listed;
+        args.action = Action::Arrange { order: columns, listed };
     }
 
     if let Some(value) = matches.get_one::<String>("action_duration") {
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         match value.split_once(',') {
             Some((first, second)) => {
                 let column = |part: &str| {
@@ -3693,7 +3559,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                         "since the span between a column and itself is PT0S on \
                          every row rather than a duration"));
                 }
-                args.second_column = Some(second);
+                args.action = Action::Duration { second: Some(second) };
             },
             None => {
                 args.selected_column = parse_column("--duration", value)?;
@@ -3708,7 +3574,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
     // goes with it. So `-u0 --round-seconds` would be accepted and the flag
     // would do nothing, since -u keeps whatever precision the input carried,
     // and the run would look as if it had honoured the request.
-    if args.round_seconds && !args.action_duration {
+    if args.round_seconds && !matches!(args.action, Action::Duration { .. }) {
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "'--round-seconds' rounds the result of '-d/--duration', and there \
@@ -3724,7 +3590,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
                 "'--offset' expects <column>,<offset>, e.g. -o1,-06:00"))
         })?;
         args.selected_column = parse_column("--offset", column_word)?;
-        args.action_offset = Some(parse_offset(offset_word)?);
+        args.action = Action::ToOffset(parse_offset(offset_word)?);
     }
 
     if let Some(value) = matches.get_one::<String>("position") {
@@ -4079,11 +3945,11 @@ mod tests {
     }
 
     fn to_utc(args: &mut ArgumentFlags) {
-        args.action_to_utc = true;
+        args.action = Action::ToUtc;
     }
 
     fn to_offset(args: &mut ArgumentFlags) {
-        args.action_offset = Some(FixedOffset::west_opt(6 * 3600).unwrap());
+        args.action = Action::ToOffset(FixedOffset::west_opt(6 * 3600).unwrap());
     }
 
     // One case: its label, the options, the row read and the row written, or
@@ -4094,23 +3960,23 @@ mod tests {
     fn process_headers_names_what_each_action_adds() {
         use InsertPosition::{After, Before, Replace};
         fn split(args: &mut ArgumentFlags) {
-            args.action_split = true;
+            args.action = Action::Split;
         }
         fn rfc3339(args: &mut ArgumentFlags) {
-            args.action_to_rfc3339 = true;
+            args.action = Action::ToRfc3339;
         }
         fn local(args: &mut ArgumentFlags) {
-            args.action_to_local = true;
+            args.action = Action::ToLocal(None);
         }
         fn duration(args: &mut ArgumentFlags) {
-            args.action_duration = true;
+            args.action = Action::Duration { second: None };
         }
         // Two-column --duration: the row-over-row column pair, written at -i.
         let paired = |position, insert_column| {
             flags(|args| {
-                args.action_duration = true;
+                args.action = Action::Duration { second: None };
                 args.selected_column = 1;
-                args.second_column = Some(2);
+                args.action = Action::Duration { second: Some(2) };
                 args.insert_column = insert_column;
                 args.insert_position = position;
             })
@@ -4122,7 +3988,7 @@ mod tests {
             (
                 "split, default position is after its own column",
                 flags(|args| {
-                    args.action_split = true;
+                    args.action = Action::Split;
                     args.selected_column = 1;
                 }),
                 id_ts_val.clone(),
@@ -4218,7 +4084,7 @@ mod tests {
                 flags(|args| {
                     duration(args);
                     args.selected_column = 1;
-                    args.second_column = Some(2);
+                    args.action = Action::Duration { second: Some(2) };
                 }),
                 id_start_end.clone(),
                 Some(vec!["id", "start", "end", "<row_duration"]),
@@ -4234,7 +4100,7 @@ mod tests {
                 flags(|args| {
                     duration(args);
                     args.selected_column = 0;
-                    args.second_column = Some(9);
+                    args.action = Action::Duration { second: Some(9) };
                 }),
                 id_start_end.clone(),
                 None,
@@ -4242,8 +4108,7 @@ mod tests {
             (
                 "remove",
                 flags(|args| {
-                    args.action_remove = true;
-                    args.remove_columns = vec![1];
+                    args.action = Action::Remove(vec![1]);
                 }),
                 id_ts_val.clone(),
                 Some(vec!["id", "val"]),
@@ -4251,9 +4116,7 @@ mod tests {
             (
                 "arrange, named columns first and then the rest",
                 flags(|args| {
-                    args.action_arrange = true;
-                    args.arrange_columns = vec![3, 1];
-                    args.arrange_listed = vec![1, 3];
+                    args.action = Action::Arrange { order: vec![3, 1], listed: vec![1, 3] };
                 }),
                 vec!["a", "b", "c", "d", "e"],
                 Some(vec!["d", "b", "a", "c", "e"]),
@@ -4262,8 +4125,7 @@ mod tests {
                 // As --remove's parsing produces it: highest index first.
                 "remove several columns",
                 flags(|args| {
-                    args.action_remove = true;
-                    args.remove_columns = vec![3, 1];
+                    args.action = Action::Remove(vec![3, 1]);
                 }),
                 vec!["id", "ts", "val", "note"],
                 Some(vec!["id", "val"]),
@@ -4271,8 +4133,7 @@ mod tests {
             (
                 "remove refuses the list if any column is out of bounds",
                 flags(|args| {
-                    args.action_remove = true;
-                    args.remove_columns = vec![9, 0];
+                    args.action = Action::Remove(vec![9, 0]);
                 }),
                 vec!["id", "ts"],
                 None,
@@ -4280,8 +4141,7 @@ mod tests {
             (
                 "remove, column out of bounds",
                 flags(|args| {
-                    args.action_remove = true;
-                    args.remove_columns = vec![9];
+                    args.action = Action::Remove(vec![9]);
                 }),
                 id_ts_val.clone(),
                 None,
@@ -4293,8 +4153,7 @@ mod tests {
                 // index must be a clean error against a zero-field record.
                 "zero-field record",
                 flags(|args| {
-                    args.action_remove = true;
-                    args.remove_columns = vec![0];
+                    args.action = Action::Remove(vec![0]);
                 }),
                 vec![],
                 None,
@@ -4331,19 +4190,17 @@ mod tests {
     fn process_record_writes_what_each_action_makes_of_a_row() {
         use InsertPosition::{After, Before, Replace};
         fn split(args: &mut ArgumentFlags) {
-            args.action_split = true;
+            args.action = Action::Split;
         }
         fn rfc3339(args: &mut ArgumentFlags) {
-            args.action_to_rfc3339 = true;
+            args.action = Action::ToRfc3339;
         }
         let huge = i64::MAX.to_string();
         let cases: Vec<Case> = vec![
             (
                 "arrange keeps the width and puts the named columns first",
                 flags(|args| {
-                    args.action_arrange = true;
-                    args.arrange_columns = vec![2, 0];
-                    args.arrange_listed = vec![0, 2];
+                    args.action = Action::Arrange { order: vec![2, 0], listed: vec![0, 2] };
                 }),
                 vec!["a", "b", "c", "d"],
                 Some(vec!["c", "a", "b", "d"]),
@@ -4351,9 +4208,7 @@ mod tests {
             (
                 "arrange, column out of bounds",
                 flags(|args| {
-                    args.action_arrange = true;
-                    args.arrange_columns = vec![9];
-                    args.arrange_listed = vec![9];
+                    args.action = Action::Arrange { order: vec![9], listed: vec![9] };
                 }),
                 vec!["a", "b"],
                 None,
@@ -4361,8 +4216,7 @@ mod tests {
             (
                 "remove, column out of bounds",
                 flags(|args| {
-                    args.action_remove = true;
-                    args.remove_columns = vec![9];
+                    args.action = Action::Remove(vec![9]);
                 }),
                 vec!["1", "2", "3"],
                 None,
@@ -4370,8 +4224,7 @@ mod tests {
             (
                 "remove at the last valid index",
                 flags(|args| {
-                    args.action_remove = true;
-                    args.remove_columns = vec![2];
+                    args.action = Action::Remove(vec![2]);
                 }),
                 vec!["1", "2", "3"],
                 Some(vec!["1", "2"]),
@@ -4379,8 +4232,7 @@ mod tests {
             (
                 "zero-field record",
                 flags(|args| {
-                    args.action_remove = true;
-                    args.remove_columns = vec![0];
+                    args.action = Action::Remove(vec![0]);
                 }),
                 vec![],
                 None,
@@ -4519,9 +4371,9 @@ mod tests {
                 // two columns.
                 "two-column duration, -i independent of its columns",
                 flags(|args| {
-                    args.action_duration = true;
+                    args.action = Action::Duration { second: None };
                     args.selected_column = 0;
-                    args.second_column = Some(2);
+                    args.action = Action::Duration { second: Some(2) };
                     args.insert_column = Some(1);
                     args.insert_position = Replace;
                 }),
@@ -4534,8 +4386,7 @@ mod tests {
                 // whatever moved up.
                 "remove several columns by input position",
                 flags(|args| {
-                    args.action_remove = true;
-                    args.remove_columns = vec![1, 0];
+                    args.action = Action::Remove(vec![1, 0]);
                 }),
                 vec!["a", "b", "c", "d"],
                 Some(vec!["c", "d"]),
@@ -4543,8 +4394,7 @@ mod tests {
             (
                 "remove drops the named column",
                 flags(|args| {
-                    args.action_remove = true;
-                    args.remove_columns = vec![1];
+                    args.action = Action::Remove(vec![1]);
                 }),
                 vec!["1", "2", "3"],
                 Some(vec!["1", "3"]),
@@ -4651,7 +4501,7 @@ mod tests {
     #[test]
     fn record_to_local_produces_the_same_instant_as_utc() {
         let mut args = default_args();
-        args.action_to_local = true;
+        args.action = Action::ToLocal(None);
         args.selected_column = 1;
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
@@ -4670,7 +4520,7 @@ mod tests {
     #[test]
     fn record_to_local_accepts_offset_missing_a_colon() {
         let mut args = default_args();
-        args.action_to_local = true;
+        args.action = Action::ToLocal(None);
         args.selected_column = 1;
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
@@ -4815,7 +4665,7 @@ mod tests {
     #[test]
     fn record_duration_first_row_is_zero_and_seeds_cache() {
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 1;
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
@@ -4835,7 +4685,7 @@ mod tests {
     #[test]
     fn record_duration_accepts_offset_missing_a_colon() {
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 1;
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
@@ -4855,7 +4705,7 @@ mod tests {
     #[test]
     fn record_duration_accumulates_row_over_row_even_when_unsorted() {
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 1;
         args.insert_position = InsertPosition::Replace;
 
@@ -4889,7 +4739,7 @@ mod tests {
         // duration must reflect the instant, not naive wall-clock
         // subtraction, or this would come out as 0d2h0m0s instead.
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 1;
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
@@ -4917,7 +4767,7 @@ mod tests {
         // timestamps' wall-clock difference is 1h but the real elapsed
         // time is 2h.
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 1;
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
@@ -4942,7 +4792,7 @@ mod tests {
     #[test]
     fn record_duration_parse_error_leaves_cache_untouched() {
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 1;
         args.insert_position = InsertPosition::Replace;
         let seed = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap();
@@ -4958,9 +4808,9 @@ mod tests {
     #[test]
     fn record_duration_two_column_computes_absolute_difference_regardless_of_order() {
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 0;
-        args.second_column = Some(4);
+        args.action = Action::Duration { second: Some(4) };
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
 
@@ -4986,9 +4836,9 @@ mod tests {
     #[test]
     fn record_duration_two_column_identical_timestamps_is_zero() {
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 0;
-        args.second_column = Some(1);
+        args.action = Action::Duration { second: Some(1) };
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
         let (result, _) = process_record(
@@ -5003,9 +4853,9 @@ mod tests {
     #[test]
     fn record_duration_two_column_accepts_offset_missing_a_colon() {
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 0;
-        args.second_column = Some(1);
+        args.action = Action::Duration { second: Some(1) };
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
         let (result, _) = process_record(
@@ -5020,9 +4870,9 @@ mod tests {
     #[test]
     fn record_duration_two_column_either_column_invalid_is_parse_err() {
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 0;
-        args.second_column = Some(1);
+        args.action = Action::Duration { second: Some(1) };
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
 
@@ -5050,9 +4900,9 @@ mod tests {
         // offset, not a shared reference offset. 12:00 EDT = 16:00 UTC;
         // 20:00 CEST = 18:00 UTC; real difference is 2h.
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 0;
-        args.second_column = Some(1);
+        args.action = Action::Duration { second: Some(1) };
         args.insert_position = InsertPosition::Replace;
         let cache: Option<DateTime<FixedOffset>> = None;
         let (result, _) = process_record(
@@ -5070,9 +4920,9 @@ mod tests {
     #[test]
     fn record_duration_two_column_does_not_touch_the_row_over_row_cache() {
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 0;
-        args.second_column = Some(1);
+        args.action = Action::Duration { second: Some(1) };
         args.insert_position = InsertPosition::Replace;
         let seed = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z").unwrap();
         let (_, new_cache) = process_record(
@@ -5087,9 +4937,9 @@ mod tests {
     #[test]
     fn record_duration_two_column_out_of_bound_second_column_is_a_clean_error() {
         let mut args = default_args();
-        args.action_duration = true;
+        args.action = Action::Duration { second: None };
         args.selected_column = 0;
-        args.second_column = Some(9);
+        args.action = Action::Duration { second: Some(9) };
         let cache: Option<DateTime<FixedOffset>> = None;
         let result = process_record(&record(&["1", "2"]), &args, cache);
         assert!(result.is_err());
@@ -5267,12 +5117,16 @@ mod tests {
     #[test]
     fn insert_target_uses_the_actions_own_column_when_i_is_absent() {
         let mut args = default_args();
-        assert_eq!(insert_target(&args, 1, 3), 1);
+        args.selected_column = 1;
+        assert_eq!(insert_target(&args, 3), 1);
+        // The two-column --duration falls back to its second column.
+        args.action = Action::Duration { second: Some(2) };
+        assert_eq!(insert_target(&args, 3), 2);
         // -i, once given, replaces that fallback and is clamped to the row.
         args.insert_column = Some(0);
-        assert_eq!(insert_target(&args, 1, 3), 0);
+        assert_eq!(insert_target(&args, 3), 0);
         args.insert_column = Some(99);
-        assert_eq!(insert_target(&args, 1, 3), 2);
+        assert_eq!(insert_target(&args, 3), 2);
     }
 
     // ---- insert_fields -----------------------------------------------------
@@ -5280,18 +5134,18 @@ mod tests {
     #[test]
     fn insert_fields_places_one_value_by_position() {
         for (position, expected) in [
-            (InsertPosition::Before, vec!["a", "new>", "b", "c"]),
+            (InsertPosition::Before, vec!["a", "new", "b", "c"]),
             (InsertPosition::Replace, vec!["a", "new", "c"]),
-            (InsertPosition::After, vec!["a", "b", "<new", "c"]),
+            (InsertPosition::After, vec!["a", "b", "new", "c"]),
         ] {
             let mut fields = vec!["a", "b", "c"];
-            insert_fields(&mut fields, 1, position, &["new>"], &["new"], &["<new"]);
+            insert_fields(&mut fields, 1, position, &["new"]);
             assert_eq!(fields, expected, "position={position:?}");
         }
         // "after" the last column appends rather than running past the end.
         let mut fields = vec!["a", "b", "c"];
-        insert_fields(&mut fields, 2, InsertPosition::After, &["new>"], &["new"], &["<new"]);
-        assert_eq!(fields, vec!["a", "b", "c", "<new"]);
+        insert_fields(&mut fields, 2, InsertPosition::After, &["new"]);
+        assert_eq!(fields, vec!["a", "b", "c", "new"]);
     }
 
     #[test]
@@ -5299,13 +5153,12 @@ mod tests {
         // The pair is written left-to-right whichever side of the column it
         // lands on, which two separate inserts make easy to get backwards.
         for (position, expected) in [
-            (InsertPosition::Before, vec!["a", "one>", "two>", "b", "c"]),
+            (InsertPosition::Before, vec!["a", "one", "two", "b", "c"]),
             (InsertPosition::Replace, vec!["a", "one", "two", "c"]),
-            (InsertPosition::After, vec!["a", "b", "<one", "<two", "c"]),
+            (InsertPosition::After, vec!["a", "b", "one", "two", "c"]),
         ] {
             let mut fields = vec!["a", "b", "c"];
-            insert_fields(&mut fields, 1, position,
-                &["one>", "two>"], &["one", "two"], &["<one", "<two"]);
+            insert_fields(&mut fields, 1, position, &["one", "two"]);
             assert_eq!(fields, expected, "position={position:?}");
         }
     }
@@ -5323,6 +5176,14 @@ mod tests {
         let mut every = vec!["a", "b", "c"];
         remove_columns(&mut every, &[2, 1, 0]);
         assert!(every.is_empty());
+    }
+
+    // FIELDS in --arrange's order, as apply_row_edit writes them.
+    fn arranged<'a>(fields: &[&'a str], order: &[usize], listed: &[usize]) -> Vec<&'a str> {
+        let row = csv::StringRecord::from(fields.to_vec());
+        let mut out = Vec::new();
+        arrange_into(&mut out, &row, order, listed);
+        out.into_iter().map(|field| fields[fields.iter().position(|f| *f == field).unwrap()]).collect()
     }
 
     #[test]

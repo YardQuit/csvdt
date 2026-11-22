@@ -1772,10 +1772,10 @@ fn conflicting_actions_are_rejected() {
 #[test]
 fn every_pair_of_actions_conflicts() {
     // The single conflicting_actions_are_rejected test above only exercises
-    // one of the 21 possible pairs among the 7 actions. conflicts_with_all
-    // is declared by hand on each action (not derived), so a missing or
-    // one-sided entry would silently let two actions run together instead
-    // of erroring: check every pair, not just one.
+    // one of the 21 possible pairs among the 7 actions. The conflict comes
+    // from one argument group, and an action left out of it would silently
+    // run together with another instead of erroring: check every pair, not
+    // just one.
     let actions: Vec<Vec<&str>> = vec![
         vec!["-s1"],
         vec!["-r1"],
