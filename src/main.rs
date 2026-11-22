@@ -1687,10 +1687,9 @@ fn parse_rfc3339_lenient(value: &str) -> Result<DateTime<FixedOffset>, chrono::P
     // to nanoseconds: a tenth digit vanishes with no error. This tool's
     // promise is the opposite, "what the source had is what comes out", so
     // precision a value cannot carry is refused into parse_err rather than
-    // quietly cut. The error itself is manufactured by parsing an empty
-    // string, since chrono gives no way to construct one.
+    // quietly cut.
     if fractional_digits(value) > 9 {
-        return chrono::DateTime::parse_from_rfc3339("");
+        return Err(refused());
     }
     let strict = chrono::DateTime::parse_from_rfc3339(value);
     let parsed = if strict.is_ok() {
@@ -1702,8 +1701,23 @@ fn parse_rfc3339_lenient(value: &str) -> Result<DateTime<FixedOffset>, chrono::P
         }
     };
     match parsed {
-        Ok(stamp) if !leap_second_is_possible(stamp) => chrono::DateTime::parse_from_rfc3339(""),
+        Ok(stamp) if !leap_second_is_possible(stamp) => Err(refused()),
+        // Year 0000 is four digits but no year of the calendar the format
+        // uses, see is_rfc3339_year. Refused on the way in, so every action
+        // marks it the same way rather than only those that write a
+        // timestamp: -s would otherwise copy it out and -d measure from it.
+        Ok(stamp) if stamp.year() == 0 => Err(refused()),
         other => other,
+    }
+}
+
+// The error parse_rfc3339_lenient gives for a value chrono reads but this tool
+// refuses. Made by parsing an empty string, since chrono gives no way to
+// construct one.
+fn refused() -> chrono::ParseError {
+    match chrono::DateTime::parse_from_rfc3339("") {
+        Err(error) => error,
+        Ok(_) => unreachable!("an empty string is not a timestamp"),
     }
 }
 

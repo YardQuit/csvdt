@@ -488,6 +488,36 @@ fn a_conversion_that_leaves_rfc3339s_year_range_is_marked_not_written() {
     }
 }
 
+// Year 0000 is no year of the calendar RFC3339 uses, and the help says the
+// range is 0001 through 9999 for reading as well as writing. Every action
+// that reads a timestamp marks it the same way, including the two that write
+// no timestamp of their own: -s copied it into its date column and -d
+// measured a span from it.
+#[test]
+fn year_zero_is_parse_err_under_every_action_that_reads_a_timestamp() {
+    let rows = "0000-01-01T00:00:00Z,2024-01-01T00:00:00Z\n\
+                2024-01-01T00:00:00Z,2024-01-02T00:00:00Z\n";
+    for (args, first_row) in [
+        (vec!["-s0"], "0000-01-01T00:00:00Z,parse_err,parse_err,2024-01-01T00:00:00Z"),
+        (vec!["-d0,1"], "0000-01-01T00:00:00Z,2024-01-01T00:00:00Z,parse_err"),
+        (vec!["-u0"], "0000-01-01T00:00:00Z,parse_err,2024-01-01T00:00:00Z"),
+        (vec!["-o0,+01:00"], "0000-01-01T00:00:00Z,parse_err,2024-01-01T00:00:00Z"),
+    ] {
+        let output = csvdt().args(&args).write_stdin(rows).output().unwrap();
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(stdout.lines().next(), Some(first_row), "{args:?}");
+    }
+
+    // -d's row-over-row form keeps measuring from the last real timestamp.
+    csvdt()
+        .args(["-d0"])
+        .write_stdin("2024-01-01T00:00:00Z\n0000-01-01T00:00:00Z\n2024-01-02T00:00:00Z\n")
+        .assert()
+        .success()
+        .stdout("2024-01-01T00:00:00Z,PT0S\n0000-01-01T00:00:00Z,parse_err\n2024-01-02T00:00:00Z,P1D\n");
+}
+
 #[test]
 fn split_keeps_sub_second_precision_like_every_other_conversion() {
     // The time column was formatted with a hard-coded %H:%M:%S, so a fraction
