@@ -39,6 +39,7 @@
 ;;; Code:
 
 (require 'ansi-color)
+(require 'cl-lib)
 (require 'delsel)
 (require 'seq)
 (require 'subr-x)
@@ -575,48 +576,42 @@ where :value is nil), since telling a value from a filename needs that."
           (setq rest (cdr rest))))))
     (nreverse files)))
 
+(defun csvdt--options-part (args)
+  "Return the part of ARGS before \"--\", which clap reads as options.
+Past \"--\" everything is positional."
+  (seq-take-while (lambda (argument) (not (equal argument "--"))) args))
+
 (defun csvdt--header-requested-p (args)
-  "Non-nil when ARGS ask csvdt to treat the first record as a header.
-Only up to \"--\": past it, to clap, everything is positional."
+  "Non-nil when ARGS ask csvdt to treat the first record as a header."
   (seq-some
    (lambda (argument)
      (or (member argument csvdt-header-options)
          (seq-intersection (csvdt--short-flags argument) csvdt-header-options)))
-   (seq-take-while (lambda (argument) (not (equal argument "--"))) args)))
+   (csvdt--options-part args)))
 
-(defun csvdt--header-line (beg args)
-  "Return the buffer's header line to put in front of a region at BEG.
+(defun csvdt--header-line (beg args &optional records)
+  "Return the buffer's header record to put in front of a region at BEG.
 Nil unless ARGS ask for a header and BEG is below it: a region starting
-inside the header line is left alone, since it already carries part of
-one and guessing what was meant would be worse than not."
+inside the header already carries part of one, and guessing what was
+meant would be worse than leaving it alone.  The header is a whole
+record, which spans two lines when one of its fields holds a newline.
+RECORDS is the index from `csvdt--make-records', made when nil."
   (when (and csvdt-region-carries-header
              (csvdt--header-requested-p args))
     (save-excursion
       (goto-char (point-min))
       (let* ((dialect (csvdt--dialect args))
-             ;; The header's whole record, not its first line.  A header
-             ;; whose own field holds a newline spans two, and taking one
-             ;; of them handed csvdt a fragment opening a quote that never
-             ;; closed, which swallowed the rows behind it, and failed
-             ;; the run for a reason that named neither the header nor the
-             ;; field.
              (header-end (cdr (csvdt--whole-records
                                (point-min) (line-beginning-position 2)
-                               (car dialect) (cdr dialect)))))
+                               (car dialect) (cdr dialect) records))))
         (when (>= beg header-end)
           (buffer-substring-no-properties (point-min) header-end))))))
 
 (defun csvdt--whole-lines (beg end)
   "Return BEG..END widened to whole lines.
-Half a line is half a record whatever else is true: sending part of one
-would hand csvdt a truncated row.  A range ending exactly at the start of
-a line stops there, having been selected up to the previous line's
-newline rather than into this one.
-
-Whole lines are not yet whole records: a quoted field may hold newlines
-and carry one record across several.  `csvdt--whole-records' finishes
-the job; this is the cheap part of it, and the whole of it for a file
-whose fields hold no newlines."
+A range ending exactly at the start of a line stops there.  Whole lines are
+not yet whole records, since a quoted field may span lines; see
+`csvdt--whole-records'."
   (save-excursion
     (let ((start (progn (goto-char beg) (line-beginning-position)))
           (finish (progn (goto-char end)
@@ -625,173 +620,221 @@ whose fields hold no newlines."
                            (min (point-max) (line-beginning-position 2))))))
       (cons start (max finish start)))))
 
-(defun csvdt--dialect (args)
-  "Return (QUOTE . DELIMITER) as characters, as ARGS leave them.
-Only up to \"--\", on the same reasoning as `csvdt--header-requested-p':
-past it clap reads everything as positional."
-  (let ((options (seq-take-while (lambda (argument) (not (equal argument "--")))
-                                 args)))
-    (cons (if (seq-some (lambda (argument)
-                          (member argument csvdt-single-quote-options))
-                        options)
-              ?'
-            ?\")
-          (or (csvdt--delimiter-in options) ?,))))
-
-(defun csvdt--delimiter-in (options)
-  "The delimiter character OPTIONS name, or nil for the default.
-Both spellings clap accepts: attached with \"=\" and given as the next
-argument."
+(defun csvdt--option-value (names options)
+  "Return the value OPTIONS give to an option called one of NAMES, or nil.
+Both spellings clap accepts are read: attached with \"=\" and as the next
+argument.  An empty or missing value is nil."
   (let ((found nil))
     (while (and options (not found))
-      (let ((argument (car options)))
-        (cond
-         ((member argument csvdt-read-delimiter-options)
-          (setq found (and (cadr options) (aref (cadr options) 0))))
-         (t
-          ;; The attached spelling.  Measured off the option's own name
-          ;; rather than by looking for the "=", which keeps this to
-          ;; Emacs 27's string functions as the rest of the file does.
-          (let ((name (seq-find (lambda (name)
-                                  (string-prefix-p (concat name "=") argument))
-                                csvdt-read-delimiter-options)))
-            (when name
-              (let ((value (substring argument (1+ (length name)))))
-                (setq found (and (not (string-empty-p value))
-                                 (aref value 0)))))))))
+      (let* ((argument (car options))
+             (name (seq-find (lambda (name)
+                               (string-prefix-p (concat name "=") argument))
+                             names))
+             (value (cond ((member argument names) (cadr options))
+                          (name (substring argument (1+ (length name)))))))
+        (when (and value (not (string-empty-p value)))
+          (setq found value)))
       (setq options (cdr options)))
     found))
 
+(defun csvdt--option-given-p (names options)
+  "Non-nil when OPTIONS include an option called one of NAMES."
+  (seq-some (lambda (argument)
+              (or (member argument names)
+                  (seq-some (lambda (name)
+                              (string-prefix-p (concat name "=") argument))
+                            names)))
+            options))
+
+(defun csvdt--dialect (args)
+  "Return (QUOTE . DELIMITER) as characters, as ARGS leave them."
+  (let ((options (csvdt--options-part args)))
+    (cons (if (csvdt--option-given-p csvdt-single-quote-options options)
+              ?'
+            ?\")
+          (let ((value (csvdt--option-value csvdt-read-delimiter-options
+                                            options)))
+            (if value (aref value 0) ?,)))))
+
 (defun csvdt--field-initial-p (pos delimiter)
   "Whether POS is where a field begins.
-The first character of the accessible portion, or the one just past a
-DELIMITER or a line ending."
+That is the first character of the accessible portion, or the one just past
+a DELIMITER or a line ending."
   (or (eq pos (point-min))
       (memq (char-before pos) (list delimiter ?\n ?\r))))
 
-(defun csvdt--inside-quoted-field-p (pos quote delimiter)
+;;; Where quoted fields hold line breaks
+
+;; A record is not always a line: a quoted field may hold newlines.  The
+;; index below finds those fields in one forward pass, so any number of
+;; positions can be asked about for the price of reading the buffer once.
+
+(cl-defstruct (csvdt--records
+               (:constructor csvdt--make-records
+                             (quote-char delimiter &optional off
+                                         &aux (scanned (point-min)))))
+  "How far a buffer has been read for quoted fields that span lines.
+QUOTE-CHAR and DELIMITER are the dialect.  SCANNED is the position up to
+which the buffer has been read.  SPANS is a vector of the first COUNT
+(OPEN . CLOSE) pairs found, in buffer order, where OPEN is the position of
+the opening quote and CLOSE that of the closing one, or the end of the
+buffer for a quote never closed.  Only fields holding a line break are
+kept.  OFF says not to look at all, so every position is outside a field."
+  quote-char delimiter off scanned (spans (make-vector 16 nil)) (count 0))
+
+(defun csvdt--records-add (records open close)
+  "Add the quoted field from OPEN to CLOSE to RECORDS."
+  (let ((spans (csvdt--records-spans records))
+        (count (csvdt--records-count records)))
+    (when (= count (length spans))
+      (setq spans (vconcat spans (make-vector count nil)))
+      (setf (csvdt--records-spans records) spans))
+    (aset spans count (cons open close))
+    (setf (csvdt--records-count records) (1+ count))))
+
+(defun csvdt--records-extend (records pos)
+  "Read RECORDS' buffer far enough to say what lies at POS.
+Quotes are jumped to rather than every character read, and a quote opens a
+field only where a field begins.  A doubled quote inside a field is an
+escaped quote and leaves it open."
+  (when (and (not (csvdt--records-off records))
+             (> pos (csvdt--records-scanned records)))
+    (let ((quote-char (csvdt--records-quote-char records))
+          (delimiter (csvdt--records-delimiter records))
+          (open nil)
+          (done nil))
+      (save-excursion
+        (goto-char (csvdt--records-scanned records))
+        (while (not done)
+          (if (search-forward (char-to-string quote-char)
+                              (if open nil (min pos (point-max))) t)
+              (let ((at (1- (point))))
+                (cond
+                 ((not open)
+                  (when (csvdt--field-initial-p at delimiter)
+                    (setq open at)))
+                 ((eq (char-after) quote-char)
+                  (forward-char 1))
+                 (t
+                  (when (save-excursion (goto-char open)
+                                        (search-forward "\n" at t))
+                    (csvdt--records-add records open at))
+                  (setq open nil)))
+                (when (and (not open) (>= (point) pos))
+                  (setq done t)))
+            (when open
+              (csvdt--records-add records open (point-max))
+              (goto-char (point-max)))
+            (setq done t)))
+        (setf (csvdt--records-scanned records) (max pos (point)))))))
+
+(defun csvdt--records-span-at (records pos)
+  "Return the (OPEN . CLOSE) field of RECORDS that holds POS, or nil.
+A position is held from just after the opening quote to the closing one.
+Only fields with a line break are known, so this answers for positions at
+the start of a line or the end of the buffer, which are the ones a record
+boundary can be."
+  (csvdt--records-extend records pos)
+  (let ((spans (csvdt--records-spans records))
+        (low 0)
+        (high (csvdt--records-count records)))
+    ;; The first span opening at or after POS.
+    (while (< low high)
+      (let ((middle (/ (+ low high) 2)))
+        (if (< (car (aref spans middle)) pos)
+            (setq low (1+ middle))
+          (setq high middle))))
+    (when (> low 0)
+      (let ((span (aref spans (1- low))))
+        (and (<= pos (cdr span)) span)))))
+
+(defun csvdt--inside-quoted-field-p (pos quote delimiter &optional records)
   "Non-nil when POS falls inside a quoted field rather than between records.
-Read from the start of the accessible portion, since nothing nearer can
-say which side of a quote a position is on.  Jumps quote to quote rather
-than character to character, so the cost follows how many QUOTE
-characters come before POS rather than how much text does: DELIMITER
-says where a field begins, which is the only place a quote opens one:
-measured at
-0.17 s over 14 MB holding twelve thousand of them, and 1.9 s over 18 MB
-where every field is quoted.  A run over a whole buffer has nothing
-before it and pays nothing."
-  (save-excursion
-    (goto-char (point-min))
-    (let ((inside nil)
-          (needle (char-to-string quote)))
-      (while (search-forward needle pos t)
-        (if inside
-            ;; A doubled quote inside a run is one escaped quote: the run
-            ;; goes on, and the second must not be read as opening anything.
-            (if (eq (char-after) quote)
-                (forward-char 1)
-              (setq inside nil))
-          ;; Outside, a quote opens a run only where a field begins.
-          ;; Anywhere else it is data: a\"b is three literal characters to
-          ;; the reader, not the start of something.
-          (when (csvdt--field-initial-p (1- (point)) delimiter)
-            (setq inside t))))
-      inside)))
+POS is a line start or the end of the buffer.  QUOTE and DELIMITER are the
+dialect.  RECORDS is the index to read from, made when nil; pass one to
+ask about many positions with a single pass over the buffer."
+  (and (csvdt--records-span-at
+        (or records (csvdt--make-records quote delimiter)) pos)
+       t))
 
-(defun csvdt--whole-records (beg end quote delimiter)
+(defun csvdt--whole-records (beg end quote delimiter &optional records)
   "Return BEG..END widened out to whole records.
-A record is not always a line.  A quoted field may hold newlines (an
-address, a notes column, an embedded document) and then one record
-spans several lines, which is ordinary CSV and which csvdt reads and
-writes faithfully.  Widening to whole lines is therefore not enough on
-its own: a range starting inside such a field hands over the tail of a
-record as though it were a record of its own.  That parses cleanly,
-converts cleanly and reports success, and the field it produces is not
-the data: x\\n y arrives as y\", with nothing to say so.
-
-QUOTE and DELIMITER are the dialect the run will read with, since what
-counts as a record depends on both.
-
-Only ever widens.  A range already sitting on record boundaries is
-returned unchanged, which is every range in a file whose fields hold no
-newlines at all."
-  (let ((start beg)
-        (finish end))
-    ;; Back to the line the record opens on.
+A quoted field may hold newlines, and then one record spans several lines.
+A range starting inside such a field would hand csvdt the tail of a record
+as if it were one, which parses and converts without complaint.  QUOTE and
+DELIMITER are the dialect the run reads with; RECORDS is the index to use,
+made when nil.  A range already on record boundaries is returned as it
+is."
+  (let ((records (or records (csvdt--make-records quote delimiter)))
+        (start beg)
+        (finish end)
+        span)
     (while (and (> start (point-min))
-                (csvdt--inside-quoted-field-p start quote delimiter))
-      (setq start (save-excursion
-                    (goto-char start)
-                    (forward-line -1)
-                    (point))))
-    ;; And on to the line past the one it closes on.
+                (setq span (csvdt--records-span-at records start)))
+      (setq start (save-excursion (goto-char (car span))
+                                  (line-beginning-position))))
     (while (and (< finish (point-max))
-                (csvdt--inside-quoted-field-p finish quote delimiter))
-      (setq finish (save-excursion
-                     (goto-char finish)
-                     (forward-line 1)
-                     (point))))
+                (setq span (csvdt--records-span-at records finish)))
+      (setq finish (save-excursion (goto-char (cdr span))
+                                   (line-beginning-position 2))))
     (cons start (max finish start))))
 
-(defun csvdt--narrowing-cuts-record-p (ranges quote delimiter)
+(defun csvdt--settle-ranges (ranges records)
+  "Return RANGES, which are whole lines, widened to whole records.
+Ranges brought onto the same record are not sent twice."
+  (csvdt--drop-covered
+   (mapcar (lambda (range)
+             (csvdt--whole-records (car range) (cdr range)
+                                   (csvdt--records-quote-char records)
+                                   (csvdt--records-delimiter records)
+                                   records))
+           ranges)))
+
+(defun csvdt--narrowing-cuts-record-p (ranges quote delimiter &optional records)
   "Which end of RANGES the buffer's narrowing cuts a record at.
 Returns `start', `end', `both' or nil.  QUOTE and DELIMITER are the
-dialect the run will read with, which is what decides where a record ends.
-Widening can only reach as far as the accessible portion: a buffer
-narrowed to begin or end mid-record has nothing whole to widen to, so the clamp
-leaves half a record and nothing says so.  It goes to csvdt as a short
-row: passed through truncated, or, once a conversion is asked for,
-refused as a ragged record naming a line rather than the narrowing behind
-it.  Widening past the restriction would send lines nobody chose, so the
-run reports the cut instead of hiding or overriding it.
+dialect, RECORDS the index to use, made when nil.
 
-Two ways to be cut, because a record is not always a line.  Mid-line is
-the plain one.  The other is a narrowing that ends at a line boundary
-which is nonetheless inside a quoted field: whole lines are reachable
-there, so the mid-line test saw nothing, while the record they belong to
-was still severed.  That one could pass quietly: asked to accept ragged
-records (the obvious thing to reach for when a count looks off), csvdt
-took the truncated one rather than refusing it, and a field holding a
-newline arrived without the half of itself that was out of reach, exit 0,
-with the rows behind it gone."
-  (let* ((start (car (car ranges)))
+Widening cannot go past the accessible portion, so a buffer narrowed to
+begin or end mid-record leaves half a record, which csvdt reads as a short
+row.  The cut is reported rather than hidden or overridden.  A record is
+cut mid-line, or at a line boundary that lies inside a quoted field."
+  (let* ((records (or records (csvdt--make-records quote delimiter)))
+         (start (car (car ranges)))
          (finish (cdr (car (last ranges))))
+         (narrowed (buffer-narrowed-p))
          (at-start
           (and (= start (point-min))
-               ;; Widened, because both questions are about text out of
-               ;; reach: whether a quote before the restriction is still
-               ;; open here, and whether the line this sits on began before
-               ;; it.
+               ;; The text before the narrowing decides whether a quote is
+               ;; still open here, and whether this line began before it.
                (save-restriction
                  (widen)
-                 (or (csvdt--inside-quoted-field-p start quote delimiter)
+                 (or (csvdt--records-span-at
+                      (if narrowed
+                          (csvdt--make-records quote delimiter
+                                               (csvdt--records-off records))
+                        records)
+                      start)
                      (save-excursion
                        (goto-char start)
-                       ;; Only the start of a line begins a record.
-                       ;; Anywhere else, the first record is the tail of one.
                        (not (bolp)))))))
          (at-end
           (and (= finish (point-max))
-               (or
-                ;; Ending inside a quoted field: what is reachable stops
-                ;; partway through a record however tidy the line looks.
-                (csvdt--inside-quoted-field-p finish quote delimiter)
-                (save-restriction
-                  (widen)
-                  (save-excursion
-                    (goto-char finish)
-                    ;; At end-of-line only the newline is out of reach, and
-                    ;; the record itself is whole: csvdt supplies the
-                    ;; terminator.
-                    (not (or (bolp) (eolp)))))))))
+               (or (csvdt--records-span-at records finish)
+                   ;; At end-of-line only the newline is out of reach, and
+                   ;; csvdt supplies the terminator.
+                   (save-restriction
+                     (widen)
+                     (save-excursion
+                       (goto-char finish)
+                       (not (or (bolp) (eolp)))))))))
     (cond ((and at-start at-end) 'both)
           (at-start 'start)
           (at-end 'end))))
 
 (defun csvdt--cut-note (cut)
   "How to say that the narrowing left CUT half-reachable.
-One phrasing for both the run summary and the failure message, since a
-run that fails because of the cut is the case the check exists for."
+CUT is the value `csvdt--narrowing-cuts-record-p' returns."
   (pcase cut
     ('both "first and last records cut short by the narrowing")
     ('start "first record cut short by the narrowing")
@@ -800,29 +843,10 @@ run that fails because of the cut is the case the check exists for."
 (defun csvdt--piece-bounds (item)
   "Return ITEM as a sorted (BEG . END) pair in this buffer, or nil.
 ITEM is a cons or an overlay, as `csvdt-banked-lines-function' and the
-region report pieces.  One decoding, shared by `csvdt--normalise-ranges'
-and `csvdt--mid-line-boundary-p', so what counts as a live piece cannot
-drift between what a run covers and what it says about the selection.
-
-A pair's ends may be integers or markers: a marker is how a package
-holds a position that must survive edits, so pairs of them are what a
-banking package most naturally reports.  They were silently dropped
-instead, and `csvdt-run-dwim', finding nothing banked, ran over the
-whole buffer without a word.
-
-nil for a dead overlay, which reports nil for both ends, and for a
-marker pointing nowhere; for an overlay or a marker belonging to
-another buffer, whose positions mean something else entirely here and
-would otherwise be clamped onto lines nobody picked out; and for a
-piece starting at or past the end of the buffer, which names no
-character: clamped into range instead, a stale one in a buffer whose
-last line has no newline would widen onto that line, where \"No banked
-lines\" is the truth.
-
-Either way round: a pair is two ends, not a direction, and
-`region-beginning' and `region-end' are the only reason one usually
-arrives sorted.  Taking them as given turned a reversed pair into an
-empty range, so the lines it named went silently missing."
+region report pieces.  The ends of a pair may be integers or markers, in
+either order.  The result is nil for a dead overlay, for a marker pointing
+nowhere, for an overlay or marker belonging to an unrelated buffer, and for
+a piece starting at or past the end of this one."
   (when (or (consp item) (overlayp item))
     (let ((beg (csvdt--piece-position
                 (if (overlayp item) (overlay-start item) (car item))))
@@ -837,22 +861,16 @@ empty range, so the lines it named went silently missing."
 (defun csvdt--same-text-p (buffer)
   "Whether BUFFER is this one, or shares its text as an indirect buffer.
 An indirect buffer and its base hold the same characters at the same
-positions, so a marker or overlay made in one names exactly the text the
-other would name: unlike a position from an unrelated buffer, which is
-what the foreign-buffer refusal is for.  `clone-indirect-buffer' is an
-ordinary way to look at a file, and banking made in the base was refused
-there: `csvdt-run-banked' said \"No banked lines\", and
-`csvdt-run-dwim', finding nothing banked, ran over the whole buffer."
+positions, so a marker or overlay made in one names the same text in the
+other, unlike a position from an unrelated buffer."
   (and (buffer-live-p buffer)
        (eq (or (buffer-base-buffer buffer) buffer)
            (or (buffer-base-buffer (current-buffer)) (current-buffer)))))
 
 (defun csvdt--piece-position (part)
-  "Return PART as a position in this buffer, or nil.
-PART is one end of a banked piece: an integer, a marker, or whatever a
-dead overlay reported an end as (nil).  A marker in an unrelated buffer
-gets the foreign overlay's treatment (its position means something else
-entirely here) and one pointing nowhere has no position to give."
+  "Return PART, one end of a banked piece, as a position in this buffer.
+PART is an integer, a marker, or nil (what a dead overlay reports).  The
+result is nil for a marker in an unrelated buffer or pointing nowhere."
   (cond ((integerp part) part)
         ((and (markerp part)
               (csvdt--same-text-p (marker-buffer part)))
@@ -862,25 +880,15 @@ entirely here) and one pointing nowhere has no position to give."
   "Return ITEMS as whole-line (BEG . END) conses, in buffer order.
 ITEMS may hold conses or overlays, in any order, overlapping or repeated.
 Dead overlays are dropped, every range is widened to whole lines, and
-ranges that touch are merged, so a selection that happens to abut a
-banked stretch becomes one, and no line is ever sent twice.
-SOURCE names where ITEMS came from, for the error a malformed one raises;
-it defaults to `csvdt-banked-lines-function', which is the usual source
-and the one a reader would think to check."
-  ;; The naming below is per item, so a function returning something that
-  ;; is not a list at all, a vector, a number, a string, reached dolist
-  ;; and signalled the raw wrong-type-argument this exists to prevent.
+ranges that touch are merged, so no line is sent twice.  SOURCE names where
+ITEMS came from, for the error a malformed one raises; it defaults to
+`csvdt-banked-lines-function'."
   (unless (listp items)
     (user-error "%s reported %S, which is not a list of positions or overlays"
                 (or source "`csvdt-banked-lines-function'") items))
   (let ((ranges '()))
     (dolist (item items)
       ;; nil is tolerated: a package filtering its own list produces them.
-      ;; Anything else that is neither a pair of positions nor an overlay
-      ;; is a mistake worth naming, rather than a raw wrong-type-argument
-      ;; from inside, and a cons with junk for an end, (5 . nil) say, is
-      ;; the same mistake in better disguise: left unchecked it would be
-      ;; dropped without a word further down.
       (unless (or (null item) (overlayp item)
                   (and (consp item)
                        (or (integerp (car item)) (markerp (car item)))
@@ -890,17 +898,15 @@ and the one a reader would think to check."
       (let ((bounds (csvdt--piece-bounds item)))
         (when bounds
           (let ((range (csvdt--whole-lines (car bounds) (cdr bounds))))
-            ;; A pair naming nothing, both ends past the buffer, say,
-            ;; widens to nothing.  Dropped, so it cannot pad the count of
-            ;; stretches or make an empty run look like a successful one.
+            ;; A pair naming nothing widens to nothing and is dropped, so
+            ;; it cannot make an empty run look like a successful one.
             (when (< (car range) (cdr range))
               (push range ranges))))))
     (csvdt--merge-ranges ranges)))
 
 (defun csvdt--merge-ranges (ranges)
   "Return RANGES sorted into buffer order, touching or overlapping ones joined.
-Fresh conses throughout, so the list handed in is neither reordered nor
-rewritten."
+The conses are fresh, so the list handed in is left alone."
   (let ((sorted (sort (copy-sequence ranges)
                       (lambda (a b) (< (car a) (car b)))))
         (merged '()))
@@ -912,46 +918,51 @@ rewritten."
 
 (defun csvdt--drop-covered (ranges)
   "Return RANGES with any part an earlier one already covers removed.
-Needed after widening, which brings ranges together that were apart: two
-banked lines inside one record that spans several widen to that same
-record, and it went out once per range: a duplicate row, valid CSV,
-clean-looking, and nothing in a count to question it.
+Widening to records can bring ranges onto the same record, and it would go
+out once per range.  Order is left as given, unlike `csvdt--merge-ranges'.
 
-Order is left exactly as given, unlike `csvdt--merge-ranges'.  Buffer
-order is something `csvdt--run' asks of its caller rather than something
-it imposes, and sorting here would quietly take that decision away from
-whoever assembled the list."
-  (let ((kept '()))
+Ranges that begin in buffer order, which every list a command builds does,
+are done in one pass: whatever the earlier ones cover that lies at or past
+the start of the next is an unbroken stretch ending at the furthest end
+seen.  Any other order is compared range against range."
+  (let ((kept '())
+        (ascending (let ((previous nil) (sorted t))
+                     (dolist (range ranges)
+                       (when (and previous (< (car range) previous))
+                         (setq sorted nil))
+                       (setq previous (car range)))
+                     sorted))
+        (furthest nil))
     (dolist (range ranges)
       (let ((beg (car range))
             (end (cdr range))
             (trimmed nil))
-        (dolist (seen kept)
-          (when (and (< beg (cdr seen)) (> end (car seen)))
-            (setq trimmed t)
-            (cond
-             ;; Wholly inside something already going out: nothing left.
-             ((and (>= beg (car seen)) (<= end (cdr seen))) (setq beg end))
-             ;; Overlapping at one end: keep the part that is new.
-             ((>= beg (car seen)) (setq beg (cdr seen)))
-             ((<= end (cdr seen)) (setq end (car seen))))))
-        ;; An empty range that nothing covered is passed on as it came: a
-        ;; whole-buffer run over an empty buffer is one of those, and
-        ;; dropping it left the run with no range at all.  Only a range
-        ;; trimmed away to nothing is really gone.
+        (if ascending
+            (when (and furthest (< beg furthest))
+              (setq trimmed t
+                    beg (min end furthest)))
+          (dolist (seen kept)
+            (when (and (< beg (cdr seen)) (> end (car seen)))
+              (setq trimmed t)
+              (cond
+               ((and (>= beg (car seen)) (<= end (cdr seen))) (setq beg end))
+               ((>= beg (car seen)) (setq beg (cdr seen)))
+               ((<= end (cdr seen)) (setq end (car seen)))))))
+        (setq furthest (max (or furthest end) end))
+        ;; An empty range nothing covered is kept: a whole-buffer run over
+        ;; an empty buffer is one.  Only a range trimmed to nothing goes.
         (when (or (not trimmed) (< beg end))
           (push (cons beg end) kept))))
     (nreverse kept)))
 
 (defun csvdt-banked-lines-from-overlays (property)
   "Return a function reporting overlays in the buffer that carry PROPERTY.
-A fallback for a package that exposes no function of its own: naming the
-property it happens to set reaches into its internals, and can break when
-those change.  Prefer pointing `csvdt-banked-lines-function' straight at
-a function the package documents, where there is one.
+For a package that exposes no function of its own.  Naming a property it
+happens to set reaches into its internals, so prefer pointing
+`csvdt-banked-lines-function' at a function the package documents.
 
-Most packages that bank lines mark them with an overlay, so where there is
-not, this is usually the whole of plugging one in:
+Most packages that bank lines mark them with an overlay, so this is
+usually the whole of plugging one in:
 
     (setq csvdt-banked-lines-function
           (csvdt-banked-lines-from-overlays \\='some-package-banked))
@@ -966,21 +977,15 @@ being shared with whatever else highlights that buffer."
 
 (defun csvdt--region-ranges ()
   "Return the active region as (BEG . END) conses, or nil when there is none.
-`region-bounds' rather than `region-beginning' and `region-end', because
-a region need not be one stretch: a rectangle is one piece per line, and a
-package that defines its own selection through `region-extract-function'
-reports its pieces the same way.  Taking the two ends instead would swallow
-everything lying between them."
+A region need not be one stretch: a rectangle is one piece per line, and a
+package defining its own selection through `region-extract-function'
+reports its pieces the same way, hence `region-bounds'."
   (and (use-region-p) (region-bounds)))
 
 (defun csvdt--banked-lines ()
   "Return what `csvdt-banked-lines-function' reports, or nil.
-A function that is named but not defined is a configuration error rather
-than an absence of banked lines: the bare \"Symbol's function definition
-is void\" does not say that the setting is what is wrong, and returning nil
-instead would run over the whole buffer without a word.
-The likeliest cause is the package that defines it not being loaded, or
-being older than the function named."
+A function that is named but not defined is a configuration error, most
+likely from the package that defines it not being loaded."
   (when csvdt-banked-lines-function
     (unless (functionp csvdt-banked-lines-function)
       (user-error
@@ -991,19 +996,14 @@ being older than the function named."
 
 (defun csvdt--mid-line-boundary-p (items)
   "Non-nil when a piece in ITEMS begins or ends inside a line.
-ITEMS are the raw pieces a command was given (conses or overlays, as
-`csvdt--normalise-ranges' takes them) asked before normalising widens
-them, because afterwards every range is whole lines and nothing is left
-to notice.
+ITEMS are the raw pieces a command was given, conses or overlays, before
+`csvdt--normalise-ranges' widens them.
 
-An end sits on a line boundary at the start of a line, at the end of
-one, or at the end of the buffer.  The end of a line, because an
-overlay covering a line usually stops before the newline (that is the
-shape `csvdt-banked-lines-from-overlays' reports) and the row it
-names is whole: widening adds only the newline, and calling that a
-widened selection put the notice on every banked run.  A beginning is
-on a boundary only at the start of a line: beginning at the end of one
-pulls that entire line in, which is exactly the widening this reports."
+An end is on a boundary at the start of a line, at the end of one, or at
+the end of the buffer.  The end of a line counts because an overlay covering
+a line usually stops before the newline.  A beginning is on a boundary only
+at the start of a line.  A zero-width piece widens to a whole line it holds
+no character of, and is reported."
   (save-excursion
     (seq-some
      (lambda (item)
@@ -1011,9 +1011,6 @@ pulls that entire line in, which is exactly the widening this reports."
          (when bounds
            (let ((low (car bounds))
                  (high (min (cdr bounds) (point-max))))
-             ;; A zero-width piece widens to its entire containing line,
-             ;; a row the selection held no character of, which is the
-             ;; largest widening there is, so it is reported.
              (if (= low high)
                  t
                (or (progn (goto-char low) (not (bolp)))
@@ -1022,20 +1019,55 @@ pulls that entire line in, which is exactly the widening this reports."
                                    (= high (point-max)))))))))))
      items)))
 
+(defun csvdt--selection-ranges (banked region)
+  "Return what BANKED and REGION pieces cover, as a plist.
+BANKED and REGION are the raw pieces from `csvdt--banked-lines' and
+`csvdt--region-ranges'.  :banked and :region are each normalised under
+their own name, so a malformed piece is blamed on its source, and :all is
+the two merged, which also joins a region to a banked stretch it abuts."
+  (let ((banked (csvdt--normalise-ranges banked))
+        (region (csvdt--normalise-ranges region "`region-bounds'")))
+    (list :banked banked :region region
+          :all (csvdt--normalise-ranges (append banked region)))))
+
+(defun csvdt--plan (ranges args &optional snapped records)
+  "Work out what a run over RANGES with ARGS covers.
+RANGES are (BEG . END) conses in buffer order.  Returns a plist:
+:ranges    the ranges widened to whole lines, then to whole records;
+:snapped   non-nil when widening to lines changed them, or SNAPPED is
+           non-nil because the caller's raw selection had a boundary
+           inside a line;
+:spanned   non-nil when widening to records changed them;
+:cut       what the narrowing cuts, from `csvdt--narrowing-cuts-record-p';
+:header    the header record to put in front, or nil;
+:records   the index of quoted fields, which holds all that was read.
+RECORDS is an index to reuse."
+  (let* ((lines (mapcar (lambda (range)
+                          (csvdt--whole-lines (car range) (cdr range)))
+                        ranges))
+         (dialect (csvdt--dialect args))
+         (records (or records
+                      (csvdt--make-records (car dialect) (cdr dialect))))
+         (settled (csvdt--settle-ranges lines records)))
+    (list :ranges settled
+          :snapped (or snapped (not (equal lines ranges)))
+          :spanned (not (equal settled lines))
+          :cut (csvdt--narrowing-cuts-record-p
+                settled (car dialect) (cdr dialect) records)
+          :header (csvdt--header-line (caar settled) args records)
+          :records records)))
+
 (defun csvdt--run (ranges args &optional snapped)
   "Pipe RANGES of this buffer through csvdt with ARGS and show the result.
-RANGES is a list of (BEG . END) conses in buffer order; more than one is
-how banked lines reach csvdt as a single file.  Ranges below the buffer's
-header are sent with that header in front of them, so csvdt does not take
-the first selected row for one.  On failure the exit status and csvdt's
-own message are reported, since it writes a specific reason for every
-refusal; on success anything csvdt said on stderr (how much did not
-convert, rows a re-read would take for comments) is shown with the
-summary rather than thrown away.
-SNAPPED says the caller's raw selection had a boundary inside a line, so
-the run covers whole rows the selection only touched.  The commands
-compute it with `csvdt--mid-line-boundary-p' before normalising, since
-normalised ranges are already whole lines and carry no sign of it."
+RANGES is a list of (BEG . END) conses in buffer order, more than one being
+how banked lines reach csvdt as one file.  They are widened as
+`csvdt--plan' says, and ranges below the buffer's header go with that
+header in front, so csvdt does not take the first selected row for one.
+SNAPPED says the caller's raw selection had a boundary inside a line,
+which `csvdt--mid-line-boundary-p' reports before normalizing hides it.
+
+On failure the exit status and csvdt's own message are reported.  On
+success anything csvdt said on stderr is shown with the summary."
   (let ((files (csvdt--file-arguments args)))
     (when files
       (user-error
@@ -1043,36 +1075,12 @@ normalised ranges are already whole lines and carry no sign of it."
        (string-join files ", ")
        "these commands send it the lines on standard input")))
   (let* ((program (csvdt--program))
-         ;; Whatever was selected, whole records are what go out. Half a line
-         ;; is half a record: a selection starting mid-row hands csvdt a
-         ;; truncated field, which it reads as a value rather than as damage.
-         ;; Reported below when it makes a difference, so a selection that was
-         ;; not what it looked like says so.
-         (widened (mapcar (lambda (range)
-                            (csvdt--whole-lines (car range) (cdr range)))
-                          ranges))
-         (snapped (or snapped (not (equal widened ranges))))
-         (ranges widened)
-         ;; Whole lines are not yet whole records, though, because a quoted
-         ;; field may hold newlines and then one record covers several lines.
-         ;; A range that begins inside such a field looks like a row and is
-         ;; the tail of one; it would convert cleanly and report success, with
-         ;; the cut field arriving as data nobody wrote. It is pushed out to
-         ;; the record boundaries instead, and said, since the run then covers
-         ;; more than was selected.
-         (dialect (csvdt--dialect args))
-         ;; Merged again afterwards: widening can bring two ranges onto the
-         ;; same record, and sending it once per range would put a duplicate
-         ;; row in the output that nothing else would question.
-         (recorded (csvdt--drop-covered
-                    (mapcar (lambda (range)
-                              (csvdt--whole-records (car range) (cdr range)
-                                                    (car dialect) (cdr dialect)))
-                            ranges)))
-         (spanned (not (equal recorded ranges)))
-         (ranges recorded)
-         (cut (csvdt--narrowing-cuts-record-p ranges (car dialect) (cdr dialect)))
-         (header (csvdt--header-line (caar ranges) args))
+         (plan (csvdt--plan ranges args snapped))
+         (ranges (plist-get plan :ranges))
+         (snapped (plist-get plan :snapped))
+         (spanned (plist-get plan :spanned))
+         (cut (plist-get plan :cut))
+         (header (plist-get plan :header))
          (source (current-buffer))
          (errfile (make-temp-file "csvdt-stderr"))
          ;; UTF-8 in both directions rather than whatever the locale makes the
@@ -1260,83 +1268,45 @@ is measured across what was banked rather than across what was skipped."
 (defun csvdt-run-dwim (args)
   "Run csvdt with ARGS on the banked lines and the region together.
 Both, not one or the other: the region is usually the piece not banked
-yet, and dropping either would mean running over less than was picked out.
-They are merged, so a selection abutting or inside a banked stretch does
-not send a line twice.  With neither, the whole buffer."
+yet.  They are merged, so a selection abutting or inside a banked stretch
+does not send a line twice.  With neither, the whole buffer."
   (interactive (list (csvdt--read-arguments)))
-  ;; Each list is normalised under its own name, so a malformed piece is
-  ;; blamed on whichever source reported it, normalising the two together
-  ;; pointed every complaint at `csvdt-banked-lines-function', including
-  ;; for pieces the region supplied.  The merged result is normalised once
-  ;; more, which is what merges a selection into a banked stretch it abuts.
   (let* ((banked-raw (csvdt--banked-lines))
          (region-raw (csvdt--region-ranges))
-         (ranges (csvdt--normalise-ranges
-                  (append (csvdt--normalise-ranges banked-raw)
-                          (csvdt--normalise-ranges region-raw
-                                                   "`region-bounds'")))))
+         (ranges (plist-get (csvdt--selection-ranges banked-raw region-raw)
+                            :all)))
     (csvdt--run (or ranges (list (cons (point-min) (point-max)))) args
                 (and ranges
                      (csvdt--mid-line-boundary-p
                       (append banked-raw region-raw))))))
 
-(defun csvdt--describe-dialect ()
-  "The dialect a run started from the prefilled arguments would read with.
-Which character quotes a field, and which separates them, decide where a
-record ends, and `csvdt-describe-run' answers before any argument line
-has been typed, so `csvdt-default-arguments' is the best statement of
-intent available to it.  A prefill that will not split is not worth
-failing this command over, since it is the one command that must not
-raise what it is here to explain: the plain dialect stands in, and a run
-whose own arguments name another may cover a little more than described."
-  (or (ignore-errors
-        (csvdt--dialect (csvdt--split-arguments csvdt-default-arguments)))
-      (cons ?\" ?,)))
-
 ;;;###autoload
 (defun csvdt-describe-run ()
   "Say what a run would cover, without running anything.
-For when the output covers more or less than expected: it reports what
-this package can see, which is not always what the buffer looks like.
-Lines that merely look banked (highlighted by something else, or banked
-by a package `csvdt-banked-lines-function' does not point at) are not
-banked as far as csvdt is concerned, and this says so.
-
-Counted the way a run counts: whole records, so a stretch reaching into a
-field that spans lines is described as reaching over all of it."
+For when the output covers more or less than expected.  It reports what
+this package sees, which is not always what the buffer looks like: lines
+that merely look banked, highlighted by something else or banked by a
+package `csvdt-banked-lines-function' does not point at, are not banked as
+far as csvdt is concerned.  Counted as a run counts, in whole records.  The
+dialect is the one `csvdt-default-arguments' gives, since no arguments have
+been typed yet."
   (interactive)
-  (let* ((dialect (csvdt--describe-dialect))
-         ;; Settled the way a run settles them: normalised, then widened out
-         ;; to whole records and merged again. Stopping at the normalising
-         ;; would describe two banked lines inside one record that spans
-         ;; several as two stretches of one line, where the run makes one
-         ;; stretch of three. This command is reached for when a run covered
-         ;; something unexpected, so being wrong exactly where the run is
-         ;; surprising is the one thing it cannot afford.
-         (settle
-          (lambda (rs)
-            (csvdt--drop-covered
-             (mapcar (lambda (r)
-                       (csvdt--whole-records (car r) (cdr r)
-                                             (car dialect) (cdr dialect)))
-                     rs))))
-         (reported (and (functionp csvdt-banked-lines-function)
-                       (csvdt--banked-lines)))
-         (banked (funcall settle (csvdt--normalise-ranges reported)))
-         ;; Normalised, because this command exists to say what a run would
-         ;; cover and a run normalises. Describing the raw pieces reported a
-         ;; three-line rectangle as three stretches where the run makes one.
-         (region (funcall settle
-                          (csvdt--normalise-ranges (csvdt--region-ranges)
-                                                   "`region-bounds'")))
-         (ranges (funcall settle
-                          (csvdt--normalise-ranges (append reported region))))
-         ;; Asked of what a run would send, which with nothing banked or
-         ;; selected is the accessible portion, the same range the run
-         ;; passes, so the same answer.
-         (cut (csvdt--narrowing-cuts-record-p
-               (or ranges (list (cons (point-min) (point-max))))
-               (car dialect) (cdr dialect)))
+  (let* ((args (ignore-errors
+                 (csvdt--split-arguments csvdt-default-arguments)))
+         ;; This command must not raise what it is here to explain, so an
+         ;; undefined banking function is described, not signalled.
+         (selection (csvdt--selection-ranges
+                     (and (functionp csvdt-banked-lines-function)
+                          (csvdt--banked-lines))
+                     (csvdt--region-ranges)))
+         (all (plist-get selection :all))
+         (plan (csvdt--plan (or all (list (cons (point-min) (point-max))))
+                            args))
+         (records (plist-get plan :records))
+         (ranges (and all (plist-get plan :ranges)))
+         (banked (csvdt--settle-ranges (plist-get selection :banked) records))
+         (region (csvdt--settle-ranges (plist-get selection :region) records))
+         (cut (plist-get plan :cut))
          (describe
           (lambda (rs)
             (let ((lines (apply #'+ (mapcar (lambda (r)
@@ -1353,7 +1323,6 @@ field that spans lines is described as reaching over all of it."
                (count-lines (point-min) (point-max))))
      (cond ((null csvdt-banked-lines-function)
             "nothing, `csvdt-banked-lines-function' is unset")
-           ;; The one command that must not raise what it is here to explain.
            ((not (functionp csvdt-banked-lines-function))
             (format "nothing, `csvdt-banked-lines-function' names %S, \
 which is not defined"
@@ -1361,14 +1330,8 @@ which is not defined"
            (banked (funcall describe banked))
            (t "nothing reported -- lines that look banked may not be"))
      (if region (funcall describe region) "none")
-     ;; The run says this too, but the command exists to be asked *before*
-     ;; a run, and a record the narrowing has cut in half is the plainest
-     ;; case of what it promises to report: what this package can see
-     ;; differing from what the buffer looks like. Only when there is one,
-     ;; so an ordinary buffer's answer is unchanged.
-     ;; The note is its own sentence, not under a "Narrowing:" label, which
-     ;; would read "Narrowing: last record cut short by the narrowing".  One
-     ;; phrasing is the point of the helper.
+     ;; Its own sentence, since a "Narrowing:" label would read "Narrowing:
+     ;; last record cut short by the narrowing".
      (if cut
          (let ((note (csvdt--cut-note cut)))
            (format "  %s%s." (upcase (substring note 0 1)) (substring note 1)))

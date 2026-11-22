@@ -89,29 +89,27 @@ Emacs add-on usually pins a version, and the subpackage would stop being
 however it is installed, the commands run interpreted unless you compile them
 yourself.
 
-Whether that is worth doing depends on which path a run takes, and the answer
-is not the obvious one. Measured on a 25 MB, 500,001-row CSV with `-H -p -r 1`
-under Emacs 30.2, three runs each:
+Whether that is worth doing depends on which path a run takes. Measured on a
+25 MB, 500,001-row CSV with `-H -p -r 1` under Emacs 31.1, three runs each, as
+the time from starting the command to having its result:
 
 | | interpreted | byte-compiled |
 | --- | --- | --- |
-| whole buffer | 1.37 s | 1.41 s |
-| 2000 banked ranges | 4.6–4.8 s | 4.1–4.2 s |
+| whole buffer | 0.60–0.81 s | 0.60–0.64 s |
+| 2000 banked ranges | 0.15–0.25 s | 0.12 s |
+| 20000 banked ranges | 0.37–0.46 s | 0.19–0.21 s |
 
 A whole-buffer run gains nothing, and a bigger file does not change that. It
-is handed straight to the process with `call-process-region`, which copies
-nothing however large the buffer is, so no Elisp ever touches a row: of that
-1.37 s the csvdt process is 0.32 s, most of the rest is Emacs encoding the
-buffer out as UTF-8 and reading the result back, and some 0.18 s is left for
-everything else, all of this package's Lisp included. Compiling can only
-attack that last slice. As the file grows, the process and the encoding grow
-with it while that slice stays where it is.
+is handed to the process without copying, so no Elisp touches a row: most of
+the time is csvdt itself, Emacs encoding the buffer out as UTF-8 and reading
+the result back. Compiling can only attack the small slice that is left.
 
-The multi-range path is where compiling pays. A region in several pieces, or
-banked lines, cannot be handed over as one range: the text is assembled first,
-record boundaries are worked out per piece, and covered pieces are dropped.
-That is a real loop over Lisp objects, and compiling is worth about a tenth of
-it. So compile if you bank lines, and do not expect a large file to speed up.
+Banked lines, or a region in several pieces, send only the lines picked, but
+where each begins is worked out in Lisp,
+in one pass over the buffer for the whole selection. The time follows the
+number of ranges, not that number times the size of the file. Compiling is
+worth about half of it, so compile if you bank lines, and do not expect a
+large file to speed up.
 
 Byte-compiling is also a check. `run-tests.sh` compiles as a gate and treats
 any warning as a failure, so a release compiles clean; a warning against your

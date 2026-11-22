@@ -41,7 +41,7 @@
 (defvar test-csvdt-ran 0
   "How many checks were reached.")
 
-(defconst test-csvdt-expected 303
+(defconst test-csvdt-expected 307
   "How many checks this file makes.
 Raise it with the count.  A run reporting fewer has not passed, whatever
 the ones it did reach said.
@@ -2692,6 +2692,86 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                           t))
                     (error 'raw-error))
                   t)
+
+;;; Many ranges cost one pass over the buffer
+;;
+;; Working out where records begin used to read the buffer from its start
+;; for each end of each range, so the cost grew with the square of the
+;; number of banked lines.  Counting searches is exact where timing is not.
+
+(with-temp-buffer
+  (dotimes (i 300) (insert (format "\"q%d\",%d\n" i i)))
+  (let ((ranges '())
+        (searches 0))
+    (dotimes (i 100)
+      (goto-char (point-min))
+      (forward-line (* i 3))
+      (push (cons (point) (line-beginning-position 2)) ranges))
+    (setq ranges (nreverse ranges))
+    (cl-letf* ((original (symbol-function 'search-forward))
+               ((symbol-function 'search-forward)
+                (lambda (&rest args)
+                  (setq searches (1+ searches))
+                  (apply original args))))
+      (csvdt--plan ranges '("-H" "-p")))
+    (test-csvdt-check "100 banked lines read the buffer once, not 100 times"
+                      (< searches 1500) t)))
+
+;; Dropping what an earlier range covers compared every range with every
+;; earlier one.  Ranges in buffer order are done in one pass now.  Checked
+;; as sets of positions: no position is sent twice, and every position that
+;; was asked for is still sent.
+
+(defun test-csvdt-positions (ranges)
+  "Return the positions RANGES cover, as a sorted list with repeats kept."
+  (let ((positions '()))
+    (dolist (range ranges)
+      (let ((position (car range)))
+        (while (< position (cdr range))
+          (push position positions)
+          (setq position (1+ position)))))
+    (sort positions #'<)))
+
+(let ((state 7)
+      (wrong 0))
+  (dotimes (_ 300)
+    (let ((start 0)
+          (ranges '()))
+      (dotimes (_ 12)
+        (setq state (mod (+ (* state 1103515245) 12345) 2147483648))
+        (setq start (+ start (mod (/ state 65536) 6)))
+        (push (cons start (+ start (mod (/ state 4096) 9))) ranges))
+      (setq ranges (nreverse ranges))
+      (unless (equal (test-csvdt-positions (csvdt--drop-covered ranges))
+                     (delete-dups (test-csvdt-positions ranges)))
+        (setq wrong (1+ wrong)))))
+  (test-csvdt-check "ranges in buffer order lose repeats and nothing else"
+                    wrong 0))
+
+(let ((ranges (let ((list '()))
+                (dotimes (i 6000) (push (cons (* i 10) (+ (* i 10) 10)) list))
+                (nreverse list)))
+      (start (float-time)))
+  (csvdt--drop-covered ranges)
+  (test-csvdt-check "6000 ranges are trimmed in well under a second"
+                    (< (- (float-time) start) 0.5) t))
+
+;;; The run and the description settle ranges in one place
+
+(with-temp-buffer
+  (insert test-csvdt-headed)
+  (let ((planned 0))
+    (advice-add 'csvdt--plan :before (lambda (&rest _) (setq planned (1+ planned)))
+                '((name . test-count)))
+    (unwind-protect
+        (progn
+          (csvdt--run (list (cons (point-min) (point-max))) '("-H" "-p"))
+          (let ((after-run planned))
+            (current-message-of (csvdt-describe-run))
+            (test-csvdt-check "a run and a description both go through csvdt--plan"
+                              (list after-run (- planned after-run))
+                              '(1 1))))
+      (advice-remove 'csvdt--plan 'test-count))))
 
 ;;; Documentation reads as it was meant to
 ;;
