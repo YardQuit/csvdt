@@ -22,20 +22,14 @@
 # The monthly build *calls* this workflow rather than this one listening for
 # a release: a release created with GITHUB_TOKEN raises no event, by design,
 # so `on: release` would never fire and the RPM would silently stop tracking
-# releases. A pushed tag does raise an event, which is why the tag and not
-# the release is what this workflow listens for.
+# releases. The monthly build runs when a version tag is pushed, so a tagged
+# version reaches this workflow through that call. Listening for the tag here
+# as well built and published the RPM twice for every release.
 name: RPM
 
 on:
-  # A version tag is a release, and a release is the only thing this
-  # workflow packages. Matched by shape rather than listed, and only the
-  # three-part form: rpm-release and the monthly build's archive tags all
-  # live in this namespace and none of them is a released version.
-  #
-  # Master is deliberately not here. A push to it changes nothing anyone can
-  # install until a version is tagged.
-  push:
-    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  # No push trigger: a version tag starts the monthly build, which calls this
+  # workflow, and a push to master changes nothing anyone can install.
   # Every path the package is built out of. A change to the README does not
   # need Fedora's opinion; a change to the spec, the options, the front end
   # or the dependency requirements does.
@@ -448,7 +442,7 @@ jobs:
     needs: build
     if: >-
       github.repository == 'YardQuit/csvdt' &&
-      (inputs.publish || github.event_name == 'push')
+      inputs.publish
     runs-on: ubuntu-latest
     # The build job next door has one for the same reason: this is a dozen API
     # calls against a service that can stop answering, and without a bound a
