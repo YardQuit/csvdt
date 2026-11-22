@@ -27,31 +27,15 @@ use std::error::Error;
 //
 // Unix only: this is a gap std leaves on every platform, but the descriptor
 // is the part of it there is a way to ask about.
-#[cfg(unix)]
 pub(crate) fn require_writable_stdout() -> Result<(), Box<dyn Error>> {
     use std::io::Write;
-    use std::os::fd::AsFd;
-
-    let probed = std::io::stdout()
-        .as_fd()
-        .try_clone_to_owned()
-        .map(std::fs::File::from)
-        .and_then(|mut duplicate| duplicate.write(&[]));
-    match probed {
-        Err(error) if error.raw_os_error() == Some(libc::EBADF) => {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "standard output cannot be written to. It is usually '<' \
-                 where '>' was meant: the output would have gone nowhere and \
-                 the run would have reported success".to_string())))
-        },
-        _ => Ok(()),
-    }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn require_writable_stdout() -> Result<(), Box<dyn Error>> {
-    Ok(())
+    refuse_closed_stream(
+        duplicate(std::io::stdout()),
+        |stream| stream.write(&[]),
+        "standard output cannot be written to. It is usually '<' where '>' \
+         was meant: the output would have gone nowhere and the run would have \
+         reported success",
+    )
 }
 
 // The same gap on the way in. std hides EBADF on a read as well, and hides it
@@ -62,32 +46,63 @@ pub(crate) fn require_writable_stdout() -> Result<(), Box<dyn Error>> {
 //
 // A zero-length read consumes no byte and does not wait: a pipe with no
 // writer yet answers it at once, as does a terminal.
-#[cfg(unix)]
 pub(crate) fn require_readable_stdin() -> Result<(), Box<dyn Error>> {
     use std::io::Read;
-    use std::os::fd::AsFd;
+    refuse_closed_stream(
+        duplicate(std::io::stdin()),
+        |stream| stream.read(&mut []),
+        "standard input cannot be read from. It is usually '>' where '<' was \
+         meant, which has the shell empty the file on the way past: the run \
+         would have read nothing and reported success, which is what an empty \
+         input does",
+    )
+}
 
-    let probed = std::io::stdin()
-        .as_fd()
-        .try_clone_to_owned()
-        .map(std::fs::File::from)
-        .and_then(|mut duplicate| duplicate.read(&mut []));
+// Refuses with MESSAGE a standard stream that PROBE finds closed, which on
+// Unix is EBADF. Elsewhere there is no such answer to look for, and nothing
+// is refused.
+fn refuse_closed_stream(
+    stream: Option<std::fs::File>,
+    probe: impl FnOnce(&mut std::fs::File) -> std::io::Result<usize>,
+    message: &str,
+) -> Result<(), Box<dyn Error>> {
+    #[cfg(unix)]
+    let closed = |error: &std::io::Error| error.raw_os_error() == Some(libc::EBADF);
+    #[cfg(not(unix))]
+    let closed = |_: &std::io::Error| false;
+    // A descriptor that cannot even be duplicated is closed too.
+    let probed = stream
+        .ok_or_else(|| std::io::Error::from_raw_os_error(EBADF))
+        .and_then(|mut stream| probe(&mut stream));
     match probed {
-        Err(error) if error.raw_os_error() == Some(libc::EBADF) => {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "standard input cannot be read from. It is usually '>' where \
-                 '<' was meant, which has the shell empty the file on the way \
-                 past: the run would have read nothing and reported success, \
-                 which is what an empty input does".to_string())))
-        },
+        Err(error) if closed(&error) => Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput, message.to_string()))),
         _ => Ok(()),
     }
 }
 
+// The error a closed descriptor gives, where the platform has one to give.
+#[cfg(unix)]
+const EBADF: i32 = libc::EBADF;
 #[cfg(not(unix))]
-pub(crate) fn require_readable_stdin() -> Result<(), Box<dyn Error>> {
-    Ok(())
+const EBADF: i32 = 0;
+
+// A File of its own on one of the run's standard streams, so it can be
+// asked what a file is asked without closing the stream when it is dropped.
+// None where the platform cannot duplicate it.
+#[cfg(unix)]
+fn duplicate(stream: impl std::os::fd::AsFd) -> Option<std::fs::File> {
+    stream.as_fd().try_clone_to_owned().ok().map(std::fs::File::from)
+}
+
+#[cfg(windows)]
+fn duplicate(stream: impl std::os::windows::io::AsHandle) -> Option<std::fs::File> {
+    stream.as_handle().try_clone_to_owned().ok().map(std::fs::File::from)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn duplicate<T>(_stream: T) -> Option<std::fs::File> {
+    None
 }
 
 // The identity of an open file as the platform tells it: device and inode on
@@ -166,38 +181,14 @@ pub(crate) fn path_identity(path: &std::path::Path) -> Option<(u64, u64)> {
     file_identity(&std::fs::File::open(path).ok()?)
 }
 
-// The identity of one of the run's own streams, standard input or standard
-// output, which carry no path to open by.
-#[cfg(unix)]
-fn stream_identity(stream: std::os::fd::BorrowedFd) -> Option<(u64, u64)> {
-    let duplicate = stream.try_clone_to_owned().ok().map(std::fs::File::from)?;
-    file_identity(&duplicate)
-}
-
 // The identity of standard input, where the platform can say.
 pub(crate) fn stdin_identity() -> Option<(u64, u64)> {
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsFd;
-        stream_identity(std::io::stdin().as_fd())
-    }
-    #[cfg(not(unix))]
-    {
-        None
-    }
+    file_identity(&duplicate(std::io::stdin())?)
 }
 
 // The identity of standard output, where the platform can say.
 pub(crate) fn stdout_identity() -> Option<(u64, u64)> {
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsFd;
-        stream_identity(std::io::stdout().as_fd())
-    }
-    #[cfg(not(unix))]
-    {
-        None
-    }
+    file_identity(&duplicate(std::io::stdout())?)
 }
 
 // Refuses an input file that is also where the output is going.
@@ -208,32 +199,22 @@ pub(crate) fn stdout_identity() -> Option<(u64, u64)> {
 // happened would be that the data was gone. `csvdt in.csv >> in.csv` is the
 // other half: the file is still whole when this is asked, and left to run it
 // would produce the input followed by a conversion of the input, also at 0.
+// cmd and PowerShell open '> in.csv' before csvdt starts just as a Unix shell
+// does, so the guard holds on Windows too.
 //
-// Compared by device and inode rather than by path, so a symbolic link, a
-// hard link, or a second spelling of the same directory is caught with it.
+// Compared by identity rather than by path, so a symbolic link, a hard link,
+// a junction, or a second spelling of the same directory is caught with it.
 //
 // Regular files only. Sharing a character device is meaningless rather than
 // damaging: `csvdt /dev/null > /dev/null` is one inode twice over and has
 // nothing to lose, and a run cannot be both ends of a pipe.
-#[cfg(unix)]
 pub(crate) fn refuse_input_that_is_also_the_output(
     path: &std::path::Path,
     input: &std::fs::File,
 ) -> Result<(), Box<dyn Error>> {
-    use std::os::fd::AsFd;
-    use std::os::unix::fs::MetadataExt;
-
-    let Ok(read_from) = input.metadata() else { return Ok(()) };
-    if !read_from.file_type().is_file() {
-        return Ok(());
-    }
-    let written_to = std::io::stdout()
-        .as_fd()
-        .try_clone_to_owned()
-        .map(std::fs::File::from)
-        .and_then(|duplicate| duplicate.metadata());
-    let Ok(written_to) = written_to else { return Ok(()) };
-    if written_to.dev() != read_from.dev() || written_to.ino() != read_from.ino() {
+    let regular = input.metadata().is_ok_and(|about| about.file_type().is_file());
+    let read_from = file_identity(input);
+    if !regular || read_from.is_none() || read_from != stdout_identity() {
         return Ok(());
     }
     let path = path.display();
@@ -244,82 +225,4 @@ pub(crate) fn refuse_input_that_is_also_the_output(
                  {path}' has already emptied it and '>> {path}' would leave \
                  the file followed by a conversion of itself. Write another \
                  file and move it into place"))))
-}
-
-// The same refusal on Windows, where a redirection destroys the file exactly
-// as it does on Unix: cmd and PowerShell both open '> in.csv' before csvdt
-// starts. Without this arm the guard would be Unix-only while KNOWN LIMITS
-// promises it on every platform, so the tests for it run on Windows too.
-//
-// A file's identity here is its volume serial number and its 64-bit index,
-// which is what dev and ino are on the other side. std has no way to ask:
-// MetadataExt::file_index is still unstable, so the call is made directly.
-// Being an identity rather than a path, it catches a junction, a hard link
-// and a second spelling of the same file, as the Unix side does.
-//
-// The handles are borrowed rather than duplicated. The Unix side clones its
-// descriptor because it needs a File to call metadata() on; nothing is opened
-// or closed here, so there is no handle to lose and no risk of closing the
-// one the run is about to write to.
-#[cfg(windows)]
-pub(crate) fn refuse_input_that_is_also_the_output(
-    path: &std::path::Path,
-    input: &std::fs::File,
-) -> Result<(), Box<dyn Error>> {
-    use std::os::windows::io::AsRawHandle;
-
-    // None where the question cannot be answered, a pipe, a console, a
-    // device, which is the same "then it is not the case" the Unix side
-    // takes for a handle it cannot stat.
-    fn identity(handle: std::os::windows::io::RawHandle) -> Option<(u32, u64)> {
-        use windows_sys::Win32::Storage::FileSystem::{
-            BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
-        };
-        let mut about = unsafe {
-            std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>()
-        };
-        // SAFETY: the handle is borrowed from a live File or from Stdout, and
-        // the struct is owned here and correctly sized for the call.
-        let answered = unsafe {
-            GetFileInformationByHandle(handle as _, &mut about)
-        };
-        if answered == 0 {
-            return None;
-        }
-        Some((
-            about.dwVolumeSerialNumber,
-            (u64::from(about.nFileIndexHigh) << 32)
-                | u64::from(about.nFileIndexLow),
-        ))
-    }
-
-    let Ok(read_from) = input.metadata() else { return Ok(()) };
-    if !read_from.file_type().is_file() {
-        return Ok(());
-    }
-    let Some(source) = identity(input.as_raw_handle()) else {
-        return Ok(());
-    };
-    let Some(destination) = identity(std::io::stdout().as_raw_handle()) else {
-        return Ok(());
-    };
-    if source != destination {
-        return Ok(());
-    }
-    let path = path.display();
-    Err(Box::new(std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        format!("'{path}' is both the input and where the output is going. \
-                 The shell opens a redirection before csvdt runs, so '> \
-                 {path}' has already emptied it and '>> {path}' would leave \
-                 the file followed by a conversion of itself. Write another \
-                 file and move it into place"))))
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(crate) fn refuse_input_that_is_also_the_output(
-    _path: &std::path::Path,
-    _input: &std::fs::File,
-) -> Result<(), Box<dyn Error>> {
-    Ok(())
 }
