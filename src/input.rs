@@ -4,6 +4,149 @@ use std::error::Error;
 use crate::platform;
 use crate::cli::*;
 
+/// Where each physical line of the input starts, kept for the records not yet
+/// written, so a record can be given the line it starts on.
+///
+/// The CSV reader stamps a record with the position where it began reading
+/// it, which is before any blank lines and comment lines it skipped on the
+/// way, so its line number points at the first of those instead of at the
+/// record. Counting here, as the bytes pass, gives the line an editor jumps
+/// to. A line is counted at each '\n', as the reader counts them, so a CRLF
+/// file counts the same as an LF one.
+#[derive(Debug)]
+pub(crate) struct LineStarts {
+    /// The offset of each line start still kept, with the line's first byte,
+    /// which says whether the reader skips the line.
+    starts: Vec<(u64, u8)>,
+    /// The number of the first line kept, counting from 1.
+    first_line: u64,
+    /// How many bytes have passed.
+    offset: u64,
+    /// Whether the next byte to pass starts a line.
+    at_line_start: bool,
+}
+
+impl Default for LineStarts {
+    fn default() -> Self {
+        LineStarts {
+            starts: Vec::new(),
+            first_line: 1,
+            offset: 0,
+            at_line_start: true,
+        }
+    }
+}
+
+/// The line starts of one input, shared between the reader that counts them
+/// and the run that asks.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Lines(std::rc::Rc<std::cell::RefCell<LineStarts>>);
+
+impl Lines {
+    /// The line the record read from POSITION starts on: the line holding
+    /// the position, moved past the blank lines, and the lines that begin
+    /// with COMMENT, that the reader skipped there.
+    pub(crate) fn line_of(&self, position: Option<&csv::Position>, comment: Option<char>) -> u64 {
+        let starts = self.0.borrow();
+        let Some(position) = position else { return starts.first_line };
+        let at = position.byte();
+        let after = starts.starts.partition_point(|&(offset, _)| offset <= at);
+        let Some(mut index) = after.checked_sub(1) else { return position.line() };
+        let skipped = |byte: u8| byte == b'\n' || byte == b'\r' || comment.is_some_and(|c| c as u8 == byte);
+        // A record ended by CRLF ends at the '\r', so the next one is read
+        // from the '\n', the last byte of the line, and starts on the line
+        // after it.
+        let mut at_line_start = starts.starts[index].0 == at;
+        if starts.starts.get(index + 1).is_some_and(|&(offset, _)| offset == at + 1) {
+            index += 1;
+            at_line_start = true;
+        }
+        if at_line_start {
+            while index + 1 < starts.starts.len() && skipped(starts.starts[index].1) {
+                index += 1;
+            }
+        }
+        starts.first_line + index as u64
+    }
+
+    /// Lets go of the line starts before the line holding POSITION, which
+    /// no record still to come can start on. Done in batches, once enough
+    /// have gathered, so a row costs a comparison rather than a removal.
+    pub(crate) fn forget_before(&self, position: Option<&csv::Position>) {
+        const BATCH: usize = 4096;
+        let Some(position) = position else { return };
+        let mut starts = self.0.borrow_mut();
+        if starts.starts.len() < BATCH {
+            return;
+        }
+        let holding = starts.starts.partition_point(|&(offset, _)| offset <= position.byte());
+        let done = holding.saturating_sub(1);
+        starts.starts.drain(..done);
+        starts.first_line += done as u64;
+    }
+}
+
+/// A reader that notes where each line starts as the bytes pass, into the
+/// Lines it was made with. It sits next to the CSV reader, outside every other
+/// wrapper, so its offsets are the ones the reader's positions count in.
+pub(crate) struct CountLines<R> {
+    /// The input being read.
+    input: R,
+    /// Where the line starts go.
+    lines: Lines,
+}
+
+/// Wraps INPUT so its line starts are noted, and returns the Lines to ask.
+pub(crate) fn count_lines<R: std::io::Read>(input: R) -> (CountLines<R>, Lines) {
+    let lines = Lines::default();
+    (CountLines { input, lines: lines.clone() }, lines)
+}
+
+impl<R: std::io::Read> std::io::Read for CountLines<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.input.read(buffer)?;
+        let bytes = &buffer[..count];
+        let mut lines = self.lines.0.borrow_mut();
+        let mut at = 0;
+        while at < bytes.len() {
+            if lines.at_line_start {
+                let offset = lines.offset + at as u64;
+                lines.starts.push((offset, bytes[at]));
+                lines.at_line_start = false;
+            }
+            match find_newline(&bytes[at..]) {
+                Some(found) => {
+                    at += found + 1;
+                    lines.at_line_start = true;
+                },
+                None => break,
+            }
+        }
+        lines.offset += count as u64;
+        Ok(count)
+    }
+}
+
+/// Where the first '\n' in BYTES is. Eight bytes are tested at a time, since
+/// every byte of the input passes through here and a line is about a hundred
+/// of them: a byte-by-byte loop cost a third of a plain run.
+pub(crate) fn find_newline(bytes: &[u8]) -> Option<usize> {
+    const ONES: u64 = u64::from_ne_bytes([0x01; 8]);
+    const HIGHS: u64 = u64::from_ne_bytes([0x80; 8]);
+    const NEWLINES: u64 = u64::from_ne_bytes([b'\n'; 8]);
+    let (chunks, _) = bytes.as_chunks::<8>();
+    let mut passed = 0;
+    for chunk in chunks {
+        let word = u64::from_ne_bytes(*chunk) ^ NEWLINES;
+        // Non-zero exactly when some byte of the word was a newline.
+        if word.wrapping_sub(ONES) & !word & HIGHS != 0 {
+            break;
+        }
+        passed += 8;
+    }
+    bytes[passed..].iter().position(|&byte| byte == b'\n').map(|found| passed + found)
+}
+
 /// How much of the input to look at when deciding whether it is UTF-16.
 pub(crate) const ENCODING_PROBE_BYTES: usize = 512;
 

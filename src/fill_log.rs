@@ -108,22 +108,18 @@ impl FillLog {
         Ok(FillLog { writer, rows: 0 })
     }
 
-    /// POSITION is the reader's, so 'line' is the line an editor jumps to and
-    /// 'record' counts records, which drift apart the moment a field holds a
-    /// newline, and the pair is what lets a reader find the row either way. A
-    /// header is read before any record and has no position of its own; it is
-    /// line 1 and record 0, which is what the reader would have said.
+    /// Logs one record, AT its physical line and its record number: 'line' is
+    /// the line an editor jumps to and 'record' counts records, which drift
+    /// apart the moment a field holds a newline, and the pair is what lets a
+    /// reader find the row either way.
     pub(crate) fn note(
         &mut self,
-        position: Option<&csv::Position>,
+        at: (u64, u64),
         fields: usize,
         width: usize,
         action: &str,
     ) -> Result<(), Box<dyn Error>> {
-        let (line, record) = match position {
-            Some(at) => (at.line(), at.record()),
-            None => (1, 0),
-        };
+        let (line, record) = at;
         self.writer.write_record([
             &line.to_string(),
             &record.to_string(),

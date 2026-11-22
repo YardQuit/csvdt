@@ -1329,7 +1329,7 @@ fn a_header_wider_than_the_widest_count_gets_the_widest_message() {
     let mut writer = csv::Writer::from_writer(Vec::new());
     // match rather than expect_err, which would ask Tally to be Debug
     // for the sake of a test alone.
-    let error = match process_stream(reader, &mut writer, &args, Some(2), None) {
+    let error = match process_stream(reader, &Lines::default(), &mut writer, &args, Some(2), None) {
         Err(error) => error.to_string(),
         Ok(_) => panic!("a header wider than the count means the input changed"),
     };
@@ -1348,7 +1348,7 @@ fn a_header_wider_than_the_widest_count_gets_the_widest_message() {
         .flexible(true)
         .from_reader(&b"a,b\n1,2,3\n"[..]);
     let mut writer = csv::Writer::from_writer(Vec::new());
-    process_stream(reader, &mut writer, &args, Some(3), None).unwrap();
+    process_stream(reader, &Lines::default(), &mut writer, &args, Some(3), None).unwrap();
     let written = String::from_utf8(writer.into_inner().unwrap()).unwrap();
     assert_eq!(written, "a,b,\n1,2,3\n");
 }
@@ -1751,10 +1751,11 @@ static COUNTING: CountingAllocator = CountingAllocator;
 /// The allocations process_stream makes over ROWS rows of twelve fields.
 fn allocations_over(rows: usize, args: &ArgumentFlags) -> u64 {
     let input = "1,2,3,4,5,6,7,8,9,10,11,12\n".repeat(rows);
-    let reader = configure_reader(args).from_reader(input.as_bytes());
+    let (counted, lines) = count_lines(input.as_bytes());
+    let reader = configure_reader(args).from_reader(counted);
     let mut writer = csv::Writer::from_writer(std::io::sink());
     let before = ALLOCATIONS.with(std::cell::Cell::get);
-    process_stream(reader, &mut writer, args, None, None).expect("the run succeeds");
+    process_stream(reader, &lines, &mut writer, args, None, None).expect("the run succeeds");
     ALLOCATIONS.with(std::cell::Cell::get) - before
 }
 
@@ -1819,7 +1820,7 @@ fn rows_reach_a_terminal_one_at_a_time() {
         let writes = std::rc::Rc::new(std::cell::Cell::new(0));
         let reader = configure_reader(&args).from_reader("1\n2\n3\n".as_bytes());
         let mut writer = csv::Writer::from_writer(CountedWrites(writes.clone()));
-        process_stream(reader, &mut writer, &args, None, None).unwrap();
+        process_stream(reader, &Lines::default(), &mut writer, &args, None, None).unwrap();
         assert_eq!(writes.get(), expected, "flush_each_record={flush_each_record}");
     }
 }
@@ -1840,4 +1841,23 @@ fn a_rule_is_read_only_when_both_its_offsets_show() {
     // A rule without daylight saving has the one offset to show.
     assert!(offsets_follow_rule(&[7200, 7200], 7200, None));
     assert!(!offsets_follow_rule(&stockholm, 10800, None));
+}
+
+// ---- counting lines ----------------------------------------------------------
+
+/// The newline search finds the first newline wherever it falls against the
+/// eight-byte steps it takes, and nothing where there is none.
+#[test]
+fn find_newline_finds_the_first_newline_anywhere() {
+    for length in 0..40 {
+        let mut bytes = vec![b'x'; length];
+        assert_eq!(find_newline(&bytes), None, "length {length}");
+        for at in 0..length {
+            bytes[at] = b'\n';
+            assert_eq!(find_newline(&bytes), Some(at), "length {length}, at {at}");
+            bytes[at] = 0x8a;
+            assert_eq!(find_newline(&bytes), None, "a byte one bit from a newline, length {length}");
+            bytes[at] = b'x';
+        }
+    }
 }

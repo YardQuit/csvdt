@@ -24,22 +24,21 @@ pub(crate) fn out_of_bound() -> Box<dyn Error> {
     Box::new(OutOfBound)
 }
 
-/// Attaches which record an out-of-bound column was measured against, in the
+/// Attaches which record an out-of-bound column was measured against, AT its
+/// line and record number, or the header where AT is None. Said in the
 /// same terms the CSV reader's own errors use: "record 3 (line: 4)" for a data
 /// row, "the header" for the header. The bare message names neither the
 /// record nor its width, which matters most in a ragged file, where finding
 /// the one short row is the task. Any other error is handed back as it was.
 pub(crate) fn locate_out_of_bound(
-    error: Box<dyn Error>, record: &csv::StringRecord, header: bool,
+    error: Box<dyn Error>, record: &csv::StringRecord, at: Option<(u64, u64)>,
 ) -> Box<dyn Error> {
     if !error.is::<OutOfBound>() {
         return error;
     }
-    let location = match (header, record.position()) {
-        (true, _) => "the header".to_string(),
-        (false, Some(position)) => format!(
-            "record {} (line: {})", position.record(), position.line()),
-        (false, None) => "this record".to_string(),
+    let location = match at {
+        None => "the header".to_string(),
+        Some((line, number)) => format!("record {number} (line: {line})"),
     };
     Box::new(std::io::Error::new(
         std::io::ErrorKind::InvalidData,

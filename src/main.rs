@@ -311,12 +311,13 @@ pub(crate) fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
             Box::new(file)
         },
     };
-    let reader = reader_builder.from_reader(end_in_newline(reject_utf16(input)?, &args));
+    let (input, lines) = count_lines(end_in_newline(reject_utf16(input)?, &args));
+    let reader = reader_builder.from_reader(input);
     if args.peek {
         answer(peek_stream(reader, &args)?.as_bytes());
         return Ok(());
     }
-    let tally = process_stream(reader, &mut writer, &args, scanned_width, fill_log.as_mut())?;
+    let tally = process_stream(reader, &lines, &mut writer, &args, scanned_width, fill_log.as_mut())?;
 
     if let Some(log) = fill_log.take() {
         let rows = log.finish()?;
@@ -335,6 +336,7 @@ pub(crate) fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
 /// what a filling mode did. Returns the tally the run reports at its end.
 pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
     mut reader: csv::Reader<R>,
+    lines: &Lines,
     writer: &mut csv::Writer<W>,
     args: &ArgumentFlags,
     scanned_width: Option<usize>,
@@ -342,6 +344,11 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
 ) -> Result<Tally, Box<dyn Error>> {
     let mut tally = Tally::default();
     let mut dt_cache: Option<DateTime<FixedOffset>> = None;
+    // Where a record is, as the fill log and the out-of-bound message give
+    // it: the physical line it starts on, and its number among the records.
+    let at = |position: Option<&csv::Position>| {
+        (lines.line_of(position, args.read_as_comment), position.map_or(0, csv::Position::record))
+    };
 
     // The width --flexible=fix pads out to. Streaming with flat memory means
     // the widest row can't be known without reading the whole file first, so
@@ -389,13 +396,13 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
                 // record-length error instead.
                 if headers.len() > width {
                     if let Some(log) = fill_log.as_deref_mut() {
-                        log.note(None, headers.len(), width, "over")?;
+                        log.note(at(headers.position()), headers.len(), width, "over")?;
                     }
                     return Err(row_wider_than_reference(
                         headers.len(), width, args.fill_mode));
                 }
                 if let (true, Some(log)) = (headers.len() < width, fill_log.as_deref_mut()) {
-                    log.note(None, headers.len(), width, "padded")?;
+                    log.note(at(headers.position()), headers.len(), width, "padded")?;
                 }
                 // Under FillMode::Off the width above is the header's own, so
                 // neither branch can fire and nothing pads: the header is the
@@ -408,7 +415,7 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
             // after this point, the loop below only calls read_record, and
             // the writer is handed the record directly.
             let new_headers = process_headers(&headers, args)
-                .map_err(|error| locate_out_of_bound(error, &headers, true))?;
+                .map_err(|error| locate_out_of_bound(error, &headers, None))?;
             if args.output_header {
                 // Asked of the header too, and only when one is actually
                 // written: a run without -p/--print-header puts no header in
@@ -440,13 +447,13 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
                 // that ended the run rather than stopping just short of the
                 // one a reader most wants to see.
                 if let Some(log) = fill_log.as_deref_mut() {
-                    log.note(record.position(), record.len(), width, "over")?;
+                    log.note(at(record.position()), record.len(), width, "over")?;
                 }
                 return Err(row_wider_than_reference(
                     record.len(), width, args.fill_mode));
             }
             if let (true, Some(log)) = (record.len() < width, fill_log.as_deref_mut()) {
-                log.note(record.position(), record.len(), width, "padded")?;
+                log.note(at(record.position()), record.len(), width, "padded")?;
             }
             // Padded before the action runs, so a column index refers to the
             // rectangular row: an action pointed at a field this row was
@@ -468,16 +475,17 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
             let width = *fill_width.get_or_insert(record.len());
             match record.len().cmp(&width) {
                 std::cmp::Ordering::Less => {
-                    log.note(record.position(), record.len(), width, "short")?
+                    log.note(at(record.position()), record.len(), width, "short")?
                 },
                 std::cmp::Ordering::Greater => {
-                    log.note(record.position(), record.len(), width, "over")?
+                    log.note(at(record.position()), record.len(), width, "over")?
                 },
                 std::cmp::Ordering::Equal => (),
             }
         }
         let (edit, new_dt_cache) = plan_row_edit(&record, args, dt_cache)
-            .map_err(|error| locate_out_of_bound(error, &record, false))?;
+            .map_err(|error| locate_out_of_bound(error, &record, Some(at(record.position()))))?;
+        lines.forget_before(record.position());
         tally.record(&edit);
         // Must be built per row: it borrows `record`, which the next
         // read_record() overwrites, so it cannot be hoisted out of the loop.

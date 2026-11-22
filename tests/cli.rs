@@ -346,6 +346,41 @@ fn a_dash_as_the_file_reads_standard_input() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// The fill log's 'line' is the physical line a record starts on, counted
+/// by csvdt: the CSV reader's own position is taken before the blank and
+/// comment lines it skips, so it named the first of those instead.
+#[test]
+fn the_fill_log_gives_the_line_each_record_starts_on() {
+    let log = |args: &[&str], input: &str| -> Vec<String> {
+        let output = csvdt().args(args).args(["--fill-log", "-"]).write_stdin(input.to_string()).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stderr).unwrap().lines().skip(1)
+            .take_while(|line| !line.starts_with("csvdt:")).map(str::to_string).collect()
+    };
+    // A header below comment lines and a blank line.
+    assert_eq!(log(&["-H", "-p", "--comment", "#", "-f=widest"], "# c1\n# c2\n\na,b\n1,2,3\n"),
+               ["4,0,2,3,-1,padded"]);
+    // A data row after a comment line and a blank one.
+    assert_eq!(log(&["--comment", "#", "-f=fix"], "a,b\n# c\n\n1\n"), ["4,1,1,2,-1,padded"]);
+    // CRLF, a blank CRLF line, and a quoted field holding a newline.
+    assert_eq!(log(&["-f=fix"], "a,b\r\n\r\n1\r\n\"x\ny\",2\r\n3\r\n"),
+               ["3,1,1,2,-1,padded", "6,3,1,2,-1,padded"]);
+    // A quoted field whose lines look blank or commented is still data.
+    assert_eq!(log(&["--comment", "#", "-f=fix"], "a,b\n\"q\n\n# not\n\",1\n# c\n\n5\n"),
+               ["8,2,1,2,-1,padded"]);
+}
+
+/// The out-of-bound message names the same line.
+#[test]
+fn an_out_of_bound_row_is_named_by_the_line_it_starts_on() {
+    csvdt()
+        .args(["--comment", "#", "-f", "-u2"])
+        .write_stdin("a,b,c\n# c\n\n1\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("record 1 (line: 4) has 1 field(s)"));
+}
+
 // ---- column actions: split / rfc3339 / utc / local / duration / remove ---
 // Every action takes its column number as its own argument (e.g. -s1),
 // glued or space-separated. -i is independent: "-i <col> <mode>".

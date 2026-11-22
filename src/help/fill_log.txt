@@ -31,8 +31,10 @@ either:
 
 |    PS> Import-Csv fill.log | Format-Table
 
-'line' is the line an editor jumps to; 'record' counts records,
-which is a different number as soon as a field holds a newline.
+'line' is the line an editor jumps to, past any comment or blank
+lines above the record, and counted at each newline, so a CRLF
+file counts as an LF one does; 'record' counts records, which is
+a different number as soon as a field holds a newline.
 'fields' is what the row arrived with, 'width' what it was
 measured against, and 'delta' the difference between them --
 how far the row is from that shape, whether or not anything was
