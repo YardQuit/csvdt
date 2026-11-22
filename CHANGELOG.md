@@ -54,16 +54,20 @@ Two properties are deliberate.
 
 ### Converting
 
-- `-r/--rfc3339`, `-u/--utc` and `-l/--local` convert a column of
-  epoch timestamps to RFC 3339, to UTC, and to a named zone.
+- `-r/--rfc3339` converts a column of Unix epoch seconds to RFC 3339.
+  `-u/--utc` and `-l/--local` take RFC 3339 timestamps and write them in UTC
+  and in a named zone.
 - `-o/--offset` shifts a column by a fixed offset. `-s/--split` splits a
   timestamp column into date and time. `-d/--duration` reports the interval
   between two columns, or between a column and each following row.
 - `--round-seconds` drops sub-second precision rather than carrying digits
   the source did not mean.
-- A value that will not parse is reported with the line, the record, the column
-  and the text that failed, and the run stops. It is never passed through, and
-  never replaced with something that looks like a timestamp.
+- A value that will not parse is written as the literal `parse_err` and the
+  run goes on to the next row. How many failed is reported on stderr at the
+  end. It is never passed through, and never replaced with something that
+  looks like a timestamp. The run exits 0, unless nothing converted at all, in
+  which case it exits 1, since that is indistinguishable from success
+  otherwise.
 
 ### Writing
 
@@ -103,11 +107,11 @@ keep the output of `csvdt --version` beside it.
 
 ### In this repository
 
-- `src/` : the program. The help text is a corpus of files under `src/help/`
+- `src/`: the program. The help text is a corpus of files under `src/help/`
   rather than string literals, and the manual page is rendered from it.
-- `tests/` : the test suite, run by `cargo test`.
-- `checks/` : differential checks against Python's `csv` and `datetime`, and
-  against this documentation, over generated input. Not the test suite; run by
-  hand before a release. See `checks/README.md`.
-- `emacs/` : the front end and its own suite.
-- `packaging/rpm/` : the spec the Fedora packages are built from.
+- `tests/`: the test suite, run by `cargo test`.
+- `checks/`: differential checks against Python's `csv` and `datetime`, and
+  against this documentation, over generated input. Not the test suite; run
+  before a release, by the monthly build and by hand. See `checks/README.md`.
+- `emacs/`: the front end and its own suite.
+- `packaging/rpm/`: the spec the Fedora packages are built from.
