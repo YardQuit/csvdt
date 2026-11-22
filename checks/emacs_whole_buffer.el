@@ -38,7 +38,7 @@
         (with-current-buffer source
           (insert text)
           (condition-case _
-              (progn (csvdt-run-buffer args)
+              (progn (csvdt--await (csvdt-run-buffer args))
                      (cons 0 (with-current-buffer "*csvdt output*"
                                (buffer-string))))
             (error (cons 1 "raised"))))

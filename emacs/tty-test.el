@@ -83,7 +83,11 @@ than what landed in the output buffer can still be typed for real."
     (transient-mark-mode 1)
     (deactivate-mark)
     (execute-kbd-macro
-     (kbd (concat (or before "C-c t") " " keys)))))
+     (kbd (concat (or before "C-c t") " " keys)))
+    ;; The run is in the background: wait for it, and signal what it
+    ;; reported if it failed, as the check records a signal.
+    (when csvdt--current-job
+      (csvdt--await csvdt--current-job))))
 
 (defun csvdt-tty-record (name got want)
   "Record NAME as reached, and as passed when GOT equals WANT."

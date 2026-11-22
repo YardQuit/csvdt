@@ -32,6 +32,10 @@
 ;; begins depends on both.  The tests check that each is an option csvdt
 ;; still reports and that no other option name appears in this file.
 ;;
+;; A run happens in the background: the selected text is written to a
+;; temporary file in pieces, csvdt is started on the file, and the result is
+;; shown by the process's sentinel, so Emacs is not held up by a large file.
+;;
 ;; A csvdt too old to know `--list-options', or one printing a format version
 ;; this file does not read, falls back to parsing the option names out of
 ;; `--help'.
@@ -1057,170 +1061,298 @@ RECORDS is an index to reuse."
           :header (csvdt--header-line (caar settled) args records)
           :records records)))
 
+(cl-defstruct (csvdt--job (:constructor csvdt--make-job))
+  "One csvdt run, from its input being written to its result being shown.
+SOURCE is the buffer the text comes from, ARGS the arguments, and INFO a
+plist of what the report needs.  PIECES is the input still to be written
+to INPUT, a temporary file, and TICK the source's modification count when
+the run began.  PROCESS, RESULT and ERRORS are the csvdt process and the
+buffers for its output and messages, once it has started, and PENDING how
+many of the output and error streams are still open.  DONE is set when
+the run has been reported, ERROR then holds the message if it failed.
+ABORT is a reason the run was stopped, and SUPERSEDED says a later run
+took its place."
+  source args info pieces tick input process result errors (pending 2)
+  done error abort superseded)
+
+(defvar csvdt--current-job nil
+  "The `csvdt--job' in progress, or nil.")
+
+(defconst csvdt--chunk-size 1048576
+  "How many characters of the buffer are written for csvdt at a time.")
+
+(defun csvdt--input-pieces (ranges header)
+  "Return the text of RANGES, with HEADER in front, as a list of pieces.
+A piece is a string or a (BEG . END) pair of positions in this buffer.  One
+range and no header go as they are.  Otherwise each stretch is made to end
+in a newline, so the next one does not run on to it."
+  (if (and (null header) (null (cdr ranges)))
+      (list (car ranges))
+    (let ((pieces '()))
+      (when header
+        (push header pieces)
+        (unless (string-suffix-p "\n" header)
+          (push "\n" pieces)))
+      (dolist (range ranges)
+        (when (< (car range) (cdr range))
+          (push range pieces)
+          (unless (eq (char-before (cdr range)) ?\n)
+            (push "\n" pieces))))
+      (nreverse pieces))))
+
+(defun csvdt--next-input (source pieces)
+  "Take up to `csvdt--chunk-size' characters from the front of PIECES.
+PIECES are as `csvdt--input-pieces' returns them and SOURCE is the buffer
+their positions are in.  Returns (TEXT . REST), REST being what is left."
+  (let ((budget csvdt--chunk-size)
+        (parts '()))
+    (while (and pieces (> budget 0))
+      (let ((piece (car pieces)))
+        (if (stringp piece)
+            (progn (push piece parts)
+                   (setq budget (- budget (length piece))
+                         pieces (cdr pieces)))
+          (let ((stop (min (cdr piece) (+ (car piece) budget))))
+            (push (with-current-buffer source
+                    (save-restriction
+                      (widen)
+                      (buffer-substring-no-properties (car piece) stop)))
+                  parts)
+            (setq budget (- budget (- stop (car piece)))
+                  pieces (if (< stop (cdr piece))
+                             (cons (cons stop (cdr piece)) (cdr pieces))
+                           (cdr pieces)))))))
+    (cons (apply #'concat (nreverse parts)) pieces)))
+
+(defun csvdt--stop (job reason &optional superseded)
+  "Stop JOB, to be reported as having failed for REASON.
+With SUPERSEDED it is dropped without a report, a later run having taken its
+place."
+  (unless (csvdt--job-done job)
+    (setf (csvdt--job-abort job) reason
+          (csvdt--job-superseded job) superseded)
+    (if (process-live-p (csvdt--job-process job))
+        (delete-process (csvdt--job-process job))
+      (csvdt--finish job))))
+
+(defun csvdt--write (job)
+  "Write the next part of JOB's input to its file, then arrange for the rest.
+The text is read from the source buffer a chunk at a time, from a timer, so
+Emacs stays responsive and the buffer is never copied whole.  Once it is
+all written csvdt is started on the file.  If the source has changed since
+the run began, what was written no longer matches it and the run is
+stopped."
+  (let ((source (csvdt--job-source job)))
+    (unless (or (csvdt--job-abort job) (csvdt--job-done job))
+      (condition-case err
+          (cond
+           ((not (and (buffer-live-p source)
+                      (eq (csvdt--job-tick job)
+                          (buffer-chars-modified-tick source))))
+            (csvdt--stop job "The buffer changed while csvdt was reading it"))
+           ((null (csvdt--job-pieces job))
+            (csvdt--launch job))
+           (t
+            (let ((next (csvdt--next-input source (csvdt--job-pieces job)))
+                  (coding-system-for-write 'utf-8-unix))
+              ;; In a buffer of its own, which has no local coding system
+              ;; to override the one bound here.
+              (with-temp-buffer
+                (write-region (car next) nil (csvdt--job-input job) t
+                              'silent))
+              (setf (csvdt--job-pieces job) (cdr next))
+              (run-at-time 0 nil #'csvdt--write job))))
+        (error (csvdt--stop job (error-message-string err)))))))
+
+(defun csvdt--sentinel (process _event)
+  "Count PROCESS, a csvdt run or its error stream, as ended.
+The run is reported once both have, so that all of csvdt's messages are
+in hand."
+  (unless (or (process-live-p process) (process-get process 'csvdt-ended))
+    (process-put process 'csvdt-ended t)
+    (let ((job (process-get process 'csvdt-job)))
+      (when (zerop (setf (csvdt--job-pending job) (1- (csvdt--job-pending job))))
+        (csvdt--finish job)))))
+
+(defun csvdt--launch (job)
+  "Start csvdt on the input JOB has written.
+csvdt reads the file rather than standard input, which is what lets it be
+written in pieces and read back at the speed of the disk, not of a pipe."
+  (let* ((program (csvdt--program))
+         (args (csvdt--job-args job))
+         (result (generate-new-buffer " *csvdt-result*"))
+         (errors (generate-new-buffer " *csvdt-errors*"))
+         (process nil))
+    (setf (csvdt--job-result job) result
+          (csvdt--job-errors job) errors)
+    (setq process
+          (make-process
+           :name "csvdt" :buffer result
+           :command (append (list program) args
+                            (if (member "--" args) '() '("--"))
+                            (list (csvdt--job-input job)))
+           ;; csvdt requires UTF-8 and refuses anything else.
+           :coding 'utf-8-unix
+           :connection-type 'pipe :noquery t
+           :stderr errors :sentinel #'csvdt--sentinel))
+    (let ((stderr (get-buffer-process errors)))
+      (set-process-coding-system stderr 'utf-8-unix)
+      (set-process-query-on-exit-flag stderr nil)
+      (set-process-sentinel stderr #'csvdt--sentinel)
+      (process-put stderr 'csvdt-job job))
+    (process-put process 'csvdt-job job)
+    (setf (csvdt--job-process job) process)))
+
+(defun csvdt--start (source args pieces info)
+  "Start a run of csvdt with ARGS on PIECES of SOURCE, returning its job.
+The run is asynchronous: this returns at once, and `csvdt--finish' shows
+the result when csvdt is done.  INFO is a plist of what the report needs.
+A run still going is stopped and its result dropped."
+  (when (and csvdt--current-job (not (csvdt--job-done csvdt--current-job)))
+    (csvdt--stop csvdt--current-job nil t))
+  (let ((job (csvdt--make-job
+              :source source :args args :info info :pieces pieces
+              :tick (buffer-chars-modified-tick source)
+              :input (make-temp-file "csvdt-input"))))
+    (setq csvdt--current-job job)
+    (run-at-time 0 nil #'csvdt--write job)
+    job))
+
+(defun csvdt--fail (job message)
+  "Record MESSAGE as why JOB failed, and say so."
+  (setf (csvdt--job-error job) message)
+  (message "%s" message))
+
+(defun csvdt--finish (job)
+  "Report JOB, whose process, if it got as far as one, has ended.
+Marks it done when it has been reported, whatever came of it."
+  (unless (csvdt--job-done job)
+    (unwind-protect
+        (unless (csvdt--job-superseded job)
+          (condition-case err
+              (csvdt--report job)
+            (error (csvdt--fail job (error-message-string err)))))
+      (dolist (buffer (list (csvdt--job-result job) (csvdt--job-errors job)))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer)))
+      (ignore-errors (delete-file (csvdt--job-input job)))
+      (when (eq csvdt--current-job job)
+        (setq csvdt--current-job nil))
+      (setf (csvdt--job-done job) t))))
+
+(defun csvdt--report (job)
+  "Show what the run JOB made, or why it failed.
+A failed run shows what csvdt wrote before failing, except one fed from the
+output buffer, whose contents are the input and are left alone."
+  (let* ((info (csvdt--job-info job))
+         (process (csvdt--job-process job))
+         (result (csvdt--job-result job))
+         (ranges (plist-get info :ranges))
+         (cut (plist-get info :cut))
+         (said (and (csvdt--job-errors job)
+                    (with-current-buffer (csvdt--job-errors job)
+                      (string-trim (buffer-string))))))
+    (cond
+     ((csvdt--job-abort job) (csvdt--fail job (csvdt--job-abort job)))
+     ((not (and (eq (process-status process) 'exit)
+                (eq (process-exit-status process) 0)))
+      (unless (or (zerop (buffer-size result))
+                  (eq (csvdt--job-source job) (get-buffer "*csvdt output*")))
+        (display-buffer (csvdt--fill-output result)))
+      ;; csvdt names itself on every line it writes, which this message has
+      ;; already said.  The cut is named because csvdt reports a short
+      ;; record as a problem with a line, which sends the reader to data
+      ;; that is not the matter.
+      (csvdt--fail job
+                   (format "csvdt exited %s: %s%s" (process-exit-status process)
+                           (if (string-empty-p said)
+                               "(no message)"
+                             (string-remove-prefix "csvdt: " said))
+                           (if cut
+                               (concat " -- note the " (csvdt--cut-note cut))
+                             ""))))
+     (t
+      (let ((out (csvdt--fill-output result)))
+        (display-buffer out)
+        (message "csvdt %s: %d lines%s%s%s%s%s"
+                 (string-join (csvdt--job-args job) " ")
+                 (with-current-buffer out
+                   (count-lines (point-min) (point-max)))
+                 (if (cdr ranges)
+                     (format " from %d stretches" (length ranges))
+                   "")
+                 (if (plist-get info :snapped)
+                     ", selection widened to whole lines"
+                   "")
+                 (if (plist-get info :spanned)
+                     ", widened to whole records: a quoted field spans lines"
+                   "")
+                 (if cut (concat ", " (csvdt--cut-note cut)) "")
+                 (if (string-empty-p said) "" (concat "\n" said))))))))
+
 (defun csvdt--run (ranges args &optional snapped)
-  "Pipe RANGES of this buffer through csvdt with ARGS and show the result.
+  "Start csvdt with ARGS on RANGES of this buffer, and return its job.
 RANGES is a list of (BEG . END) conses in buffer order, more than one being
 how banked lines reach csvdt as one file.  They are widened as
 `csvdt--plan' says, and ranges below the buffer's header go with that
 header in front, so csvdt does not take the first selected row for one.
 SNAPPED says the caller's raw selection had a boundary inside a line,
-which `csvdt--mid-line-boundary-p' reports before normalizing hides it.
+which `csvdt--mid-line-boundary-p' reports before normalising hides it.
 
-On failure the exit status and csvdt's own message are reported.  On
-success anything csvdt said on stderr is shown with the summary."
+The run happens in the background.  When csvdt is done the result is shown
+in `*csvdt output*' and a summary is given, or the exit status and csvdt's
+own message if it failed.  `csvdt--await' waits for the returned job."
   (let ((files (csvdt--file-arguments args)))
     (when files
       (user-error
        "Cannot run: csvdt would read %s and ignore the selection; %s"
        (string-join files ", ")
-       "these commands send it the lines on standard input")))
-  (let* ((program (csvdt--program))
-         (plan (csvdt--plan ranges args snapped))
-         (ranges (plist-get plan :ranges))
-         (snapped (plist-get plan :snapped))
-         (spanned (plist-get plan :spanned))
-         (cut (plist-get plan :cut))
-         (header (plist-get plan :header))
-         (source (current-buffer))
-         (errfile (make-temp-file "csvdt-stderr"))
-         ;; UTF-8 in both directions rather than whatever the locale makes the
-         ;; default process coding: csvdt requires UTF-8 and refuses anything
-         ;; else, so a buffer Emacs decoded from cp1252 has to be re-encoded on
-         ;; the way out, not passed through as the bytes it came from.  The
-         ;; -unix part normalises CRLF endings too, so a Windows CSV does not
-         ;; reach csvdt with stray carriage returns inside its last field.
-         ;;
-         ;; Bound again inside the assemble path below, since a let-binding
-         ;; made here binds whatever binding the SOURCE buffer has, and a
-         ;; buffer-local one leaves the temp buffer that assembles the text
-         ;; seeing the global value instead.  A source buffer that sets
-         ;; either variable locally would send latin-1 to a program that
-         ;; refuses it, and the run would die on csvdt's invalid-UTF-8
-         ;; error.
-         (coding-system-for-write 'utf-8-unix)
-         (coding-system-for-read 'utf-8-unix)
-         ;; Written to a scratch buffer rather than straight into the output
-         ;; buffer, because they can be the same buffer, feeding a result
-         ;; back through csvdt is a reasonable thing to do, and erasing the
-         ;; output buffer first would take the input away mid-read.
-         (result (generate-new-buffer " *csvdt-result*"))
-         (notes nil)
-         status)
-    (unwind-protect
-        (progn
-          (setq status
-                (if (and (null header) (null (cdr ranges)))
-                    ;; One range and nothing to put in front of it: hand the
-                    ;; buffer straight to the process, which is the whole-buffer
-                    ;; case and costs no copy however large the file is.
-                    (apply #'call-process-region (caar ranges) (cdar ranges)
-                           program nil (list result errfile) nil args)
-                  ;; Otherwise assemble, since a header and the lines it
-                  ;; belongs to are not adjacent and banked lines are not
-                  ;; adjacent to each other.  Only ever a selection's worth of
-                  ;; text.
-                  (with-temp-buffer
-                    (let ((coding-system-for-write 'utf-8-unix)
-                          (coding-system-for-read 'utf-8-unix))
-                      (when header (insert header))
-                      (dolist (range ranges)
-                        (insert-buffer-substring source (car range) (cdr range))
-                        ;; A buffer whose last line has no newline gives a range
-                        ;; that does not end in one, which would run the next
-                        ;; banked line onto the end of it.
-                        (unless (or (bobp) (eq (char-before) ?\n))
-                          (insert "\n")))
-                      (apply #'call-process-region (point-min) (point-max)
-                             program nil (list result errfile) nil args)))))
-          (let ((said (with-temp-buffer
-                        (insert-file-contents errfile)
-                        (string-trim (buffer-string)))))
-            (unless (eq status 0)
-              ;; What csvdt wrote before failing is shown, not discarded.
-              ;; On the nothing-converted exit the output is complete and
-              ;; its parse_err markers are exactly the diagnostic csvdt's
-              ;; own message points at; on a mid-stream abort the partial
-              ;; rows show where it stopped.  A shell user has both in
-              ;; front of them, and dropping them would leave an Emacs user
-              ;; told "the output was written either way" about output no one
-              ;; can see.  Except when the run was fed from the output
-              ;; buffer itself: there its contents are the input, and a
-              ;; failed run must not replace the data with its debris.
-              (unless (or (zerop (buffer-size result))
-                          (eq source (get-buffer "*csvdt output*")))
-                (display-buffer (csvdt--fill-output result)))
-              ;; csvdt names itself on every line it writes to stderr, which
-              ;; is what a shell user needs and what this message has already
-              ;; said: without the trim it reads "csvdt exited 1: csvdt: ...".
-              ;; With the cut named, because this is the failure the check
-              ;; is for: csvdt sees a short record and says so about a line,
-              ;; which sends the reader looking at data that is not the
-              ;; matter: the half of it out of reach is.
-              (user-error "csvdt exited %s: %s%s" status
-                          (if (string-empty-p said)
-                              "(no message)"
-                            (string-remove-prefix "csvdt: " said))
-                          (if cut
-                              (concat " -- note the " (csvdt--cut-note cut))
-                            "")))
-            (setq notes (unless (string-empty-p said) said)))
-          (let ((out (csvdt--fill-output result)))
-            (display-buffer out)
-            (message "csvdt %s: %d lines%s%s%s%s%s"
-                     (string-join args " ")
-                     (with-current-buffer out
-                       (count-lines (point-min) (point-max)))
-                     ;; Said when more than one stretch went in, so it is
-                     ;; visible that a run covered the banked lines as well as
-                     ;; the region rather than one of the two.
-                     (if (cdr ranges)
-                         (format " from %d stretches" (length ranges))
-                       "")
-                     (if snapped ", selection widened to whole lines" "")
-                     ;; Named apart from the line widening above: that one
-                     ;; says the selection was short of a line, this one
-                     ;; says a record was longer than the lines it looked
-                     ;; like, which is a thing about the data.
-                     (if spanned
-                         ", widened to whole records: a quoted field spans lines"
-                       "")
-                     ;; Said however the run went: a truncated last record
-                     ;; is the kind of thing that looks like the data until
-                     ;; someone counts columns.
-                     (if cut (concat ", " (csvdt--cut-note cut)) "")
-                     ;; What csvdt said on stderr about a run that still
-                     ;; succeeded: how much did not convert, rows a re-read
-                     ;; would take for comments.  The binary goes out of its way to
-                     ;; say these; dropping them here left an Emacs user with
-                     ;; less than a shell user saw.
-                     (if notes (concat "\n" notes) ""))))
-      (kill-buffer result)
-      (delete-file errfile))))
+       "these commands send it the lines as a file of their own")))
+  (csvdt--program)
+  (let ((plan (csvdt--plan ranges args snapped)))
+    (csvdt--start (current-buffer) args
+                  (csvdt--input-pieces (plist-get plan :ranges)
+                                       (plist-get plan :header))
+                  (list :ranges (plist-get plan :ranges)
+                        :snapped (plist-get plan :snapped)
+                        :spanned (plist-get plan :spanned)
+                        :cut (plist-get plan :cut)))))
+
+(defun csvdt--await (job &optional timeout)
+  "Wait for the run JOB to be reported, and signal if it failed.
+For Lisp that wants a run to be over before it goes on, batch scripts and
+tests above all.  The commands never call it, so Emacs is not held up.
+TIMEOUT is the seconds to wait, a minute by default.  A failed run signals
+a `user-error' with the message it reported.  Returns JOB."
+  (let ((deadline (+ (float-time) (or timeout 60))))
+    (while (and (not (csvdt--job-done job))
+                (< (float-time) deadline))
+      (accept-process-output nil 0.001)))
+  (unless (csvdt--job-done job)
+    (error "The csvdt run was not reported in time"))
+  (when (csvdt--job-error job)
+    (user-error "%s" (csvdt--job-error job)))
+  job)
 
 (defun csvdt--fill-output (result)
-  "Replace the output buffer's contents with RESULT's, returning the buffer."
+  "Make the text of buffer RESULT the contents of the output buffer.
+Returns the output buffer.  The text is swapped between the two rather than
+copied, so a large result is held once.  RESULT is left with what the
+output buffer held, overlays another package put on it included."
   (let ((out (get-buffer-create "*csvdt output*")))
     (with-current-buffer out
       (let ((inhibit-read-only t))
-        (erase-buffer)
-        ;; Overlays another package left on the previous result would
-        ;; otherwise survive it.  Emptying the buffer collapses one to
-        ;; zero width rather than removing it, and an overlay that
-        ;; advances with text inserted at its end then grows over the
-        ;; whole of the next result, so a line highlighted for having
-        ;; been banked colours everything that replaces it.  The
-        ;; contents they described are gone either way.
-        (remove-overlays)
-        (insert-buffer-substring-no-properties result))
+        (buffer-swap-text result))
       (csvdt--apply-output-mode)
       (goto-char (point-min)))
     out))
 
-;;; Running it
+;;; Commands
 
 ;;;###autoload
 (defun csvdt-run-buffer (args)
-  "Run csvdt over the whole buffer with ARGS."
+  "Run csvdt over the whole buffer with ARGS.
+The run is in the background; the result is shown when csvdt is done."
   (interactive (list (csvdt--read-arguments)))
   (csvdt--run (list (cons (point-min) (point-max))) args))
 
@@ -1229,15 +1361,10 @@ success anything csvdt said on stderr is shown with the summary."
   "Run csvdt over the active region with ARGS.
 Useful for trying something on a handful of rows before the whole file.
 Every piece of the region, where it has more than one: see
-`csvdt--region-ranges'.
-The pieces are normalised first, as the banked ones always were.
-`csvdt--run' asks for ranges in buffer order, and a region need not
-report them that way: `region-bounds' does, but a package hooking
-`region-extract-function' defines its own selection and may report the
-pieces in any order, overlapping, or naming nothing at all.  Handing those
-straight on sent rows out of buffer order (which csvdt reads, where it
-measures between consecutive rows, as the order the events happened in)
-and sent a line covered by two pieces twice."
+`csvdt--region-ranges'.  The pieces are put in buffer order and merged
+first, since a package defining its own selection through
+`region-extract-function' may report them in any order or overlapping.
+The run is in the background; the result is shown when csvdt is done."
   (interactive (list (csvdt--read-arguments)))
   (let* ((pieces (csvdt--region-ranges))
          (ranges (csvdt--normalise-ranges pieces "`region-bounds'")))
@@ -1253,7 +1380,8 @@ and sent a line covered by two pieces twice."
 The lines come from `csvdt-banked-lines-function', so whichever package
 banks them is the one that decides what is banked; this only asks.  They
 are sent as one file, in buffer order, so a duration measured across them
-is measured across what was banked rather than across what was skipped."
+is measured across what was banked rather than across what was skipped.
+The run is in the background; the result is shown when csvdt is done."
   (interactive (list (csvdt--read-arguments)))
   (let* ((banked (csvdt--banked-lines))
          (ranges (csvdt--normalise-ranges banked)))
@@ -1269,7 +1397,8 @@ is measured across what was banked rather than across what was skipped."
   "Run csvdt with ARGS on the banked lines and the region together.
 Both, not one or the other: the region is usually the piece not banked
 yet.  They are merged, so a selection abutting or inside a banked stretch
-does not send a line twice.  With neither, the whole buffer."
+does not send a line twice.  With neither, the whole buffer.
+The run is in the background; the result is shown when csvdt is done."
   (interactive (list (csvdt--read-arguments)))
   (let* ((banked-raw (csvdt--banked-lines))
          (region-raw (csvdt--region-ranges))
@@ -1299,11 +1428,11 @@ been typed yet."
                      (and (functionp csvdt-banked-lines-function)
                           (csvdt--banked-lines))
                      (csvdt--region-ranges)))
-         (all (plist-get selection :all))
-         (plan (csvdt--plan (or all (list (cons (point-min) (point-max))))
+         (selected (plist-get selection :all))
+         (plan (csvdt--plan (or selected (list (cons (point-min) (point-max))))
                             args))
          (records (plist-get plan :records))
-         (ranges (and all (plist-get plan :ranges)))
+         (ranges (and selected (plist-get plan :ranges)))
          (banked (csvdt--settle-ranges (plist-get selection :banked) records))
          (region (csvdt--settle-ranges (plist-get selection :region) records))
          (cut (plist-get plan :cut))

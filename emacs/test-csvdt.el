@@ -41,7 +41,7 @@
 (defvar test-csvdt-ran 0
   "How many checks were reached.")
 
-(defconst test-csvdt-expected 307
+(defconst test-csvdt-expected 312
   "How many checks this file makes.
 Raise it with the count.  A run reporting fewer has not passed, whatever
 the ones it did reach said.
@@ -61,6 +61,22 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
       (message "  ok   %s" name)
     (setq test-csvdt-failures (1+ test-csvdt-failures))
     (message "  FAIL %s\n    got:  %S\n    want: %S" name got want)))
+
+;; A run happens in the background, and the tests are written as if it did
+;; not: `csvdt--run' is advised to wait for its process and to signal what
+;; the run reported as a failure.  Tests of the background behaviour itself
+;; bind `test-csvdt-wait' to nil.
+
+(defvar test-csvdt-wait t
+  "Whether `csvdt--run' waits for the run it starts.")
+
+(advice-add 'csvdt--run :around
+            (lambda (run &rest arguments)
+              (let ((process (apply run arguments)))
+                (when test-csvdt-wait
+                  (csvdt--await process))
+                process))
+            '((name . test-csvdt-wait)))
 
 (message "csvdt.el tests against %s\n  %s"
          csvdt-executable (csvdt-version-string))
@@ -442,12 +458,13 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 ;;; What actually reaches csvdt on the wire
 ;;
 ;; csvdt requires UTF-8 and refuses anything else, so the encoding cannot be
-;; left to the locale: under a non-UTF-8 one the default process coding would
-;; hand it cp1252 bytes from a buffer Emacs had decoded perfectly.
+;; left to the locale: under a non-UTF-8 one the input would reach it as
+;; cp1252 bytes from a buffer Emacs had decoded perfectly.
 
 (let ((dump (make-temp-file "csvdt-dump" nil ".sh")))
   (with-temp-file dump
-    (insert "#!/bin/sh\nod -An -tx1 | tr -s ' \\n' ' '\n"))
+    ;; The input is the last argument, a file name.
+    (insert "#!/bin/sh\nfor file; do :; done\nod -An -tx1 < \"$file\" | tr -s ' \\n' ' '\n"))
   (set-file-modes dump #o755)
   (let ((csvdt-executable dump)
         ;; What a latin-1 locale gives you.
@@ -2621,35 +2638,108 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     (with-current-buffer "*csvdt output*" major-mode)
                     'fundamental-mode))
 
-;;; The stderr file a run makes is taken away again
+;;; A run leaves nothing behind
 ;;
-;; csvdt's stderr is collected in a temporary file so that what it said can be
-;; shown with the summary.  The file is deleted in an `unwind-protect', which
-;; is what makes a failing run cost no more than a successful one: an Emacs
-;; left open for a day otherwise dribbles one file per run into the temporary
-;; directory, and the runs that leave them are the ones nobody is watching.
+;; A run keeps its output and csvdt's messages in scratch buffers, and an
+;; Emacs left open for a day would collect them if a failing run, which is
+;; the one nobody is watching, left its pair behind.
 
-(defun test-csvdt-stderr-files ()
-  "Return how many stderr files `csvdt--run' has left in the temp directory."
-  (length (directory-files temporary-file-directory nil "\\`csvdt-stderr")))
+(defun test-csvdt-scratch-buffers ()
+  "Return how many scratch buffers `csvdt--run' has left."
+  (length (seq-filter (lambda (buffer)
+                        (string-prefix-p " *csvdt-" (buffer-name buffer)))
+                      (buffer-list))))
 
-(let ((before (test-csvdt-stderr-files)))
+(let ((before (test-csvdt-scratch-buffers)))
   (with-temp-buffer
     (insert "a,b\n1,2\n")
     (csvdt--run (list (cons (point-min) (point-max))) '("-H" "-p")))
-  (test-csvdt-check "a successful run leaves no stderr file behind"
-                    (- (test-csvdt-stderr-files) before) 0))
+  (test-csvdt-check "a successful run leaves no scratch buffer behind"
+                    (- (test-csvdt-scratch-buffers) before) 0))
 
-(let ((before (test-csvdt-stderr-files)))
+(let ((before (test-csvdt-scratch-buffers)))
   (with-temp-buffer
     (insert "a,b\n1,2\n")
-    ;; Column 9 is out of bounds, so this one signals on its way out, and
-    ;; the file has to go all the same.
+    ;; Column 9 is out of bounds, so this one fails on its way out, and
+    ;; its buffers have to go all the same.
     (condition-case nil
         (csvdt--run (list (cons (point-min) (point-max))) '("-H" "-p" "-u9"))
       (user-error nil)))
   (test-csvdt-check "and neither does one that failed"
-                    (- (test-csvdt-stderr-files) before) 0))
+                    (- (test-csvdt-scratch-buffers) before) 0))
+
+;;; A run does not hold Emacs up
+;;
+;; The run starts a process and returns.  The text is sent from a timer and
+;; the result is shown from the process's sentinel, so nothing happens until
+;; Emacs next waits for output, which is what makes these checks exact.
+
+(let ((test-csvdt-wait nil))
+  (with-temp-buffer
+    (insert "a,b\n1,2\n")
+    (with-current-buffer (get-buffer-create "*csvdt output*")
+      (erase-buffer)
+      (insert "earlier result"))
+    (let ((process (csvdt--run (list (cons (point-min) (point-max)))
+                               '("-H" "-p"))))
+      (test-csvdt-check "the command returns before the run is reported"
+                        (list (csvdt--job-p process)
+                              (csvdt--job-done process)
+                              (test-csvdt-output))
+                        (list t nil "earlier result"))
+      (csvdt--await process)
+      (test-csvdt-check "and the result arrives once Emacs waits"
+                        (test-csvdt-output) "a,b\n1,2\n"))))
+
+;; More than one chunk goes to csvdt, from a header and several ranges, and
+;; arrives as the lines it was made of.
+(with-temp-buffer
+  (let ((lines (let ((list '()))
+                 (dotimes (i 40000) (push (format "%d,%d\n" i (* i i)) list))
+                 (nreverse list))))
+    (insert "n,square\n" (apply #'concat lines))
+    (let* ((first (progn (goto-char (point-min)) (forward-line 100) (point)))
+           (second (progn (forward-line 30000) (point)))
+           (third (progn (forward-line 5000) (point))))
+      (csvdt--run (list (cons first second) (cons third (point-max)))
+                  '("-H" "-p"))
+      (test-csvdt-check "a header and ranges larger than a chunk arrive whole"
+                        (test-csvdt-output)
+                        (concat "n,square\n"
+                                (apply #'concat (seq-subseq lines 99 30099))
+                                (apply #'concat (seq-subseq lines 35099)))))))
+
+;; The text is read as it is sent, so a change to the buffer in between
+;; would send something that is neither the old text nor the new.
+(let ((test-csvdt-wait nil))
+  (with-temp-buffer
+    (insert "a,b\n1,2\n")
+    (let ((process (csvdt--run (list (cons (point-min) (point-max)))
+                               '("-H" "-p"))))
+      (goto-char (point-max))
+      (insert "3,4\n")
+      (condition-case nil (csvdt--await process) (user-error nil))
+      (test-csvdt-check "a buffer changed during the run stops it"
+                        (and (string-match-p "buffer changed"
+                                             (or (csvdt--job-error process)
+                                                 ""))
+                             t)
+                        t))))
+
+;; A second run replaces one still going, and only its result is shown.
+(let ((test-csvdt-wait nil))
+  (with-temp-buffer
+    (insert "a,b\n1,2\n")
+    (let* ((first (csvdt--run (list (cons (point-min) (point-max)))
+                              '("-H" "-p" "-u9")))
+           (second (csvdt--run (list (cons (point-min) (point-max)))
+                               '("-H" "-p"))))
+      (csvdt--await first)
+      (csvdt--await second)
+      (test-csvdt-check "a run started over another is the one reported"
+                        (list (csvdt--job-error first)
+                              (test-csvdt-output))
+                        (list nil "a,b\n1,2\n")))))
 
 ;;; Something that is not a list at all
 

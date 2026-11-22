@@ -98,7 +98,7 @@
                                  body))
                      (want (checks-cli expected args))
                      (got (condition-case _
-                              (progn (csvdt--run ranges args)
+                              (progn (csvdt--await (csvdt--run ranges args))
                                      (cons 0 (with-current-buffer "*csvdt output*"
                                                (buffer-string))))
                             (error (cons 1 "raised")))))

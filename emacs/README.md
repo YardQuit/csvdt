@@ -90,26 +90,26 @@ however it is installed, the commands run interpreted unless you compile them
 yourself.
 
 Whether that is worth doing depends on which path a run takes. Measured on a
-25 MB, 500,001-row CSV with `-H -p -r 1` under Emacs 31.1, three runs each, as
-the time from starting the command to having its result:
+25 MB, 500,001-row CSV with `-H -p -r 1` under Emacs 31.1, three runs each. Each
+cell gives the time Emacs is busy starting the run, then the time until the
+result is shown:
 
 | | interpreted | byte-compiled |
 | --- | --- | --- |
-| whole buffer | 0.60–0.81 s | 0.60–0.64 s |
-| 2000 banked ranges | 0.15–0.25 s | 0.12 s |
-| 20000 banked ranges | 0.37–0.46 s | 0.19–0.21 s |
+| whole buffer | 0.11–0.27 s, 1.3–1.6 s | 0.19–0.29 s, 1.3–1.5 s |
+| 2000 banked ranges | 0.22–0.33 s, 0.22–0.35 s | 0.18–0.21 s, 0.19–0.23 s |
+| 20000 banked ranges | 0.36–0.41 s, 0.40–0.46 s | 0.26–0.28 s, 0.30–0.32 s |
 
-A whole-buffer run gains nothing, and a bigger file does not change that. It
-is handed to the process without copying, so no Elisp touches a row: most of
-the time is csvdt itself, Emacs encoding the buffer out as UTF-8 and reading
-the result back. Compiling can only attack the small slice that is left.
+A whole-buffer run gains nothing from compiling, and a bigger file does not
+change that. No Elisp touches a row: the time is the text being written out,
+csvdt itself, and Emacs reading and decoding the result, all of which grow with
+the file while the Lisp slice stays where it is.
 
 Banked lines, or a region in several pieces, send only the lines picked, but
-where each begins is worked out in Lisp,
-in one pass over the buffer for the whole selection. The time follows the
-number of ranges, not that number times the size of the file. Compiling is
-worth about half of it, so compile if you bank lines, and do not expect a
-large file to speed up.
+where each begins is worked out in Lisp, in one pass over the buffer for the
+whole selection. The time follows the number of ranges, not that number times
+the size of the file. Compiling is worth about a third of the busy time, so
+compile if you bank lines, and do not expect a large file to speed up.
 
 Byte-compiling is also a check. `run-tests.sh` compiles as a gate and treats
 any warning as a failure, so a release compiles clean; a warning against your
@@ -216,19 +216,19 @@ csvdt arguments: --print-delimiter "'"
 Outside quotes a backslash is left as itself, which is *not* the shell's rule.
 A Windows path typed as a value has to survive as one argument, and there is no
 filename here for shell escaping to be worth more than that; these commands
-send the lines on standard input.
+give csvdt the selected lines as a file of their own.
 
 A filename in that line is refused, rather than run:
 
 ```
 csvdt arguments: -H -p sales.csv
 Cannot run: csvdt would read sales.csv and ignore the selection; these commands
-send it the lines on standard input
+send it the lines as a file of their own
 ```
 
-These commands always hand csvdt the selected lines on standard input, so a
-filename is not a second input: csvdt reads the file and the selection never
-reaches it. Nothing in the result would say so: the output buffer shows another
+These commands always hand csvdt the selected lines as a file, so a filename
+is not a second input: csvdt reads the file and the selection never reaches
+it. Nothing in the result would say so: the output buffer shows another
 file's contents, and the echo area reports a successful run.
 
 Only a name that really is a file is refused, which leaves the more common slip
@@ -630,6 +630,19 @@ reports, so a rename fails the build rather than silently disabling the feature.
 
 ## Output
 
+A run happens in the background. The command returns once csvdt is started
+and Emacs stays usable while it works. The selected text is written to a
+temporary file in pieces, from a timer, and csvdt is started on that file; the
+result is shown, and the summary or the error is given, when csvdt is done. A
+second run started meanwhile replaces the first, whose result is dropped. Only
+placing the records of a selection, which reads the buffer once, happens before
+the command returns: 0.1 to 0.4 s on a 25 MB file, whatever the selection.
+
+If the buffer is edited while its text is still being written, the run is
+stopped with "The buffer changed while csvdt was reading it", since what was
+written no longer matches what you see. Once csvdt has started the buffer may
+be changed freely.
+
 Output goes to `*csvdt output*` in `csv-mode` when it is available, otherwise
 `fundamental-mode`; set `csvdt-output-mode` to change that. A mode that turns
 out not to be available leaves the buffer plain rather than losing a run csvdt
@@ -638,15 +651,16 @@ has already done the work for.
 You can run csvdt on `*csvdt output*` itself to feed a result back through it,
 which is the one case where a source buffer is replaced rather than left alone.
 
-Each run replaces the buffer's contents outright, so overlays another package
-left on the previous result are removed with it. That matters more than it
-sounds: emptying a buffer collapses an overlay to zero width rather than
-removing it, and one created to advance with text inserted at its end then
-grows over whatever replaces it, so a line highlighted for having been banked
-in the output buffer would colour the entire next result.
+Each run replaces the buffer's contents outright. The result is built in a
+buffer of its own and its text swapped in, so a large result is held once, and
+overlays another package left on the previous result go with the old text. That
+matters more than it sounds: emptying a buffer would collapse an overlay to zero
+width rather than remove it, and one created to advance with text inserted at
+its end would then grow over whatever replaces it, so a line highlighted for
+having been banked in the output buffer would colour the entire next result.
 
-The buffer is sent as UTF-8 with Unix line endings whatever the locale's
-process encoding is, since csvdt requires UTF-8 and refuses anything else. So a
+The text is written as UTF-8 with Unix line endings whatever the locale's
+coding system is, since csvdt requires UTF-8 and refuses anything else. So a
 file Emacs decoded from cp1252, or one with CRLF endings, goes through as the
 text you are looking at rather than as the bytes it was stored in.
 
@@ -659,6 +673,11 @@ them through rather than inventing its own:
 csvdt exited 1: Specified column is out of bound: record 0 (line: 1) has 2 field(s), counted from 0
 csvdt exited 100: '--offset' target +15:00 is not a real UTC offset; they run from -12:00 to +14:00
 ```
+
+A failed run is reported in the echo area; the commands do not signal an error,
+since by then they have returned. Lisp that needs to know calls
+`csvdt--await` on what the run function returns, which waits and signals the
+same message as a `user-error`.
 
 What csvdt wrote before failing is shown too, in `*csvdt output*` as usual.
 That matters most for the "nothing converted" exit, where the output is
@@ -737,8 +756,8 @@ What it checks:
 - an overlay another package left on a previous result does not colour the next
   one, and no text properties reach the output whatever the source carried
 - non-ASCII reaches csvdt as UTF-8, and dos endings as Unix ones, under a
-  latin-1 process encoding, asserted on the actual bytes, via a stub that
-  dumps its stdin
+  latin-1 locale, asserted on the actual bytes, via a stub that dumps its
+  input file
 - an unavailable `csvdt-output-mode` still shows the output
 - csvdt's own error text surfaces on a failure, with its exit status
 - an `=`-attached argument, built from the offered candidate, actually runs
