@@ -84,6 +84,7 @@ struct ArgumentFlags {
     input_quotes: bool,                   // --single-quotes
     read_as_comment: Option<char>,        // --comment
     fill_log: Option<std::path::PathBuf>, // --fill-log's destination; "-" is stderr
+    flush_each_record: bool,              // standard output is a terminal
     output_delimiter: Option<char>,       // --print-delimiter
     output_quotes: Quoting,               // --quote
 }
@@ -326,10 +327,15 @@ const ENCODING_PROBE_BYTES: usize = 512;
 //
 // The test is the full alternating pattern rather than merely "contains a
 // NUL", so a field that holds NUL bytes still passes through.
+//
+// The probe takes what the first read that brings it to eight bytes gives,
+// rather than waiting for all of ENCODING_PROBE_BYTES: from a pipe fed a line
+// at a time, `tail -f log | csvdt -u0`, waiting would hold back every row
+// until 512 bytes had arrived. A file fills the whole probe in one read.
 fn reject_utf16<R: std::io::Read>(mut input: R) -> Result<impl std::io::Read, Box<dyn Error>> {
     let mut probe = vec![0u8; ENCODING_PROBE_BYTES];
     let mut filled = 0;
-    while filled < probe.len() {
+    while filled < 8 {
         match input.read(&mut probe[filled..])? {
             0 => break,
             read => filled += read,
@@ -871,6 +877,13 @@ fn scan_widest_record(args: &ArgumentFlags, path: &std::path::Path) -> Result<us
 }
 
 fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
+    // Rows are written as they are made when somebody is watching, the way
+    // the C library line-buffers a terminal, so a slow input shows up as it
+    // arrives. Anywhere else the output is written in large blocks.
+    let args = ArgumentFlags {
+        flush_each_record: std::io::IsTerminal::is_terminal(&std::io::stdout()),
+        ..args
+    };
     let reader_builder = configure_reader(&args);
 
     let mut writer_builder = csv::WriterBuilder::new();
@@ -1374,6 +1387,9 @@ fn process_stream<R: std::io::Read, W: std::io::Write>(
         apply_row_edit(&record, args, &edit, &mut fields);
         tally.record_written(&fields, args, false);
         writer.write_record(&fields)?;
+        if args.flush_each_record {
+            writer.flush()?;
+        }
         dt_cache = new_dt_cache;
     }
 
@@ -5626,6 +5642,54 @@ mod tests {
             };
             let per_row = (allocations_over(2000, &args) - allocations_over(1000, &args)) / 1000;
             assert!(per_row <= 2, "{style:?}: {per_row} allocations per row of twelve fields");
+        }
+    }
+    // ---- reading and writing as the input arrives ----------------------------
+
+    // A reader that hands over CHUNK once and then fails the test if it is
+    // asked again, standing for a pipe with nothing more to give yet.
+    struct OneChunk(Option<&'static [u8]>);
+
+    impl std::io::Read for OneChunk {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let chunk = self.0.take().expect("read again from a pipe with nothing more yet");
+            buffer[..chunk.len()].copy_from_slice(chunk);
+            Ok(chunk.len())
+        }
+    }
+
+    // The UTF-16 probe settles for the first read that gives it eight bytes,
+    // rather than waiting on a pipe for all 512.
+    #[test]
+    fn the_encoding_probe_does_not_wait_for_more_than_it_needs() {
+        assert!(reject_utf16(OneChunk(Some(b"2024-01-01T00:00:00Z\n"))).is_ok());
+    }
+
+    // A writer that counts how many times it is handed bytes.
+    struct CountedWrites(std::rc::Rc<std::cell::Cell<usize>>);
+
+    impl std::io::Write for CountedWrites {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.0.set(self.0.get() + 1);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // On a terminal each row is written as it is made; elsewhere the rows
+    // wait in the writer's buffer.
+    #[test]
+    fn rows_reach_a_terminal_one_at_a_time() {
+        for (flush_each_record, expected) in [(true, 3), (false, 0)] {
+            let args = ArgumentFlags { flush_each_record, ..default_args() };
+            let writes = std::rc::Rc::new(std::cell::Cell::new(0));
+            let reader = configure_reader(&args).from_reader("1\n2\n3\n".as_bytes());
+            let mut writer = csv::Writer::from_writer(CountedWrites(writes.clone()));
+            process_stream(reader, &mut writer, &args, None, None).unwrap();
+            assert_eq!(writes.get(), expected, "flush_each_record={flush_each_record}");
         }
     }
 }
