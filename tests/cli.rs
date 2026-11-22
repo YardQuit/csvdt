@@ -2358,7 +2358,7 @@ fn the_manual_page_is_rendered_from_the_options_themselves() {
 
     // Every section, including the three promoted out of clap_mangen's
     // catch-all. A heading renamed in the help files without the list in
-    // main.rs being updated loses its section, and fails here.
+    // cli.rs being updated loses its section, and fails here.
     for section in [".SH NAME", ".SH SYNOPSIS", ".SH DESCRIPTION", ".SH OPTIONS",
                     ".SH TIMESTAMP FORMATS", ".SH KNOWN LIMITS",
                     ".SH EXIT STATUS", ".SH VERSION"] {

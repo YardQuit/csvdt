@@ -1,7 +1,7 @@
 // What differs between platforms: probing the standard streams, asking a
 // file for its identity, and refusing an input that is also the output. Each
 // function has one signature, with the platform variants chosen here so the
-// run logic in main.rs has no cfg arms.
+// run logic elsewhere has no cfg arms.
 
 use std::error::Error;
 
