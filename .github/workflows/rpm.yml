@@ -30,16 +30,22 @@ name: RPM
 on:
   # No push trigger: a version tag starts the monthly build, which calls this
   # workflow, and a push to master changes nothing anyone can install.
-  # Every path the package is built out of. A change to the README does not
-  # need Fedora's opinion; a change to the spec, the options, the front end
-  # or the dependency requirements does.
+  # Every path the package is built out of, which includes the files its
+  # %files section installs as documentation and licence: a change to one of
+  # them is a change to the package. A change to anything else, such as the
+  # tests or the checks, does not need Fedora's opinion.
   pull_request:
     paths:
       - 'packaging/rpm/**'
       - '.github/workflows/rpm.yml'
+      - '.github/scripts/**'
       - 'Cargo.toml'
       - 'src/**'
       - 'emacs/csvdt.el'
+      - 'emacs/README.md'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'LICENSE'
   workflow_dispatch:
     inputs:
       publish:
