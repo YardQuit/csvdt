@@ -419,7 +419,9 @@ a value survives."
                                                (memq (aref run (1+ scan))
                                                      '(?t ?n ?r ?\\ ?\")))
                                     (user-error
-                                     "Cannot read %s: inside double quotes a backslash starts an escape, and only \\t \\n \\r \\\\ \\\" are accepted.  Use single quotes, which take backslashes literally"
+                                     "Cannot read %s: inside double quotes a backslash starts an escape, and \
+only \\t \\n \\r \\\\ \\\" are accepted.  Use single quotes, which take \
+backslashes literally"
                                      (substring line index (1+ end))))
                                   (setq scan (+ scan 2))))
                               (condition-case nil
@@ -428,7 +430,8 @@ a value survives."
                                       "")
                                 (error
                                  (user-error
-                                  "Cannot read %s: inside double quotes a backslash starts an escape (\"\\t\" is a tab).  Use single quotes, which take backslashes literally"
+                                  "Cannot read %s: inside double quotes a backslash starts an escape \
+(\"\\t\" is a tab).  Use single quotes, which take backslashes literally"
                                   (substring line index (1+ end))))))))
                   index (1+ end))))
          (t

@@ -739,6 +739,15 @@ or a different Emacs with `EMACS=`.
 header-free one cannot tell the two apart: without an action applied, `-H -p`
 and no arguments at all produce identical output.
 
+The checks are plain batch Emacs Lisp reporting through one function,
+`test-csvdt-check`, not ERT. So `M-x ert` and `ert-run-tests-batch` do not see
+them, and a single check cannot be selected by name. Moving some three hundred
+checks, several of which share state with the ones before them, would be a
+rewrite of the file for a runner that adds a selector and nothing else, so it
+has not been done. A run is asynchronous, and the tests wait for it through
+`csvdt--await`, which `csvdt--run` is advised to call; the checks of the
+background behaviour itself switch that off.
+
 What it checks:
 
 - each command through its own `interactive` form, not just the function
@@ -782,6 +791,14 @@ What it checks:
 - csvdt's own error text surfaces on a failure, with its exit status
 - an `=`-attached argument, built from the offered candidate, actually runs
 - the source buffer is not modified
+- a run returns before it is reported, a text larger than one chunk arrives
+  whole, a buffer edited while it is written stops the run, and a run started
+  over another replaces it
+- a run leaves no scratch buffer behind, whether it succeeded or failed
+- a comment option makes a run on part of the buffer refused, and a run on all
+  of it is csvdt's alone
+- where records begin is found in one pass however many ranges there are,
+  counted in searches rather than timed
 - a missing binary says which variable to set
 - **no csvdt option name appears in `csvdt.el`**: the property the whole design
   rests on, so it is asserted rather than assumed

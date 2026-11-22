@@ -105,7 +105,8 @@
                 (unless (if (eq (car want) 0) (equal want got) (eq (car got) 1))
                   (setq checks-failures (1+ checks-failures))
                   (when (<= checks-failures 5)
-                    (princ (format "  %s %S\n    buffer:   %S\n    ranges:   %S\n    should send: %S\n    shell: %S\n    emacs: %S\n"
+                    (princ (format (concat "  %s %S\n    buffer:   %S\n    ranges:   %S\n"
+                                            "    should send: %S\n    shell: %S\n    emacs: %S\n")
                                    label args text ranges expected want got))))))))
       (kill-buffer buffer)
       (when (get-buffer "*csvdt output*") (kill-buffer "*csvdt output*")))))
