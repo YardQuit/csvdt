@@ -74,8 +74,9 @@ jobs:
     # Every job has a timeout, because GitHub's six-hour default would
     # otherwise apply to all of them, across four platforms, for a workflow
     # nobody is watching on the first of the month. Each of these is several
-    # times what the job takes and still fails the same day.
-    timeout-minutes: 15
+    # times what the job takes and still fails the same day. This job's is
+    # longer for compiling cargo-audit.
+    timeout-minutes: 25
     outputs:
       ref: ${{ steps.id.outputs.ref }}
       sha: ${{ steps.id.outputs.sha }}
@@ -156,6 +157,18 @@ jobs:
       # one resolution serves all four.
       - name: Resolve the dependency set
         run: cargo update
+
+      # The set just resolved is the newest of every crate published that day,
+      # so it is checked against the RustSec advisory database before any leg
+      # builds it or anything is published. The tool is installed at a pinned
+      # version (cargo verifies the crate's checksum against the index) and the
+      # database is fetched afresh by every run, since the runner starts empty.
+      # A known vulnerability in the set stops the run; a crate that is merely
+      # unmaintained or yanked is printed and does not.
+      - name: Audit the dependency set
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
