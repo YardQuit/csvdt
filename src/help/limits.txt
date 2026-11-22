@@ -302,7 +302,7 @@ ROWS ARE PROCESSED ONE AT A TIME
 Memory use grows with the widest single record, not with the
 file: a million ordinary rows stream through flat, but each
 record is held whole while it is worked on, so one enormous
-field costs about three times its own size in memory. It is
+field costs up to about twice its own size in memory. It is
 held twice over -- once in the buffer it was read into, and once
 as the field parsed out of it -- each buffer grows by doubling,
 so it is often larger than what it holds, and both stay until
@@ -310,24 +310,24 @@ the record is done with. The case that matters is not exotic:
 it is the unclosed quote above, which turns everything after
 it, possibly the rest of the file, into one field.
 
-A crafted or damaged input can cost three times its full size
-in memory that way, where the same bytes as ordinary rows cost
-almost nothing. Measured, a 64 MB field peaks at about 200 MB
-against the 4 MB an empty run takes, and the same figure comes
+A crafted or damaged input can cost twice its full size in
+memory that way, where the same bytes as ordinary rows cost
+almost nothing. Measured, a 64 MB field peaks at about 130 MB
+against the 3 MB an empty run takes, and the same figure comes
 back whatever the run was asked to do: the two copies are the
 reader's, not any action's.
 It costs time as well, and in proportion: doubling the field
 costs about twice as long and no worse, whatever the field
-holds. Measured, a 128 MB field is read and written in about
-half a second; the writer's worst case, a field of nothing but
-quote characters where every one doubles again on the way out,
-takes about two seconds for the same size. So it is memory,
+holds. Measured, a 128 MB field is read and written in about a
+third of a second; the writer's worst case, a field of nothing
+but quote characters where every one doubles again on the way
+out, takes about a second for the same size. So it is memory,
 above, that a damaged file spends -- not time.
 
 An ordinary file of a few hundred megabytes is the other way
-about. Memory stays flat, about 6 MB whatever the size, and
+about. Memory stays flat, about 4 MB whatever the size, and
 time is the only thing that grows with it: measured, 256 MB of
-rows takes under a second to reformat and about a second to
+rows takes about a second to reformat and a second and a half to
 convert a column. Both figures are one machine's and yours will
 differ; the proportion is the part that holds anywhere.
 
