@@ -110,9 +110,10 @@ fn duplicate<T>(_stream: T) -> Option<std::fs::File> {
 // one identity are one file however it was spelled, through a symbolic
 // link, a hard link, a second spelling of a directory, or '/dev/stdout'.
 //
-// None where the question is meaningless rather than answerable: a pipe, a
-// console, a device. Sharing one of those is not damaging the way sharing a
-// regular file is, and a run cannot be both ends of a pipe.
+// None for a console or a device, where sharing is harmless: '/dev/null'
+// twice over has nothing to lose. A regular file has one everywhere, and on
+// Unix so does a fifo or a pipe, for the reason given below; on Windows a
+// pipe has none.
 #[cfg(unix)]
 pub(crate) fn file_identity(file: &std::fs::File) -> Option<(u64, u64)> {
     metadata_identity(&file.metadata().ok()?)

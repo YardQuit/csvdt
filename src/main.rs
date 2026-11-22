@@ -279,18 +279,15 @@ fn main() {
         std::process::exit(1);
     }
 
-    let mut args = ArgumentFlags::default();
-    let arguments = arguments(args);
-    match arguments {
-        Ok(arguments) => args=arguments,
+    let args = match arguments() {
+        Ok(args) => args,
         Err(err) => {
             fatal(&err.to_string());
             std::process::exit(100);
         },
-    }
+    };
 
-    let execute = reader_writer(args);
-    match execute {
+    match reader_writer(args) {
         Ok(_) => (),
         // A reader that stops reading is not an error to report. `csvdt file
         // | head` closes the pipe as soon as it has what it wants, and Rust
@@ -314,17 +311,14 @@ fn main() {
 fn is_broken_pipe(error: &(dyn Error + 'static)) -> bool {
     let mut cause = Some(error);
     while let Some(err) = cause {
-        if let Some(io) = err.downcast_ref::<std::io::Error>() {
-            if io.kind() == std::io::ErrorKind::BrokenPipe {
-                return true;
+        let io = err.downcast_ref::<std::io::Error>().or_else(|| {
+            match err.downcast_ref::<csv::Error>().map(csv::Error::kind) {
+                Some(csv::ErrorKind::Io(io)) => Some(io),
+                _ => None,
             }
-        }
-        if let Some(csv) = err.downcast_ref::<csv::Error>() {
-            if let csv::ErrorKind::Io(io) = csv.kind() {
-                if io.kind() == std::io::ErrorKind::BrokenPipe {
-                    return true;
-                }
-            }
+        });
+        if io.is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe) {
+            return true;
         }
         cause = err.source();
     }
@@ -396,7 +390,7 @@ fn reject_utf16<R: std::io::Read>(mut input: R) -> Result<impl std::io::Read, Bo
 // Guarantees the input hands the CSV reader a final newline when '--comment'
 // is in use.
 //
-// csv-core (0.1.13) mishandles end-of-input inside a comment: its DFA treats
+// csv-core mishandles end-of-input inside a comment: its DFA treats
 // "in a comment" like "mid-record" and fabricates a record of one empty
 // field. A file whose last line is a comment with no trailing newline was
 // refused as ragged, or grew a phantom empty row under '--flexible', and a
@@ -983,23 +977,13 @@ fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
         .map(|spool| spool.path.as_path())
         .or(args.input_file.as_deref());
 
-    let tally;
     let scanned_width = match (source, args.fill_mode) {
         (Some(path), FillMode::Widest) => Some(scan_widest_record(&args, path)?),
         _ => None,
     };
 
-    match source {
-        None => {
-            let input = end_in_newline(reject_utf16(std::io::stdin())?, &args);
-            let reader = reader_builder.from_reader(input);
-            if args.peek {
-                answer(peek_stream(reader, &args)?.as_bytes());
-                return Ok(());
-            }
-            tally = process_stream(
-                reader, &mut writer, &args, scanned_width, fill_log.as_mut())?;
-        },
+    let input: Box<dyn std::io::Read> = match source {
+        None => Box::new(std::io::stdin()),
         Some(path) => {
             let file = match open_input(path) {
                 Ok(file) => file,
@@ -1017,16 +1001,15 @@ fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
                     return Err(err);
                 },
             };
-            let input = end_in_newline(reject_utf16(file)?, &args);
-            let reader = reader_builder.from_reader(input);
-            if args.peek {
-                answer(peek_stream(reader, &args)?.as_bytes());
-                return Ok(());
-            }
-            tally = process_stream(
-                reader, &mut writer, &args, scanned_width, fill_log.as_mut())?;
+            Box::new(file)
         },
+    };
+    let reader = reader_builder.from_reader(end_in_newline(reject_utf16(input)?, &args));
+    if args.peek {
+        answer(peek_stream(reader, &args)?.as_bytes());
+        return Ok(());
     }
+    let tally = process_stream(reader, &mut writer, &args, scanned_width, fill_log.as_mut())?;
 
     if let Some(log) = fill_log.take() {
         let rows = log.finish()?;
@@ -1310,10 +1293,8 @@ fn process_stream<R: std::io::Read, W: std::io::Write>(
                     return Err(row_wider_than_reference(
                         headers.len(), width, args.fill_mode));
                 }
-                if headers.len() < width {
-                    if let Some(log) = fill_log.as_deref_mut() {
-                        log.note(None, headers.len(), width, "padded")?;
-                    }
+                if let (true, Some(log)) = (headers.len() < width, fill_log.as_deref_mut()) {
+                    log.note(None, headers.len(), width, "padded")?;
                 }
                 // Under FillMode::Off the width above is the header's own, so
                 // neither branch can fire and nothing pads: the header is the
@@ -1363,10 +1344,8 @@ fn process_stream<R: std::io::Read, W: std::io::Write>(
                 return Err(row_wider_than_reference(
                     record.len(), width, args.fill_mode));
             }
-            if record.len() < width {
-                if let Some(log) = fill_log.as_deref_mut() {
-                    log.note(record.position(), record.len(), width, "padded")?;
-                }
+            if let (true, Some(log)) = (record.len() < width, fill_log.as_deref_mut()) {
+                log.note(record.position(), record.len(), width, "padded")?;
             }
             // Padded before the action runs, so a column index refers to the
             // rectangular row: an action pointed at a field this row was
@@ -2136,7 +2115,7 @@ fn parse_offset(value: &str) -> Result<FixedOffset, Box<dyn Error>> {
         },
     };
 
-    if seconds < MIN_TARGET_OFFSET_SECONDS || seconds > MAX_TARGET_OFFSET_SECONDS {
+    if !(MIN_TARGET_OFFSET_SECONDS..=MAX_TARGET_OFFSET_SECONDS).contains(&seconds) {
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("'--offset' target {} is not a real UTC offset; \
@@ -2587,6 +2566,10 @@ fn insert_target(args: &ArgumentFlags, len: usize) -> usize {
     }
 }
 
+// An edit for one row, and the timestamp the row-over-row --duration carries
+// into the next.
+type PlannedEdit = (RowEdit, Option<DateTime<FixedOffset>>);
+
 // Parses the row and works out what to write, without touching the field
 // list. Returns the edit plus the row-over-row duration cache to carry into
 // the next row.
@@ -2594,7 +2577,7 @@ fn plan_row_edit(
     record: &csv::StringRecord,
     args: &ArgumentFlags,
     dt_cache: Option<DateTime<FixedOffset>>,
-) -> Result<(RowEdit, Option<DateTime<FixedOffset>>), Box<dyn Error>> {
+) -> Result<PlannedEdit, Box<dyn Error>> {
     check_bounds(args, record.len())?;
     let target = insert_target(args, record.len());
     let parse_err = || String::from(PARSE_ERR);
@@ -2892,7 +2875,8 @@ fn first_paragraph(text: &str) -> &str {
     text
 }
 
-fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
+fn arguments() -> Result<ArgumentFlags, Box<dyn Error>> {
+    let mut args = ArgumentFlags::default();
     const TEMPLATE: &str = include_str!("./help/help_template.txt");
     const ABOUT: &str = include_str!("./help/about.txt");
     const FILE: &str = include_str!("./help/file.txt");
@@ -2921,27 +2905,25 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
     const GENERATE_MAN: &str = include_str!("./help/generate_man.txt");
     // Not help text: roff, for the page only. See insert_man_sections.
     const MAN_SUPPLEMENT: &str = include_str!("./man/supplement.roff");
-    // The one trailing section clap allows, composed from the three files.
-    // include_str! expands to a literal, so concat! can join them.
-    const TRAILING: &str = concat!(
-        // First of the trailing sections, where a man page puts EXAMPLES:
-        // after the options, before the reference material.
-        include_str!("./help/examples.txt"),
-        include_str!("./help/formats.txt"),
-        include_str!("./help/limits.txt"),
-        include_str!("./help/exit_status.txt"),
-    );
+    // The one trailing section clap allows, composed from the four files.
+    // A macro rather than a const, since concat! wants literals, and
+    // include_str! and this both expand to one. EXAMPLES comes first, where
+    // a man page puts it: after the options, before the reference material.
+    macro_rules! trailing {
+        () => {
+            concat!(
+                include_str!("./help/examples.txt"),
+                include_str!("./help/formats.txt"),
+                include_str!("./help/limits.txt"),
+                include_str!("./help/exit_status.txt"),
+            )
+        };
+    }
+    const TRAILING: &str = trailing!();
     // The same, plus where to go next. The page does not get this one: it
     // ends in a SEE ALSO that says it already, and better, since a page is
-    // read where the other pages are. concat! wants literals, so the four
-    // are named again rather than TRAILING being extended.
-    const TRAILING_LONG: &str = concat!(
-        include_str!("./help/examples.txt"),
-        include_str!("./help/formats.txt"),
-        include_str!("./help/limits.txt"),
-        include_str!("./help/exit_status.txt"),
-        include_str!("./help/documentation.txt"),
-    );
+    // read where the other pages are.
+    const TRAILING_LONG: &str = concat!(trailing!(), include_str!("./help/documentation.txt"));
     // What -h ends with instead: that it is a summary, and what the long
     // form adds. clap already appends "(see more with '--help')" to the help
     // entry itself, which says where to look but not what is there.
@@ -3601,8 +3583,6 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         })?;
         args.insert_column = Some(parse_signed_column("--insert", column_word)?);
         args.insert_position = parse_position_word(position_word)?;
-    } else {
-        args.insert_position = InsertPosition::After;
     }
 
     if let Some(value) = matches.get_one::<String>("print_delimiter") {
@@ -3818,10 +3798,6 @@ mod tests {
             insert_position: InsertPosition::After,
             ..Default::default()
         }
-    }
-
-    fn headers(fields: &[&str]) -> csv::StringRecord {
-        csv::StringRecord::from(fields.to_vec())
     }
 
     fn record(fields: &[&str]) -> csv::StringRecord {
@@ -4160,7 +4136,7 @@ mod tests {
             ),
         ];
         for (label, args, input, expected) in cases {
-            let result = process_headers(&headers(&input), &args);
+            let result = process_headers(&record(&input), &args);
             match expected {
                 Some(expected) => {
                     let written = result.unwrap_or_else(|error| panic!("{label}: {error}"));
@@ -4171,6 +4147,9 @@ mod tests {
         }
     }
 
+    // A row as written, and the timestamp carried into the next.
+    type ProcessedRecord = (csv::StringRecord, Option<DateTime<FixedOffset>>);
+
     // Convenience wrapper for the cases below, which assert on a whole
     // StringRecord. The streaming path writes the borrowed field list
     // straight out instead.
@@ -4178,7 +4157,7 @@ mod tests {
         record: &csv::StringRecord,
         args: &ArgumentFlags,
         dt_cache: Option<DateTime<FixedOffset>>,
-    ) -> Result<(csv::StringRecord, Option<DateTime<FixedOffset>>), Box<dyn Error>> {
+    ) -> Result<ProcessedRecord, Box<dyn Error>> {
         let (edit, cache) = plan_row_edit(record, args, dt_cache)?;
         let mut fields: Vec<&str> = Vec::with_capacity(record.len() + 2);
         apply_row_edit(record, args, &edit, &mut fields);

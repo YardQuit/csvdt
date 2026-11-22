@@ -4370,7 +4370,10 @@ fn fill_log_of(arguments: &[&str], input: &str, name: &str) -> String {
         .arg("--fill-log")
         .arg(&path)
         .write_stdin(input.to_string())
-        .assert();
+        .assert()
+        // A run may end on a row too wide to pad, and the log is still
+        // written up to it; a usage error or a crash writes none.
+        .code(predicate::in_iter([0, 1]));
     std::fs::read_to_string(&path).expect("the fill log should have been written")
 }
 
