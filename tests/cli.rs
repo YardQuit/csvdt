@@ -711,6 +711,21 @@ fn offset_rejects_a_malformed_target_offset() {
         .stderr(predicate::str::contains("+02:00, -0600, or Z"));
 }
 
+// The offset is read by its shape, so a fraction of a second or a trailing
+// blank in front of or after it is refused rather than read past.
+#[test]
+fn offset_refuses_a_target_with_anything_around_it() {
+    for target in ["0,.5Z", "0,.123+02:00", "0,+01:00 "] {
+        csvdt()
+            .args(["-o", target])
+            .write_stdin("2024-06-15T14:00:00+02:00\n")
+            .assert()
+            .failure()
+            .code(100)
+            .stderr(predicate::str::contains("+02:00, -0600, or Z"));
+    }
+}
+
 #[test]
 fn duration_single_column_is_computed_row_over_row() {
     csvdt()

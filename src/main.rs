@@ -2012,10 +2012,13 @@ fn local_timezone() -> Result<Option<chrono_tz::Tz>, Box<dyn Error>> {
 const MIN_TARGET_OFFSET_SECONDS: i32 = -12 * 3600;
 const MAX_TARGET_OFFSET_SECONDS: i32 = 14 * 3600;
 
-// Parses a standalone UTC offset for -o/--offset, e.g. "+02:00", "-0600",
-// or "Z". Reuses parse_rfc3339_lenient (so the same "+HHMM" leniency
-// applies here too) by wrapping the value in a throwaway timestamp and
-// reading back its offset, rather than duplicating offset-parsing logic.
+// Parses a standalone UTC offset for -o/--offset: Z in either case, or a
+// sign, two digits of hours and two of minutes with or without a colon
+// between them ("+02:00", "-0600"), which is the offset a timestamp carries,
+// with the "+HHMM" leniency the reader allows. Nothing else is taken, not
+// even surrounding blanks: an offset is read by its shape here rather than
+// glued onto a timestamp and parsed with it, which let ".5Z" through as a
+// fraction of a second followed by Z.
 //
 // Offsets outside the range real places use are rejected. chrono itself
 // accepts anything up to +/-23:59, so without this a typo like "+15:00" for
@@ -2031,10 +2034,32 @@ fn parse_offset(value: &str) -> Result<FixedOffset, Box<dyn Error>> {
             "'--offset' expects a UTC offset like +02:00, -0600, or Z"))
     };
 
-    let candidate = format!("1970-01-01T00:00:00{}", value.to_uppercase());
-    let datetime = parse_rfc3339_lenient(&candidate).map_err(|_| malformed())?;
-    let offset = *datetime.offset();
-    let seconds = offset.local_minus_utc();
+    let seconds = match value {
+        "Z" | "z" => 0,
+        _ => {
+            let (sign, rest) = match value.split_at_checked(1) {
+                Some(("+", rest)) => (1, rest),
+                Some(("-", rest)) => (-1, rest),
+                _ => return Err(malformed()),
+            };
+            let (hours, minutes) = match rest.split_at_checked(2) {
+                Some((hours, minutes)) => (hours, minutes.strip_prefix(':').unwrap_or(minutes)),
+                None => return Err(malformed()),
+            };
+            let two_digits = |text: &str| -> Option<i32> {
+                match text.len() == 2 && text.bytes().all(|byte| byte.is_ascii_digit()) {
+                    true => text.parse().ok(),
+                    false => None,
+                }
+            };
+            match (two_digits(hours), two_digits(minutes)) {
+                (Some(hours), Some(minutes)) if hours < 24 && minutes < 60 => {
+                    sign * (hours * 3600 + minutes * 60)
+                },
+                _ => return Err(malformed()),
+            }
+        },
+    };
 
     if seconds < MIN_TARGET_OFFSET_SECONDS || seconds > MAX_TARGET_OFFSET_SECONDS {
         return Err(Box::new(std::io::Error::new(
@@ -2043,7 +2068,7 @@ fn parse_offset(value: &str) -> Result<FixedOffset, Box<dyn Error>> {
                      they run from -12:00 to +14:00", value))));
     }
 
-    Ok(offset)
+    FixedOffset::east_opt(seconds).ok_or_else(malformed)
 }
 
 // Formats a duration as an ISO 8601 duration string: P[n]DT[n]H[n]M[n]S.
@@ -4603,6 +4628,21 @@ mod tests {
     fn parse_offset_rejects_garbage() {
         assert!(parse_offset("banana").is_err());
         assert!(parse_offset("").is_err());
+    }
+
+    // An offset is taken by its shape alone. Glued onto a timestamp and read
+    // with it, a fraction of a second or a trailing blank passed as part of
+    // the timestamp and left the offset behind it accepted.
+    #[test]
+    fn parse_offset_takes_nothing_but_an_offset() {
+        for given in [
+            ".5Z", ".123+02:00", "+01:00 ", " +01:00", "+1:00", "+01:0", "+01:60", "+24:00",
+            "+01::00", "01:00", "ZZ", "+0é:00", "+01:00:00",
+        ] {
+            assert!(parse_offset(given).is_err(), "{given:?} was accepted");
+        }
+        assert_eq!(parse_offset("-00:00").unwrap(), FixedOffset::east_opt(0).unwrap());
+        assert_eq!(parse_offset("+05:45").unwrap(), FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
     }
 
     // ---- format_iso8601_duration ---------------------------------------------
