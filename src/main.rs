@@ -1951,6 +1951,14 @@ fn chrono_reads_posix_rule(standard: i32, daylight: Option<i32>) -> bool {
         let naive = chrono::NaiveDate::from_ymd_opt(2024, *month, 15)?.and_hms_opt(12, 0, 0)?;
         Some(chrono::Local.offset_from_utc_datetime(&naive).fix().local_minus_utc())
     }).collect();
+    offsets_follow_rule(&offsets, standard, daylight)
+}
+
+// Whether the OFFSETS chrono gave at the two probes are the rule's own: the
+// standard offset, and the daylight one when the rule has one. Apart from
+// chrono_reads_posix_rule so the decision can be tested without depending on
+// the zone of the machine the tests run on, which is what chrono falls back to.
+fn offsets_follow_rule(offsets: &[i32], standard: i32, daylight: Option<i32>) -> bool {
     offsets.contains(&standard) && daylight.is_none_or(|offset| offsets.contains(&offset))
 }
 
@@ -5531,5 +5539,23 @@ mod tests {
             process_stream(reader, &mut writer, &args, None, None).unwrap();
             assert_eq!(writes.get(), expected, "flush_each_record={flush_each_record}");
         }
+    }
+
+    // ---- the POSIX rule check ------------------------------------------------
+
+    // chrono replaces a rule it cannot read with the machine's own zone, whose
+    // offsets can include the rule's standard one by chance: Stockholm's
+    // summer +02:00 is Jerusalem's standard offset. Only both of the rule's
+    // offsets showing means chrono read it.
+    #[test]
+    fn a_rule_is_read_only_when_both_its_offsets_show() {
+        let stockholm = [3600, 7200];
+        // IST-2IDT: +02:00 and +03:00. One of them matching is chance.
+        assert!(!offsets_follow_rule(&stockholm, 7200, Some(10800)));
+        // AEST-10AEDT, read, from the southern hemisphere's two probes.
+        assert!(offsets_follow_rule(&[39600, 36000], 36000, Some(39600)));
+        // A rule without daylight saving has the one offset to show.
+        assert!(offsets_follow_rule(&[7200, 7200], 7200, None));
+        assert!(!offsets_follow_rule(&stockholm, 10800, None));
     }
 }
