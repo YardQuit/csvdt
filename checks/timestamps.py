@@ -50,14 +50,28 @@ def representable_in_utc(when):
     return True
 
 
+compared = 0   # how many produced rows were read back, summed over runs
+
+
 def column(args, values):
-    """Run one value per row and return the produced column."""
+    """Run one value per row and return the produced rows, one per value.
+
+    The check stops if csvdt exits with anything but 0 (all converted) or 1
+    (none did), or answers with a different number of rows than it was given:
+    a comparison over the rows that happen to be there says nothing.
+    """
+    global compared
     data = "".join(f"x,{v}\n" for v in values).encode()
     p = harness.run(args, data)
-    if p.returncode not in (0, 1):
-        return None
-    return [next(csv.reader([line]))
+    rows = [next(csv.reader([line]))
             for line in p.stdout.decode().splitlines()]
+    if p.returncode not in (0, 1) or len(rows) != len(values):
+        harness.fail(f"timestamps: csvdt {' '.join(args)} exited "
+                     f"{p.returncode} with {len(rows)} rows for "
+                     f"{len(values)} values: "
+                     f"{p.stderr.decode('utf-8', 'replace')[:200]}")
+    compared += len(rows)
+    return rows
 
 
 def generate(rng):
@@ -86,7 +100,7 @@ def main():
         bad.append(f"[{kind}] {source!r} -> {produced!r}: {why}")
 
     # -u: the instant must survive, and the offset must be +00:00.
-    for source, row in zip(values, column(["-u1"], values) or []):
+    for source, row in zip(values, column(["-u1"], values)):
         want = reference(source)
         if want is None:
             continue
@@ -103,7 +117,7 @@ def main():
 
     # -o: the instant must survive a move to a named offset.
     for offset in ["+05:30", "-06:00", "Z", "+14:00", "-12:00"]:
-        for source, row in zip(values, column([f"-o1,{offset}"], values) or []):
+        for source, row in zip(values, column([f"-o1,{offset}"], values)):
             want = reference(source)
             if want is None or row[2] == "parse_err":
                 continue
@@ -114,7 +128,7 @@ def main():
                 note(f"-o{offset}", source, row[2], f"instant moved: {want} != {got}")
 
     # -s: date and time-of-day, both read from the record's own offset.
-    for source, row in zip(values, column(["-s1"], values) or []):
+    for source, row in zip(values, column(["-s1"], values)):
         want = reference(source)
         if want is None or row[2] == "parse_err":
             continue
@@ -128,14 +142,15 @@ def main():
     # -r: Unix epoch to RFC3339, across the documented range.
     epochs = [rng.randint(-62135596800, 253402300799) for _ in range(count)]
     epochs += [0, -1, 1, -62135596800, 253402300799]
-    for epoch, row in zip(epochs, column(["-r1"], [str(e) for e in epochs]) or []):
+    for epoch, row in zip(epochs, column(["-r1"], [str(e) for e in epochs])):
         want = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=epoch)
         if row[2] == "parse_err":
             note("-r", str(epoch), "parse_err", "inside the documented range")
         elif reference(row[2]) != want:
             note("-r", str(epoch), row[2], f"!= {want}")
 
-    print(f"timestamp instants: seed {seed}, {count} values, {len(bad)} divergences")
+    print(f"timestamp instants: seed {seed}, {count} values, {compared} rows "
+          f"read back, {len(bad)} divergences")
     for line in bad[:8]:
         print(f"  {line}")
     return 1 if bad else 0

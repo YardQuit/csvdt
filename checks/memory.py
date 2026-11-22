@@ -56,24 +56,16 @@ def peak_kib(args, path):
 
 
 def rows_file(directory, n):
-    path = os.path.join(directory, f"rows-{n}.csv")
-    with open(path, "wb") as f:
-        f.write(b"a,b\n")
-        row = b"2024-06-15T14:00:00Z,x\n"
-        for _ in range(0, n, 10000):
-            f.write(row * min(10000, n))
-    return path
+    row = b"2024-06-15T14:00:00Z,x\n"
+    block = 10000
+    return harness.written(directory, f"rows-{n}.csv", b"a,b\n",
+                           *[row * block] * (n // block),
+                           row * (n % block))
 
 
 def field_file(directory, mb):
-    path = os.path.join(directory, f"field-{mb}.csv")
-    with open(path, "wb") as f:
-        f.write(b'a,b\n"')
-        chunk = b"z" * MIB
-        for _ in range(mb):
-            f.write(chunk)
-        f.write(b'",1\n')
-    return path
+    return harness.written(directory, f"field-{mb}.csv", b'a,b\n"',
+                           *[b"z" * MIB] * mb, b'",1\n')
 
 
 def main():

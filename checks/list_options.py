@@ -56,7 +56,9 @@ def took_the_value(args, value):
 
 def main():
     bad = []
+    listed = 0
     for short, long, value, separator in options():
+        listed += 1
         if value == "none" or long in ASKED:
             continue
         if long not in VALUES:
@@ -85,6 +87,8 @@ def main():
                     and name in ("--long value", "-s value")):
                 bad.append((long, f"'{separator}' but {name} took it anyway"))
 
+    if listed == 0:
+        bad.append(("--list-options", "listed no options at all"))
     print(f"list-options contract: {len(bad)} mismatches")
     for long, detail in bad:
         print(f"  {long}: {detail}")

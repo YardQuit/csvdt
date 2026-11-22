@@ -20,6 +20,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # Stands in for csvdt.  It exits 101 on every run.
 CRASHING = "#!/bin/sh\ncat >/dev/null\necho 'thread main panicked' >&2\nexit 101\n"
 
+# Stands in for csvdt.  It succeeds and writes nothing.
+SILENT = "#!/bin/sh\ncat >/dev/null\n"
+
 # Stands in for csvdt with two lies told: America/New_York is converted as if
 # it were America/Chicago, so every offset disagrees with the host's by an
 # hour while the instants stay right, and `--version` names the tzdata release
@@ -72,6 +75,31 @@ class CrashTest(unittest.TestCase):
                     done = run_check(name, stub)
                     self.assertNotEqual(done.returncode, 0, done.stdout)
                     self.assertRegex(done.stderr + done.stdout, "crashed|PANIC")
+
+
+class SilenceTest(unittest.TestCase):
+    """A csvdt that exits 0 with no output fails the checks that compare."""
+
+    def test_each_check_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stub = write_stub(directory, "csvdt", SILENT)
+            for name in ["csv_roundtrip", "quoting", "timestamps", "durations",
+                         "list_options"]:
+                with self.subTest(check=name):
+                    self.assertNotEqual(run_check(name, stub).returncode, 0)
+
+
+class StartTest(unittest.TestCase):
+    """run-checks.sh refuses a binary that is not csvdt before running any."""
+
+    def test_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stub = write_stub(directory, "csvdt", CRASHING)
+            done = subprocess.run([os.path.join(HERE, "run-checks.sh"), "local"],
+                                  capture_output=True, text=True, timeout=60,
+                                  stdin=subprocess.DEVNULL,
+                                  env=dict(os.environ, CSVDT=stub))
+            self.assertEqual(done.returncode, 2, done.stderr)
 
 
 @unittest.skipUnless(local.host_tzdata_release(),

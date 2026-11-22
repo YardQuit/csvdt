@@ -45,27 +45,20 @@ SLOWEST = 3.0
 FLOOR_SECONDS = 0.02
 
 
-def written(directory, name, body):
-    path = os.path.join(directory, name)
-    with open(path, "w") as handle:
-        handle.write(body)
-    return path
-
-
 def plain_field(directory, mb):
-    return written(directory, f"plain{mb}.csv", "h\n" + "a" * (mb * MIB) + "\n")
+    return harness.written(directory, f"plain{mb}.csv", "h\n" + "a" * (mb * MIB) + "\n")
 
 
 def quote_field(directory, mb):
     """A quoted field of nothing but quote characters: 2 bytes in per byte."""
-    return written(directory, f"quote{mb}.csv",
+    return harness.written(directory, f"quote{mb}.csv",
                    'h\n"' + '""' * (mb * MIB) + '"\n')
 
 
 def rows_file(directory, mb):
     row = "2024-06-15T14:00:00Z,1700000000,ada,info\n"
     body = row * ((mb * MIB) // len(row))
-    return written(directory, f"rows{mb}.csv", "when,epoch,who,level\n" + body)
+    return harness.written(directory, f"rows{mb}.csv", "when,epoch,who,level\n" + body)
 
 
 def seconds(args, path, reps=3):
@@ -74,7 +67,10 @@ def seconds(args, path, reps=3):
     for _ in range(reps):
         start = time.perf_counter()
         with open(os.devnull, "wb") as sink:
-            harness.run(args + [path], stdout=sink, timeout=600)
+            done = harness.run(args + [path], stdout=sink, timeout=600)
+        if done.returncode != 0:
+            harness.fail(f"timing: csvdt exited {done.returncode} on a valid "
+                         f"file: {done.stderr.decode('utf-8', 'replace')[:200]}")
         taken = time.perf_counter() - start
         best = taken if best is None else min(best, taken)
     return best

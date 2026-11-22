@@ -93,6 +93,8 @@ def either_order(rng, count):
             return [f"{args}: csvdt failed: {done.stderr.decode()[:120]}"]
         runs[args] = [next(csv.reader([line]))
                       for line in done.stdout.decode().splitlines()]
+        if len(runs[args]) != len(pairs):
+            return [f"{args}: {len(runs[args])} rows for {len(pairs)} inputs"]
 
     bad = []
     for index, (a, b) in enumerate(pairs):
@@ -127,6 +129,8 @@ def carried_forward(rng, count):
         return [f"-d0: csvdt failed: {done.stderr.decode()[:120]}"]
     got = [next(csv.reader([line]))[-1]
            for line in done.stdout.decode().splitlines()]
+    if len(got) != len(rows):
+        return [f"-d0: {len(got)} rows for {len(rows)} inputs"]
 
     bad, previous = [], None
     for index, row in enumerate(rows):
@@ -167,9 +171,13 @@ def main():
     if p.returncode != 0:
         print(f"exact durations: csvdt failed: {p.stderr.decode()[:200]}")
         return 1
+    lines = p.stdout.decode().splitlines()
+    if len(lines) != len(pairs):
+        print(f"exact durations: {len(lines)} rows for {len(pairs)} inputs")
+        return 1
 
     bad = []
-    for (a, b), line in zip(pairs, p.stdout.decode().splitlines()):
+    for (a, b), line in zip(pairs, lines):
         row = next(csv.reader([line]))
         first, second = nanoseconds(a), nanoseconds(b)
         if first is None or second is None:

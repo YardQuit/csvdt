@@ -41,15 +41,6 @@ def run(args, text):
             p.stderr.decode("utf-8", "replace"))
 
 
-def records(text, quotechar='"'):
-    """Read as Python's csv does, which is the reference reader here."""
-    try:
-        return [r for r in csv.reader(io.StringIO(text, newline=""),
-                                      quotechar=quotechar) if r != []]
-    except Exception:
-        return None
-
-
 def lines_beginning_with(text, comment):
     """Rows a second read with --comment would drop, counted from the text.
 
@@ -75,7 +66,7 @@ def misread_rows(text):
     row holding one such field can make four rows differ, and that is not a
     divergence.
     """
-    rows = records(text, '"')
+    rows = harness.records(text)
     if rows is None:
         return None
 
@@ -148,8 +139,8 @@ def main():
         again_status, again, _ = run(
             ["-H", "-p", "--comment", comment], out)
         if roundtrips and again_status in (0, 1):
-            kept = records(out)
-            survived = records(again)
+            kept = harness.records(out)
+            survived = harness.records(again)
             if kept is not None and survived is not None:
                 lost = len(kept) - len(survived)
                 if lost != claimed:
@@ -166,7 +157,7 @@ def main():
         # is found by position, which needs the output to have the columns
         # it was written with, so the same restriction as above.
         if action and roundtrips:
-            body = records(out)
+            body = harness.records(out)
             if body:
                 # Found by its header, not by position. A generated column
                 # lands beside the one it came from (that is what -i's

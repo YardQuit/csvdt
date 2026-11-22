@@ -6,6 +6,8 @@ binary that crashed on every input produced no output, which to a check that
 only compares output reads as nothing to compare, and it passed. Going
 through `run` here means a crash is seen once, by all of them.
 """
+import csv
+import io
 import os
 import subprocess
 import sys
@@ -54,6 +56,43 @@ def run(args, data=b"", *, env=None, timeout=60, stdout=subprocess.PIPE,
               file=sys.stderr)
         sys.exit(1)
     return done
+
+
+def fail(message):
+    """Stop the check at once: print MESSAGE to stderr and exit 1.
+
+    For a situation in which no comparison can be made at all, such as csvdt
+    answering with fewer rows than it was given.
+    """
+    print(message, file=sys.stderr)
+    sys.exit(1)
+
+
+def records(text, delimiter=",", quotechar='"'):
+    """The records Python's csv reads from TEXT, empty lines left out.
+
+    The reference reader of these checks.  None where the text is not CSV
+    that Python can read (csv.Error).
+    """
+    try:
+        return [row for row in csv.reader(io.StringIO(text, newline=""),
+                                          delimiter=delimiter,
+                                          quotechar=quotechar) if row != []]
+    except csv.Error:
+        return None
+
+
+def written(directory, name, *parts):
+    """Write PARTS (str or bytes, in order) to NAME in DIRECTORY; return the path.
+
+    A part may be a large object repeated by the caller, so a fixture of many
+    megabytes goes to disk without being joined in this process.
+    """
+    path = os.path.join(directory, name)
+    with open(path, "wb") as handle:
+        for part in parts:
+            handle.write(part.encode() if isinstance(part, str) else part)
+    return path
 
 
 def text(raw):

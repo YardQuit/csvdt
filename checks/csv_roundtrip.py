@@ -52,10 +52,15 @@ def generate(rng, rectangular=True):
     return data
 
 
+compared = 0   # runs whose output was read back
+
+
 def check(label, args, data):
+    global compared
     code, out = run(args, data)
     if code != 0:
         return None          # a refused input is a separate question
+    compared += 1
     want = reference(data.lstrip("﻿"))
     got = reference(out)
     if want == got:
@@ -81,7 +86,10 @@ def main():
         if found and found.split("want:")[-1][:80] not in seen:
             seen.add(found.split("want:")[-1][:80])
             bad.append(found)
-    print(f"csv round-trip: seed {seed}, {rounds} files, {len(bad)} divergences")
+    if compared == 0:
+        bad.append("every run was refused, so nothing was compared")
+    print(f"csv round-trip: seed {seed}, {rounds} files, {compared} runs "
+          f"compared, {len(bad)} divergences")
     for line in bad[:8]:
         print(f"  {line}")
     return 1 if bad else 0

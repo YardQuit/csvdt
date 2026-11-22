@@ -51,13 +51,6 @@ def run(args, text):
             p.stderr.decode("utf-8", "replace"))
 
 
-def records(text, delimiter=","):
-    """Read as Python's csv does, which is the reference reader here."""
-    return [row for row in csv.reader(io.StringIO(text, newline=""),
-                                      delimiter=delimiter, quotechar='"')
-            if row != []]
-
-
 def through_csvdt(text, delimiter, comment):
     """Read as csvdt does, which is the reader a second run would use.
 
@@ -74,7 +67,7 @@ def through_csvdt(text, delimiter, comment):
     code, out, _ = run(args, text)
     if code != 0:
         return None
-    return records(out, delimiter="\x01")
+    return harness.records(out, delimiter="\x01")
 
 
 def table(rng):
@@ -86,14 +79,18 @@ def table(rng):
     return buffer.getvalue()
 
 
+compared = 0   # draws whose output was read back
+
+
 def check(rng):
     """One draw: a table, a style, an output delimiter, a comment character."""
+    global compared
     style = rng.choice(STYLES)
     delimiter = rng.choice(DELIMITERS)
     comment = rng.choice(COMMENTS)
 
     text = table(rng)
-    want = records(text)
+    want = harness.records(text)
     if not want:
         return None
 
@@ -105,6 +102,7 @@ def check(rng):
         # A refused run is a separate question, and there is nothing to
         # compare: csvdt wrote no table to read back.
         return None
+    compared += 1
 
     # The input is read with csvdt's own reader too when a comment character
     # is in use, since a value here may begin with one and be dropped on the
@@ -113,7 +111,7 @@ def check(rng):
         want = through_csvdt(text, ",", comment)
         got = through_csvdt(out, delimiter, comment)
     else:
-        got = records(out, delimiter=delimiter)
+        got = harness.records(out, delimiter=delimiter)
     if want is None or got is None:
         return None
     if want == got:
@@ -158,12 +156,15 @@ def main():
         seen.add(signature)
         bad.append(found)
 
+    if compared == 0:
+        print(f"quoting: all {rounds} draws were refused, nothing compared")
+        return 1
     if bad:
         print(f"{len(bad)} quoting round-trip(s) lost records:\n")
         for entry in bad:
             print(" ", entry, "\n")
         return 1
-    print(f"quoting: {rounds} draws round-tripped")
+    print(f"quoting: {compared} of {rounds} draws round-tripped")
     return 0
 
 

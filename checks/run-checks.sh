@@ -41,7 +41,22 @@ if ! command -v python3 >/dev/null; then
     exit 2
 fi
 
-echo "== $("$CSVDT" --version | head -1)"
+# A binary that cannot say what it is, or gets one known conversion wrong, is
+# not worth running a whole run of checks against: refuse it here, where the
+# message can name the cause.
+version=$("$CSVDT" --version 2>&1 | head -1)
+case $version in
+    csvdt\ *) ;;
+    *) echo "$CSVDT does not answer --version like csvdt: '$version'" >&2
+       exit 2 ;;
+esac
+known=$(printf 'a\n1700000000\n' | "$CSVDT" -H -p -r0 2>&1 | tail -n1)
+if [ "$known" != "1700000000,2023-11-14T22:13:20+00:00" ]; then
+    echo "$CSVDT converted 1700000000 to '$known', not 2023-11-14T22:13:20+00:00." >&2
+    exit 2
+fi
+
+echo "== $version"
 echo "== $(python3 --version), seed $seed"
 
 wanted=${1:-}
