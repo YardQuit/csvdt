@@ -499,15 +499,19 @@ whole arguments match."
             (setq index (1+ index)))))
       (nreverse flags))))
 
+(defun csvdt--takes-separate-value-p (record)
+  "Non-nil when the option RECORD may take its value as the next argument.
+That is so when it takes a value at all and does not insist on \"=\"."
+  (and (member (plist-get record :value) '("required" "optional"))
+       (not (equal (plist-get record :separator) "equals"))))
+
 (defun csvdt--shorts-taking-a-separate-value ()
-  "Return the short options whose value may be the next argument.
-An option whose value must be attached with \"=\" takes no separate one."
+  "Return the short options whose value may be the next argument."
   (let ((shorts '()))
     (dolist (record (csvdt--option-records))
       (let ((short (plist-get record :short)))
         (when (and short (not (string-empty-p short))
-                   (member (plist-get record :value) '("required" "optional"))
-                   (not (equal (plist-get record :separator) "equals")))
+                   (csvdt--takes-separate-value-p record))
           (push short shorts))))
     shorts))
 
@@ -520,9 +524,7 @@ must be attached with \"=\"."
     (and (not (string-match-p "=" argument))
          (seq-some (lambda (record)
                      (and (equal (plist-get record :long) argument)
-                          (member (plist-get record :value)
-                                  '("required" "optional"))
-                          (not (equal (plist-get record :separator) "equals"))))
+                          (csvdt--takes-separate-value-p record)))
                    (csvdt--option-records))))
    ((and (string-prefix-p "-" argument) (> (length argument) 1))
     ;; A cluster ends at the first short that takes a value, and only takes a
