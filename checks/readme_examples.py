@@ -16,8 +16,7 @@ rather than passed over quietly: a green line here covers what it ran.
 """
 import os, re, subprocess, sys
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import harness
 
 # A file named by an example that the example does not itself write. These
 # need a fixture whose contents the README does not give, so running them
@@ -135,7 +134,7 @@ def transcripts(temporary):
     bad = []
     for path, shown, argv, stdin, fixture in MESSAGE_EXAMPLES:
         # Collapsed, because the README wraps a long message to its column.
-        text = " ".join(open(os.path.join(ROOT, path),
+        text = " ".join(open(os.path.join(harness.ROOT, path),
                              encoding="utf-8").read().split())
         if " ".join(shown.split()) not in text:
             bad.append((path, "not in the README any more", shown, ""))
@@ -143,8 +142,7 @@ def transcripts(temporary):
         if fixture:
             with open(os.path.join(temporary, fixture[0]), "wb") as handle:
                 handle.write(fixture[1])
-        done = subprocess.run([os.path.abspath(CSVDT)] + argv, input=stdin,
-                              cwd=temporary, capture_output=True)
+        done = harness.run(argv, stdin, cwd=temporary)
         said = " ".join(done.stderr.decode("utf-8", "replace").split())
         # 'csvdt exited N: ' is the front end's own wrapper round the rest.
         want = shown
@@ -195,9 +193,7 @@ def help_examples(temporary):
     guessing at output by what the lines look like dropped two rows of a
     table on the first try.
     """
-    done = subprocess.run([os.path.abspath(CSVDT), "--help"],
-                          capture_output=True, text=True)
-    lines = done.stdout.split("\n")
+    lines = harness.run(["--help"]).stdout.decode().split("\n")
     numbered = [(len(line) - len(line.lstrip()), line.strip())
                 for line in lines]
     try:
@@ -235,7 +231,7 @@ def help_examples(temporary):
         done = subprocess.run(["bash", "-c", command], cwd=temporary,
                               capture_output=True, text=True,
                               env={**os.environ, "PATH":
-                                   os.path.dirname(os.path.abspath(CSVDT))
+                                   os.path.dirname(harness.CSVDT)
                                    + os.pathsep + os.environ["PATH"]})
         got = [line.strip() for line in done.stdout.split("\n")
                if line.strip()]
@@ -248,7 +244,7 @@ def main():
     ran = skipped = 0
     bad = []
     for path in ("README.md", "emacs/README.md"):
-        for where, command, shown in examples(os.path.join(ROOT, path)):
+        for where, command, shown in examples(os.path.join(harness.ROOT, path)):
             if (NEEDS_THE_WORLD.search(command)
                     or NEEDS_THAT_BUILD.search(command)
                     or (NEEDS_A_FILE.search(command)
@@ -256,10 +252,10 @@ def main():
                 skipped += 1
                 continue
             ran += 1
-            done = subprocess.run(["bash", "-c", command], cwd=ROOT,
+            done = subprocess.run(["bash", "-c", command], cwd=harness.ROOT,
                                   capture_output=True, text=True,
                                   env={**os.environ, "PATH":
-                                       os.path.dirname(os.path.abspath(CSVDT))
+                                       os.path.dirname(harness.CSVDT)
                                        + os.pathsep + os.environ["PATH"]})
             # A block showing a message is showing what reached stderr; one
             # showing rows is showing what reached standard output. Both are

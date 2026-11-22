@@ -9,10 +9,11 @@ is the only comparison worth making across two implementations.
 -d is checked separately in durations.py, where Python's timedelta is too
 coarse to referee and the arithmetic has to be done in integers.
 """
-import calendar, csv, io, os, random, subprocess, sys
+import calendar, csv, io, random, sys
 from datetime import datetime, timedelta, timezone
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 
 # -12:00 to +14:00 is what real zones use and what -o will write; a file may
 # carry anything up to a whole day either way, and reading one is exact
@@ -52,7 +53,7 @@ def representable_in_utc(when):
 def column(args, values):
     """Run one value per row and return the produced column."""
     data = "".join(f"x,{v}\n" for v in values).encode()
-    p = subprocess.run([CSVDT] + args, input=data, capture_output=True)
+    p = harness.run(args, data)
     if p.returncode not in (0, 1):
         return None
     return [next(csv.reader([line]))

@@ -12,9 +12,10 @@ straddle. A field whose quote, delimiter or newline lands exactly on one is
 where a writer refilling mid-escape goes wrong, so those sizes are built
 deliberately rather than waited for.
 """
-import csv, io, os, random, subprocess, sys
+import csv, io, os, random, sys
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 csv.field_size_limit(10 ** 9)
 
 FIELDS = ["a", "", " sp ", "a,b", 'q"q', "line\nbreak", "\ttab", "é",
@@ -31,7 +32,7 @@ BOUNDARIES = [8 * 1024, 64 * 1024, 128 * 1024, 512 * 1024,
 
 
 def run(args, data):
-    p = subprocess.run([CSVDT] + args, input=data, capture_output=True)
+    p = harness.run(args, data)
     return p.returncode, p.stdout, p.stderr
 
 

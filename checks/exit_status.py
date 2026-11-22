@@ -29,9 +29,10 @@ gives about itself. /dev/full is the way to ask, so the section is skipped
 where there is no such device rather than passing on a machine that could not
 have run it.
 """
-import csv, io, os, random, subprocess, sys
+import csv, io, os, random, sys
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 
 GOOD = ["2024-06-15T14:00:00Z", "2024-06-15T14:00:00+02:00",
         "1999-01-01T00:00:00-05:00", "2016-12-31T23:59:60Z"]
@@ -55,8 +56,7 @@ def run(args, text, env=None):
     environment.setdefault("TZ", "UTC")
     if env:
         environment.update(env)
-    p = subprocess.run([CSVDT] + args, input=text.encode(),
-                       capture_output=True, timeout=20, env=environment)
+    p = harness.run(args, text, timeout=20, env=environment)
     return (p.returncode, p.stdout.decode("utf-8", "replace"),
             p.stderr.decode("utf-8", "replace"))
 
@@ -166,9 +166,8 @@ def main():
                      ["--list-options"], ["--generate-man"]):
             unwritable += 1
             with open("/dev/full", "wb") as full:
-                done = subprocess.run(
-                    [CSVDT] + args, input=b"a\n1700000000\n",
-                    stdout=full, stderr=subprocess.PIPE, timeout=20)
+                done = harness.run(args, b"a\n1700000000\n", stdout=full,
+                           timeout=20)
             if done.returncode != 1:
                 findings.append(("OUTPUT LOST BUT NOT 1", args, "",
                                  f"exit {done.returncode}"))

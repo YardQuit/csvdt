@@ -20,9 +20,10 @@ A count that agrees with the model but not with the second read would mean
 the model and the program share a misunderstanding, which is the failure a
 differential exists to catch.
 """
-import csv, io, os, random, re, subprocess, sys
+import csv, io, random, re, sys
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 
 COMMENT_CHARS = ["#", ";", "%", "@", "!"]
 QUOTING = ["never", "necessary", "always", "nonnumeric"]
@@ -35,8 +36,7 @@ VALUES = ["plain", "x,y", "#lead", ";lead", "%lead", "@lead", "!lead",
 
 
 def run(args, text):
-    p = subprocess.run([CSVDT] + args, input=text.encode(),
-                       capture_output=True, timeout=20)
+    p = harness.run(args, text, timeout=20)
     return (p.returncode, p.stdout.decode("utf-8", "replace"),
             p.stderr.decode("utf-8", "replace"))
 

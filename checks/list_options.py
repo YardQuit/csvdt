@@ -11,9 +11,10 @@ parses perfectly well and fails later as a missing file, which looks like an
 error but is a different answer from the option having taken it. The check
 therefore asks whether csvdt reported reading that value as a file.
 """
-import os, subprocess, sys
+import sys
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 DATA = b"a,b,c\n2024-06-15T14:00:00Z,1700000000,x\n"
 
 # A value each valued option accepts, so a refusal means the spelling was
@@ -34,8 +35,7 @@ ASKED = ("--help", "--version", "--list-options")
 
 
 def options():
-    out = subprocess.run([CSVDT, "--list-options"],
-                         capture_output=True).stdout.decode()
+    out = harness.run(["--list-options"]).stdout.decode()
     for line in out.splitlines():
         if line.startswith("#") or not line.strip():
             continue
@@ -44,7 +44,7 @@ def options():
 
 
 def took_the_value(args, value):
-    p = subprocess.run([CSVDT] + args, input=DATA, capture_output=True)
+    p = harness.run(args, DATA)
     err = p.stderr.decode()
     if f"no file named '{value}'" in err:
         return False, "read as a filename"

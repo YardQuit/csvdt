@@ -26,6 +26,12 @@ when missing would let an edited source beside a stale binary be checked as
 the previous build and reported `ALL CLEAR`, the one answer here that must
 never be wrong.
 
+Every check runs csvdt through `harness.py`, which is also where `CSVDT` is
+read. A csvdt that crashes (a panic, or death by a signal) stops the check
+with a message and a non-zero exit, so a binary that dies on every input
+cannot read as a clean run. `python3 -m unittest local_selftest` tests that
+for each check against a stand-in binary that exits 101.
+
 ## What each one asks
 
 **Against another implementation.** Python's `csv` and `datetime` were

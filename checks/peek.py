@@ -24,9 +24,10 @@ than read back from its output: with -H and -p, the header and the first data
 row; with -H alone, the first data row, since the header is a header and not
 data; with neither, the first record, which is data like any other.
 """
-import csv, io, os, random, subprocess, sys
+import csv, io, random, sys
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 
 # Each is a way of reading that changes where a field begins or ends, and so
 # changes the answer. The help says all four apply to --peek.
@@ -72,8 +73,7 @@ def generate(rng, awkward):
 
 
 def run(args, text):
-    p = subprocess.run([CSVDT] + args, input=text.encode(),
-                       capture_output=True, timeout=20)
+    p = harness.run(args, text, timeout=20)
     return p.returncode, p.stdout.decode("utf-8", "replace"), \
         p.stderr.decode("utf-8", "replace")
 
@@ -208,8 +208,7 @@ def main():
               "--print-delimiter": ";", "--quote": "always",
               "--fill-log": "-"}
 
-    listed = subprocess.run([CSVDT, "--list-options"], capture_output=True,
-                            timeout=20).stdout.decode()
+    listed = harness.run(["--list-options"], timeout=20).stdout.decode()
     refusals = 0
     welcomed = 0
     for line in listed.splitlines():

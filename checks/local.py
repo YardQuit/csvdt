@@ -52,11 +52,12 @@ Reported rather than held:
 The zones are the ones both sides know, since csvdt refuses a zone its own
 data lacks and Python cannot referee one it lacks either.
 """
-import os, random, subprocess, sys
+import os, random, sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, available_timezones
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 
 # Where the bundled data and a host's can be relied on to say the same thing.
 # The disagreements are in the era before standard time, when an offset was a
@@ -87,8 +88,7 @@ def run(rows, zone):
     """Convert column 0 in ZONE, and give back what came out of it."""
     body = "when\n" + "".join(row + "\n" for row in rows)
     environment = dict(os.environ, TZ=zone)
-    done = subprocess.run([CSVDT, "-H", "-p", "-l0"], input=body.encode(),
-                          capture_output=True, env=environment, timeout=120)
+    done = harness.run(["-H", "-p", "-l0"], body, env=environment, timeout=120)
     # Exit 1 where nothing converted is a documented answer, not a failure to
     # read: a row whose zone has a sub-minute offset is written parse_err, and
     # a file of nothing else converted nothing. The output is still the

@@ -7,10 +7,11 @@ integer number of nanoseconds, and csvdt's ISO 8601 duration parsed back the
 same way, so the comparison is exact at the precision csvdt actually works
 to.
 """
-import calendar, csv, io, os, random, re, subprocess, sys
+import calendar, csv, io, random, re, sys
 from datetime import date
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 EPOCH = date(1970, 1, 1).toordinal()
 
 TIMESTAMP = re.compile(r"(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})"
@@ -87,7 +88,7 @@ def either_order(rng, count):
     data = "".join(f"{a},{b}\n" for a, b in pairs).encode()
     runs = {}
     for args in ("-d0,1", "-d1,0"):
-        done = subprocess.run([CSVDT, args], input=data, capture_output=True)
+        done = harness.run([args], data)
         if done.returncode != 0:
             return [f"{args}: csvdt failed: {done.stderr.decode()[:120]}"]
         runs[args] = [next(csv.reader([line]))
@@ -121,7 +122,7 @@ def carried_forward(rng, count):
                         "2024-13-01T00:00:00Z", "2024-01-32T00:00:00Z"])
             for _ in range(count)]
     data = "".join(f"{row}\n" for row in rows).encode()
-    done = subprocess.run([CSVDT, "-d0"], input=data, capture_output=True)
+    done = harness.run(["-d0"], data)
     if done.returncode not in (0, 1):
         return [f"-d0: csvdt failed: {done.stderr.decode()[:120]}"]
     got = [next(csv.reader([line]))[-1]
@@ -162,7 +163,7 @@ def main():
     rng = random.Random(seed)
     pairs = [(generate(rng), generate(rng)) for _ in range(count)]
     data = "".join(f"{a},{b}\n" for a, b in pairs).encode()
-    p = subprocess.run([CSVDT, "-d0,1"], input=data, capture_output=True)
+    p = harness.run(["-d0,1"], data)
     if p.returncode != 0:
         print(f"exact durations: csvdt failed: {p.stderr.decode()[:200]}")
         return 1

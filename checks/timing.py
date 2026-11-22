@@ -31,9 +31,10 @@ is worth printing beside the others rather than held to a band.
 Fixtures go to disk rather than being piped in, so what is timed is csvdt
 reading a file rather than this process writing one.
 """
-import os, subprocess, sys, tempfile, time
+import os, sys, tempfile, time
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 MIB = 1 << 20
 
 # The most a doubling may cost. Nothing is asked of the other direction:
@@ -73,8 +74,7 @@ def seconds(args, path, reps=3):
     for _ in range(reps):
         start = time.perf_counter()
         with open(os.devnull, "wb") as sink:
-            subprocess.run([CSVDT] + args + [path], stdout=sink, stderr=sink,
-                           timeout=600)
+            harness.run(args + [path], stdout=sink, timeout=600)
         taken = time.perf_counter() - start
         best = taken if best is None else min(best, taken)
     return best

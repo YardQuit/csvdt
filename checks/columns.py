@@ -5,14 +5,15 @@ each precisely enough to write down independently. That is a different
 question from whether they crash: this asks whether the answer is the one
 documented, over every subset and every ordering of a small file's columns.
 """
-import csv, io, itertools, os, subprocess, sys
+import csv, io, itertools, sys
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 
 
 def run(args, rows):
     data = "".join(",".join(r) + "\n" for r in rows).encode()
-    p = subprocess.run([CSVDT] + args, input=data, capture_output=True)
+    p = harness.run(args, data)
     out = [r for r in csv.reader(io.StringIO(p.stdout.decode(), newline=""))
            if r != []]
     return p.returncode, out, p.stderr.decode()

@@ -20,9 +20,10 @@ numeric field beginning with the comment character is a documented gap, and
 the run reports how many rows it touches on stderr. Anything else is damage
 nothing warned about.
 """
-import csv, io, os, random, re, subprocess, sys
+import csv, io, random, re, sys
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 
 STYLES = ["always", "necessary", "nonnumeric"]
 # Disjoint from COMMENTS, so no combination is refused for naming the same
@@ -45,8 +46,7 @@ SPLIT = re.compile(r"csvdt: (\d+) row\(s\) hold a number written bare")
 
 
 def run(args, text):
-    p = subprocess.run([CSVDT] + args, input=text.encode(),
-                       capture_output=True, timeout=20)
+    p = harness.run(args, text, timeout=20)
     return (p.returncode, p.stdout.decode("utf-8", "replace"),
             p.stderr.decode("utf-8", "replace"))
 

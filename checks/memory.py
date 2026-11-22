@@ -19,9 +19,10 @@ reports the parent's pages, inherited across the fork: that read 99 MiB for
 an 88 MB file where the kernel's own high-water mark for the run was 5 MiB,
 and made a flat curve look linear.
 """
-import os, resource, subprocess, sys, tempfile
+import os, subprocess, sys, tempfile
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 MIB = 1 << 20
 
 
@@ -34,15 +35,24 @@ def peak_kib(args, path):
     reader = (
         "import os,resource,subprocess,sys\n"
         "with open(os.devnull,'wb') as n:\n"
-        "    subprocess.run(sys.argv[1:], stdout=n, stderr=n)\n"
+        "    done = subprocess.run(sys.argv[1:], stdout=n, stderr=subprocess.PIPE)\n"
         "print(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)\n"
+        "print(done.returncode)\n"
+        "sys.stdout.flush()\n"
+        "sys.stdout.buffer.write(done.stderr[:300])\n"
     )
-    out = subprocess.run([sys.executable, "-c", reader, CSVDT] + args + [path],
+    out = subprocess.run([sys.executable, "-c", reader, harness.CSVDT] + args + [path],
                          capture_output=True, timeout=300)
     try:
-        return int(out.stdout.decode().strip())
+        kib, status, said = out.stdout.decode().split("\n", 2)
+        kib, status = int(kib), int(status)
     except ValueError:
         return None
+    if harness.crashed(subprocess.CompletedProcess([], status, b"", said.encode())):
+        print(f"csvdt crashed (exit {status}) measuring {' '.join(args)}\n"
+              f"  {said.strip()}", file=sys.stderr)
+        sys.exit(1)
+    return kib
 
 
 def rows_file(directory, n):

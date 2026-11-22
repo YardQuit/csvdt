@@ -14,9 +14,10 @@ list_options.py here, the page in the rpm %check and in tests/cli.rs.
 Statuses 0, 1, 2 and 100 are the documented four; anything else is a finding
 in itself. 101 is a Rust panic and never an answer.
 """
-import csv, io, os, random, subprocess, sys
+import csv, io, random, subprocess, sys
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 
 INPUTS = {
     "plain": "a,b,c\n2024-06-15T14:00:00Z,1700000000,x\n"
@@ -68,8 +69,7 @@ def main():
                 + rng.choice(OTHER))
         name = rng.choice(list(INPUTS))
         try:
-            p = subprocess.run([CSVDT] + args, input=INPUTS[name].encode(),
-                               capture_output=True, timeout=20)
+            p = harness.run(args, INPUTS[name], timeout=20, crash_ok=True)
         except subprocess.TimeoutExpired:
             findings.append(("TIMEOUT", args, name, ""))
             continue
@@ -82,7 +82,7 @@ def main():
                 seen.add(key)
                 findings.append((kind, args, name, detail))
 
-        if p.returncode == 101 or "panicked" in err:
+        if harness.crashed(p):
             note("PANIC", err.strip()[:200])
             continue
         if p.returncode not in (0, 1, 2, 100):

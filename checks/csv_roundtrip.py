@@ -11,9 +11,10 @@ strips it. Everything else must survive: quotes, doubled quotes, delimiters
 and newlines inside fields, every line ending, and an unclosed quote, which
 both readers take the same way.
 """
-import csv, io, os, random, subprocess, sys
+import csv, io, random, sys
 
-CSVDT = os.environ.get("CSVDT", "target/release/csvdt")
+import harness
+
 csv.field_size_limit(10 ** 8)
 
 FIELDS = [
@@ -32,8 +33,7 @@ def reference(data, delimiter=",", quote='"'):
 
 
 def run(args, data):
-    p = subprocess.run([CSVDT] + args, input=data.encode(),
-                       capture_output=True)
+    p = harness.run(args, data)
     return p.returncode, p.stdout.decode("utf-8", "replace")
 
 
