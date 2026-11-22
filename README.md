@@ -724,21 +724,17 @@ The `separator` field is the part `--help` can't express machine-readably:
 `--flexible` is the only option whose value must be joined with `=`, and a
 wrapper that emitted `-f fix` would hand csvdt a filename instead.
 
-[`emacs/`](emacs/) is a worked example: an Emacs front end that names four
-csvdt options (`-H`/`--has-header`, `--single-quote`, `--read-delimiter` and
-`--comment`) and only because a region run cannot be worked out without them.
-Which flag says the first record is a header decides whether the region is
-given the buffer's header line; the next two decide where a record begins,
-since a quote only opens a field where a field begins, and that depends on the
-delimiter. Under `--comment` a region run is refused, because comment lines
-change which line a record starts on and only csvdt knows that. Everything
-else is discovered from the binary, so the front end needs no change when
-csvdt gains an option. A test holds each of the four to an option csvdt still
-reports, and another asserts no fifth name has crept in.
+[`emacs/`](emacs/) is a worked example: an Emacs front end that names one
+csvdt option, `--lines`. A run on a region, a rectangle or banked lines gives
+csvdt the whole buffer and the lines selected, and csvdt widens them to whole
+records, reading the header, comment lines and quoted newlines as it would in
+any run, then says which lines it took, which the front end shows. Nothing in
+the front end reads the buffer as CSV. Everything else is discovered from the
+binary, so the front end needs no change when csvdt gains an option. A test
+holds `--lines` to an option csvdt still reports, and another asserts no
+second name has crept in.
 
-The front end for the Tuatara editor, naming the same four options and
-refusing a region run under `--comment` in the same way, lives with Tuatara's
-own packages, in
+The front end for the Tuatara editor lives with Tuatara's own packages, in
 [Tuatara-Editor/tuatara-packages](https://github.com/Tuatara-Editor/tuatara-packages):
 
 ```lisp

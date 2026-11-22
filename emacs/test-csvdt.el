@@ -41,7 +41,7 @@
 (defvar test-csvdt-ran 0
   "How many checks were reached.")
 
-(defconst test-csvdt-expected 317
+(defconst test-csvdt-expected 298
   "How many checks this file makes.
 Raise it with the count.  A run reporting fewer has not passed, whatever
 the ones it did reach said.
@@ -660,89 +660,47 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   (test-csvdt-check "a comma-bearing line survives the interactive path"
                     (test-csvdt-output) "b,a,c\n1,0,2\n"))
 
-;;; The options named here, and the only ones
+;;; The one option named here, and the only one
 
+;; A run on part of the buffer names `--lines'; a rename in csvdt would leave
+;; every such run refused, so it is held to the options csvdt reports.
+(test-csvdt-check "--lines is an option csvdt actually reports"
+                  (and (member "--lines" (csvdt-options)) t)
+                  t)
+
+;; The settings that fed the package's own CSV scanner stay until 2.0, since
+;; settings are public, and say they are obsolete and since when.
+(dolist (symbol '(csvdt-header-options
+                  csvdt-single-quote-options
+                  csvdt-read-delimiter-options
+                  csvdt-comment-options
+                  csvdt-region-carries-header))
+  (test-csvdt-check (format "%s is obsolete since 1.2.0" symbol)
+                    (list (nth 2 (get symbol 'byte-obsolete-variable))
+                          (string-prefix-p "Obsolete since 1.2.0, and no longer read"
+                                           (documentation-property
+                                            symbol 'variable-documentation t)))
+                    '("1.2.0" t)))
+
+;; csvdt.el's own commentary, the READMEs and the description of the
+;; emacs-csvdt subpackage in the rpm spec say no setting names a csvdt option.
+;; An obsolete one does, and is read by nothing; a live one that did would be
+;; something the prose is then wrong about.
 (test-csvdt-check
- "every configured header option is one csvdt actually reports"
- (seq-remove (lambda (option) (member option (csvdt-options)))
-             csvdt-header-options)
+ "no live defcustom names a csvdt option, as the prose about them says"
+ (seq-filter
+  (lambda (symbol)
+    (let ((value (symbol-value symbol)))
+      (and (not (get symbol 'byte-obsolete-variable))
+           ;; A symbol is not a sequence to look through: hence `listp'.
+           (listp value)
+           (seq-some (lambda (item)
+                       (and (stringp item) (string-prefix-p "-" item)))
+                     value))))
+  (mapcar #'car (get 'csvdt 'custom-group)))
  nil)
 
-;; The same for the two the record-boundary scan needs: which character
-;; quotes a field, and which one separates fields, decide where a record
-;; begins, and a rename would leave the scan reading the wrong dialect
-;; without a word.
-(test-csvdt-check
- "every configured single-quote option is one csvdt actually reports"
- (seq-remove (lambda (option) (member option (csvdt-options)))
-             csvdt-single-quote-options)
- nil)
-
-(test-csvdt-check
- "every configured read-delimiter option is one csvdt actually reports"
- (seq-remove (lambda (option) (member option (csvdt-options)))
-             csvdt-read-delimiter-options)
- nil)
-
-(test-csvdt-check
- "every configured comment option is one csvdt actually reports"
- (seq-remove (lambda (option) (member option (csvdt-options)))
-             csvdt-comment-options)
- nil)
-
-;; The number of these lists is written down in places outside this file
-;; (csvdt.el's own commentary, the READMEs, and the description of the
-;; emacs-csvdt subpackage in the rpm spec), and all must give the right
-;; number. The checks above hold each list to options csvdt still reports, and
-;; the check below holds the file to naming no others, but neither notices
-;; another list being added beside them, which is what the prose would then be
-;; wrong about.
-;;
-;; So the count is pinned.  Another is not forbidden: it fails here, and the
-;; sentence in each of those places is what wants writing before this number
-;; is raised.
-(test-csvdt-check
- "four defcustoms name a csvdt option, as the prose about them says"
- (length (seq-filter
-          (lambda (symbol)
-            ;; A list of strings, one of which opens with a dash. The other
-            ;; defcustoms hold a string, a symbol, t or nil, and a symbol is
-            ;; not a sequence to look through: hence the `listp' first.
-            (let ((value (symbol-value symbol)))
-              (and (listp value)
-                   (seq-some (lambda (item)
-                               (and (stringp item)
-                                    (string-prefix-p "-" item)))
-                             value))))
-          '(csvdt-header-options
-            csvdt-single-quote-options
-            csvdt-read-delimiter-options
-            csvdt-comment-options
-            csvdt-default-arguments
-            csvdt-output-mode
-            csvdt-region-carries-header
-            csvdt-banked-lines-function
-            csvdt-executable)))
- 4)
-
-(dolist (case '(("-H" t)
-                ("--has-header" t)
-                ;; clap lets flags be written together.
-                ("-Hp" t)
-                ("-pH" t)
-                ;; A short option that takes a value consumes the rest of the
-                ;; argument, so an H after one is part of that value, not a flag.
-                ("-o0,+02:00" nil)
-                ("-i0,replace" nil)
-                ("-f=fix" nil)
-                ("-p" nil)
-                ("--print-header" nil)
-                ("--remove" nil)))
-  (test-csvdt-check (format "header requested by %S" (car case))
-                    (and (csvdt--header-requested-p (list (car case))) t)
-                    (cadr case)))
-
-;;; A region below the header is sent with the header in front of it
+;;; A region below the header is read with the buffer's header
 
 (let ((content "ts,x\n2026-07-25T12:00:00+02:00,a\n2026-07-26T12:00:00+02:00,b\n")
       (arguments '("-H" "-p" "-u0" "-i" "0,replace")))
@@ -759,20 +717,22 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                             "2026-07-25T10:00:00+00:00,a\n"
                             "2026-07-26T10:00:00+00:00,b\n"))
 
-  ;; Without it, csvdt takes the first selected row for a header: it is exempt
-  ;; from the conversion, and -i 0,replace puts the generated name where its
-  ;; timestamp was, so the row is gone.
+  ;; The obsolete setting changes nothing: off, it used to hand csvdt the
+  ;; first selected row as the header, which lost that row.
   (with-temp-buffer
     (insert content)
     (goto-char (point-min))
     (forward-line 1)
-    (let ((csvdt-region-carries-header nil))
-      (csvdt--run (list (cons (point) (point-max))) arguments)))
-  (test-csvdt-check "turning it off loses that row, as it always did"
+    (with-suppressed-warnings ((obsolete csvdt-region-carries-header))
+      (let ((csvdt-region-carries-header nil))
+        (csvdt--run (list (cons (point) (point-max))) arguments))))
+  (test-csvdt-check "turning the obsolete setting off loses no row"
                     (with-current-buffer "*csvdt output*" (buffer-string))
-                    "to_utc,a\n2026-07-26T10:00:00+00:00,b\n")
+                    (concat "to_utc,x\n"
+                            "2026-07-25T10:00:00+00:00,a\n"
+                            "2026-07-26T10:00:00+00:00,b\n"))
 
-  ;; A whole-buffer run already starts at the header, so nothing is prepended.
+  ;; A whole-buffer run already starts at the header.
   (with-temp-buffer
     (insert content)
     (csvdt--run (list (cons (point-min) (point-max))) arguments))
@@ -782,26 +742,26 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                             "2026-07-25T10:00:00+00:00,a\n"
                             "2026-07-26T10:00:00+00:00,b\n"))
 
-  ;; Without a header option there is no header to carry, and prepending one
-  ;; would add a row that is not in the selection.
+  ;; Without a header option the first line is data, and is not written
+  ;; unless it was selected.
   (with-temp-buffer
     (insert content)
     (goto-char (point-min))
     (forward-line 1)
     (csvdt--run (list (cons (point) (point-max))) '("-u0" "-i" "0,replace")))
-  (test-csvdt-check "no header option means nothing is prepended"
+  (test-csvdt-check "no header option means no header is written"
                     (with-current-buffer "*csvdt output*" (buffer-string))
                     (concat "2026-07-25T10:00:00+00:00,a\n"
                             "2026-07-26T10:00:00+00:00,b\n")))
 
-;; A region starting inside the header line is left alone: it already carries
-;; part of one, and guessing what was meant would be worse than not.
+;; A region on the header line takes the header and nothing more.
 (with-temp-buffer
   (insert "ts,x\n2026-07-25T12:00:00+02:00,a\n")
   (goto-char (+ (point-min) 2))
-  (test-csvdt-check "a region inside the header gets nothing prepended"
-                    (csvdt--header-line (point) '("-H" "-p"))
-                    nil))
+  (csvdt--run (list (cons (point) (1+ (point)))) '("-H" "-p"))
+  (test-csvdt-check "a region inside the header writes the header alone"
+                    (with-current-buffer "*csvdt output*" (buffer-string))
+                    "ts,x\n"))
 
 ;;; The package is one package.el can install
 
@@ -846,23 +806,28 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (let ((source (with-temp-buffer
                 (insert-file-contents
                  (expand-file-name "csvdt.el" test-csvdt-directory))
+                ;; The obsolete settings keep the option names they held,
+                ;; and nothing reads them.
+                (dolist (name '("csvdt-header-options" "csvdt-single-quote-options"
+                                "csvdt-read-delimiter-options" "csvdt-comment-options"))
+                  (goto-char (point-min))
+                  (when (search-forward (concat "(defcustom " name " ") nil t)
+                    (goto-char (match-beginning 0))
+                    (delete-region (point) (with-syntax-table emacs-lisp-mode-syntax-table
+                                             (forward-sexp)
+                                             (point)))))
                 (buffer-string)))
       (leaked '()))
   (dolist (option (csvdt-options))
     ;; The three the package calls to ask its questions are necessarily
-    ;; named, and so are the few a defcustom holds: those are covered by
-    ;; the staleness checks above.  Every other option must be absent, or
-    ;; it could fall out of date.
+    ;; named, and so is --lines, which the check above holds to csvdt.
+    ;; Every other option must be absent, or it could fall out of date.
     ;; As a standalone token: a private function name like
     ;; `csvdt--split-arguments' contains "--split" without mentioning an
     ;; option, so the character before the dashes must not be part of a
     ;; symbol.
     (when (and (string-prefix-p "--" option)
-               (not (member option '("--help" "--version" "--list-options")))
-               (not (member option csvdt-header-options))
-               (not (member option csvdt-single-quote-options))
-               (not (member option csvdt-read-delimiter-options))
-               (not (member option csvdt-comment-options))
+               (not (member option '("--help" "--version" "--list-options" "--lines")))
                (string-match-p (concat "\\(?:^\\|[^A-Za-z0-9]\\)"
                                        (regexp-quote option) "\\(?:$\\|[^A-Za-z0-9-]\\)")
                                source))
@@ -918,10 +883,11 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 ;;; A record is not always a line
 ;;
 ;; A quoted field may hold newlines (an address, a notes column, an embedded
-;; document) and then one record spans several lines. Widening a selection to
-;; whole lines is not enough there: a range starting inside such a field is the
-;; tail of a record, and would go out as though it were a record of its own.
-;; That converts cleanly and reports success, with a field nobody wrote.
+;; document) and then one record spans several lines.  A selection taking
+;; only some of them must take the whole record, or the tail of one would go
+;; out as a record of its own, which converts cleanly and reports success
+;; with a field nobody wrote.  csvdt reads the buffer and widens; the summary
+;; names the lines it took.
 
 (defconst test-csvdt-spanning
   (concat "h,when\n"
@@ -932,87 +898,57 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (with-temp-buffer
   (insert test-csvdt-spanning)
   ;; Line 3 is "y\",2026-...": the back half of record one.
-  (let* ((beg (progn (goto-char (point-min)) (forward-line 2) (point)))
-         (end (progn (forward-line 1) (point)))
-         (range (csvdt--whole-records beg end ?\" ?,)))
+  (let ((beg (progn (goto-char (point-min)) (forward-line 2) (point)))
+        (end (progn (forward-line 1) (point))))
     (test-csvdt-check
-     "a range opening inside a quoted field is widened back to the record"
-     (buffer-substring-no-properties (car range) (cdr range))
-     "\"x\ny\",2026-07-25T12:00:00+02:00\n"))
+     "a range opening inside a quoted field takes the whole record"
+     (list (current-message-of (csvdt--run (list (cons beg end)) '("-H" "-p")))
+           (test-csvdt-output))
+     (list "csvdt --lines 3 -H -p: 3 lines, widened to whole records: lines 2-3"
+           "h,when\n\"x\ny\",2026-07-25T12:00:00+02:00\n")))
 
-  ;; And a range that already sits on record boundaries is left alone, which
-  ;; is every range in a file whose fields hold no newlines.
-  (let* ((beg (progn (goto-char (point-min)) (forward-line 3) (point)))
-         (end (point-max))
-         (range (csvdt--whole-records beg end ?\" ?,)))
-    (test-csvdt-check "a range already on record boundaries is untouched"
-                      range (cons beg end))))
+  ;; A range already on record boundaries is taken as it is, and nothing is
+  ;; said about widening.
+  (let ((beg (progn (goto-char (point-min)) (forward-line 3) (point))))
+    (test-csvdt-check "a range already on record boundaries is not widened"
+                      (current-message-of
+                       (csvdt--run (list (cons beg (point-max))) '("-H" "-p")))
+                      "csvdt --lines 4 -H -p: 2 lines")))
 
 (with-temp-buffer
-  ;; Two banked lines inside one record that spans several. They do not touch,
-  ;; so nothing merges them when the list is normalised, and then each widens
-  ;; to the same record, which would go out once per range: a duplicate row,
-  ;; valid CSV, clean-looking, and nothing in a count to question it.
+  ;; Two banked lines inside one record that spans several, which do not
+  ;; touch.  The record goes out once, not once per line.
   (insert "h,when\n\"x\ny\nz\",2026-07-25T12:00:00+02:00\nrow2,2026-07-26T12:00:00+02:00\n")
-  (let* ((line (lambda (n)
-                 (goto-char (point-min))
-                 (forward-line n)
-                 (cons (point) (progn (forward-line 1) (point)))))
-         (ranges (list (funcall line 1) (funcall line 3)))
-         (widened (mapcar (lambda (r)
-                            (csvdt--whole-records (car r) (cdr r) ?\" ?,))
-                          ranges)))
-    (test-csvdt-check "two banked lines in one record widen to the same record"
-                      (equal (car widened) (cadr widened))
-                      t)
-    (test-csvdt-check "and it is sent once rather than once per range"
-                      (length (csvdt--drop-covered widened))
-                      1))
-
-  ;; Ranges that share nothing are all kept, in the order they came: buffer
-  ;; order is asked of the caller rather than imposed here.
-  (test-csvdt-check "ranges covering different records are all kept"
-                    (csvdt--drop-covered '((30 . 40) (10 . 20)))
-                    '((30 . 40) (10 . 20))))
+  (let ((line (lambda (n)
+                (goto-char (point-min))
+                (forward-line n)
+                (cons (point) (progn (forward-line 1) (point))))))
+    (csvdt--run (list (funcall line 1) (funcall line 3)) '())
+    (test-csvdt-check "two banked lines in one record send it once"
+                      (test-csvdt-output)
+                      "\"x\ny\nz\",2026-07-25T12:00:00+02:00\n")))
 
 (with-temp-buffer
-  ;; The header itself can span lines, and taking one of them handed csvdt a
-  ;; fragment that opened a quote and never closed it.
+  ;; The header itself can span lines, and is read whole.
   (insert "\"a\nb\",when\nrow1,2026-07-25T12:00:00+02:00\n")
   (goto-char (point-min))
   (forward-line 2)
+  (csvdt--run (list (cons (point) (point-max))) '("-H" "-p"))
   (test-csvdt-check "a header spanning two lines is carried whole"
-                    (csvdt--header-line (point) '("-H" "-p"))
-                    "\"a\nb\",when\n"))
+                    (test-csvdt-output)
+                    "\"a\nb\",when\nrow1,2026-07-25T12:00:00+02:00\n"))
 
+;; The dialect is csvdt's to read, from the arguments as typed: a single
+;; quote and a semicolon here, so the record on lines 2-3 is one record.
 (with-temp-buffer
-  ;; A quote that does not begin a field is data, not an opener: the reader
-  ;; takes a"b as three characters, and reading it as the start of a quoted
-  ;; run would drag the following lines into a record that never held them.
-  (insert "a\"b,c\nd,e\n")
-  (test-csvdt-check "a quote inside an unquoted field opens nothing"
-                    (csvdt--inside-quoted-field-p (point-max) ?\" ?,)
-                    nil))
-
-(with-temp-buffer
-  ;; A doubled quote is one escaped quote and leaves the run open.
-  (insert "\"a\"\"b\nc\",d\n")
+  (insert "h;when\n'x;\ny';1\nrow2;2\n")
   (goto-char (point-min))
-  (forward-line 1)
-  (test-csvdt-check "a doubled quote does not close the run"
-                    (csvdt--inside-quoted-field-p (point) ?\" ?,)
-                    t))
-
-(dolist (case '((nil ?\" ?,)
-                (("--single-quote") ?' ?,)
-                (("--read-delimiter" ";") ?\" ?\;)
-                (("--read-delimiter=;") ?\" ?\;)
-                ;; Past "--" everything is positional to clap, so an
-                ;; argument spelled like an option there is a filename.
-                (("--" "--single-quote") ?\" ?,)))
-  (test-csvdt-check (format "%S reads as the dialect it names" (car case))
-                    (csvdt--dialect (car case))
-                    (cons (nth 1 case) (nth 2 case))))
+  (forward-line 2)
+  (csvdt--run (list (cons (point) (line-beginning-position 2)))
+              '("--single-quote" "--read-delimiter" ";"))
+  (test-csvdt-check "a region is read in the dialect the arguments name"
+                    (test-csvdt-output)
+                    "\"x;\ny\",1\n"))
 
 (defun test-csvdt-line-bounds (n)
   "Return the (BEG . END) of line N, newline included."
@@ -1114,10 +1050,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     (concat "csvdt would run over 2 lines in 2 stretches.  "
                             "Banked: 2 lines in 2 stretches.  Region: none.")))
 
-;; Counted the way a run counts, which since records may span lines means whole
-;; records. Describing two banked lines inside one such record as two stretches
-;; of one line would be wrong where the run makes one stretch of three, and
-;; this is the command reached for when a run covered something unexpected.
+;; Counted in the lines that go to csvdt, which widens them to whole records
+;; when it runs: two banked lines inside one record are two stretches of one
+;; line here, and the run then takes the record once.
 (with-temp-buffer
   (insert "h,when\n\"x\ny\nz\",2026-07-25T12:00:00+02:00\n"
           "row2,2026-07-26T12:00:00+02:00\n")
@@ -1127,12 +1062,11 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                    (cons (point) (progn (forward-line 1) (point)))))
          (banked (list (funcall bounds 1) (funcall bounds 3))))
     (setq-local csvdt-banked-lines-function (lambda () banked))
-    (test-csvdt-check "describe counts whole records, not the lines banked"
+    (test-csvdt-check "describe counts the lines banked"
                       (current-message-of (csvdt-describe-run))
-                      (concat "csvdt would run over 3 lines in 1 stretch.  "
-                              "Banked: 3 lines in 1 stretch.  Region: none."))
-    ;; And what it says is what the run then does.
-    (test-csvdt-check "and the run covers exactly that"
+                      (concat "csvdt would run over 2 lines in 2 stretches.  "
+                              "Banked: 2 lines in 2 stretches.  Region: none."))
+    (test-csvdt-check "and the run takes their record once"
                       (progn (csvdt-run-banked '())
                              (test-csvdt-output))
                       "\"x\ny\nz\",2026-07-25T12:00:00+02:00\n")))
@@ -1281,22 +1215,16 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                                        t)))
                     t))
 
-;; A stretch that does not end in a newline must not run into the one sent
-;; after it. No command can arrange that: the ranges are normalised into buffer
-;; order first, so the only stretch that can end without a newline (the one
-;; reaching the end of the buffer) is always the last, with nothing after it to
-;; be joined onto and csvdt supplying the terminator itself. The guard is
-;; `csvdt--run's, and buffer order is something its docstring asks for rather
-;; than something it imposes, so that is where the question is put: the
-;; newline-less line first, the line above it second. Without the guard the
-;; two arrive as "3,41,2", one row made out of both.
+;; A stretch that does not end in a newline must not run into another.  The
+;; buffer goes to csvdt whole, so nothing is joined, and ranges handed over
+;; out of buffer order still come back in it, as a run over the whole buffer
+;; would write them.  Once two stretches were sent one after the other, and
+;; the newline-less line first arrived as "3,41,2", one row made of both.
 (with-temp-buffer
   (insert "a,b\n1,2\n3,4")
-  ;; No header option, so nothing is prepended and the two lines are all that
-  ;; comes back, which is what makes a join visible if there is one.
   (csvdt--run (list (test-csvdt-line-bounds 3) (test-csvdt-line-bounds 2)) '())
   (test-csvdt-check "a stretch without a final newline does not join the next"
-                    (test-csvdt-output) "3,4\n1,2\n"))
+                    (test-csvdt-output) "1,2\n3,4\n"))
 
 ;; And through the command, where such a stretch is always the last one: the
 ;; line comes back as a record of its own, neither lost for want of a
@@ -1780,14 +1708,6 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (test-csvdt-check "k is bound to csvdt-run-banked"
                   (lookup-key csvdt-command-map "k") #'csvdt-run-banked)
 
-;; "-fH" is two flags to clap (-f's value must be attached with "=", so
-;; nothing after it in a cluster can be one) and the header-carry logic has
-;; to see the -H in it.  "-uH" is -u with an attached value, and must not.
-(test-csvdt-check "-fH asks for a header"
-                  (and (csvdt--header-requested-p '("-fH")) t) t)
-(test-csvdt-check "-uH does not (H is -u's value)"
-                  (csvdt--header-requested-p '("-uH")) nil)
-
 ;; A stale range past the end of a buffer whose last line has no newline used
 ;; to clamp onto that line; it names no character and is dropped.
 (with-temp-buffer
@@ -1934,7 +1854,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                       (current-message-of
                        (test-csvdt-typed "-H -p"
                          (call-interactively #'csvdt-run-banked)))
-                      "csvdt -H -p: 3 lines from 2 stretches")))
+                      "csvdt --lines 2,4 -H -p: 3 lines from 2 stretches")))
 
 ;;; An end at end-of-line is whole
 ;;
@@ -2081,15 +2001,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 ;;; Round five, each fix pinned
 
 ;; An '=' anywhere means option=value to clap, never a cluster: scanned as one,
-;; "-f=keep" would yield junk flags, and a customised csvdt-header-options
-;; naming a letter the value held would prepend the buffer header to a run that
-;; never asked for one.
+;; "-f=keep" would yield junk flags.
 (test-csvdt-check "-f=keep is not a flag cluster"
                   (csvdt--short-flags "-f=keep") nil)
-(test-csvdt-check "and cannot trip a customised header option"
-                  (let ((csvdt-header-options '("-k")))
-                    (csvdt--header-requested-p '("-f=keep")))
-                  nil)
 (test-csvdt-check "a real cluster still scans"
                   (csvdt--short-flags "-Hp") '("-H" "-p"))
 
@@ -2203,16 +2117,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                       (user-error (and (string-match-p "neither" (cadr err)) t)))
                     t))
 
-;; Everything after "--" is positional to clap, so an -H there is a filename,
-;; not the option, and scanning past the separator would prepend the buffer's
-;; header to a run that never asked for one.
-(test-csvdt-check "-H before -- asks for a header"
-                  (and (csvdt--header-requested-p '("-H" "--")) t) t)
-(test-csvdt-check "-H after -- is positional, not the option"
-                  (csvdt--header-requested-p '("--" "-H")) nil)
-
-;; And the positional check agrees: a file really named -H, sitting after
-;; the separator, is exactly what csvdt would take for its input.
+;; Everything after "--" is positional to clap, so a file really named -H,
+;; sitting after the separator, is exactly what csvdt would take for its
+;; input.
 (let ((dir (make-temp-file "csvdt-dash" t)))
   (with-temp-file (expand-file-name "-H" dir) (insert "z,z\n"))
   (let ((default-directory (file-name-as-directory dir)))
@@ -2381,7 +2288,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
            "caf" (string #x00E9) ",1\n"
            "z" (string #x00E9) ",3\n")))
 
-;;; A narrowing that cuts a record in two says so
+;;; A narrowing that cuts a line in two says so
 ;;
 ;; Widening to whole lines can only reach as far as the accessible portion,
 ;; so a buffer narrowed to end mid-line has no whole line to widen to: the
@@ -2394,14 +2301,12 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   ;; Narrowed to stop just after the last row's comma, so what is reachable
   ;; of that record is "3,": half a row, with no whole line to widen to.
   (narrow-to-region (point-min) (- (point-max) 2))
-  (test-csvdt-check "a narrowing ending mid-line cuts the last record"
-                    (and (csvdt--narrowing-cuts-record-p
-                          (list (cons (point-min) (point-max))) ?\" ?,)
-                         t)
+  (test-csvdt-check "a narrowing ending mid-line cuts the last line"
+                    (and (csvdt--narrowing-cut (list (cons (point-min) (point-max)))) t)
                     t)
   (test-csvdt-check "and a run over it says so in its summary"
                     (and (string-match-p
-                          ", last record cut short by the narrowing"
+                          ", last line cut short by the narrowing"
                           (or (current-message-of
                                (csvdt--run (list (cons (point-min) (point-max)))
                                            '("-H" "-p")))
@@ -2415,8 +2320,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   ;; csvdt supplies the terminator itself, so the record is whole.
   (narrow-to-region (point-min) (- (point-max) 1))
   (test-csvdt-check "a narrowing ending at end-of-line cuts nothing"
-                    (csvdt--narrowing-cuts-record-p
-                     (list (cons (point-min) (point-max))) ?\" ?,)
+                    (csvdt--narrowing-cut (list (cons (point-min) (point-max))))
                     nil))
 
 (with-temp-buffer
@@ -2424,31 +2328,26 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   ;; and reading it as a cut would put the note on every such buffer.
   (insert "a,b\n1,2")
   (test-csvdt-check "a last line without a newline is not a cut"
-                    (csvdt--narrowing-cuts-record-p
-                     (list (cons (point-min) (point-max))) ?\" ?,)
+                    (csvdt--narrowing-cut (list (cons (point-min) (point-max))))
                     nil))
 
 ;; The same cut at the other end.
 ;;
-;; The start of the accessible portion is asked about as well as the end, since
-;; a narrowing that begins mid-record is the same cut, with the same two ways
-;; of happening. Mid-line, csvdt sees a short first record and says so about a
-;; line, which sends the reader looking at data that is not the matter. Inside
-;; a quoted field it is worse: the run would succeed, exit 0, with the first
-;; record's opening half out of reach and nothing said at all.
+;; The start of the accessible portion is asked about as well as the end:
+;; csvdt sees a short first record and says so about a line, which sends the
+;; reader looking at data that is not the matter.
 
 (with-temp-buffer
   (insert "a,b\n1,2\n3,4\n")
   ;; Beginning one character into the second line: what is reachable of
   ;; that record is ",2": half a row, with no whole line to widen back to.
   (narrow-to-region (+ (point-min) 5) (point-max))
-  (test-csvdt-check "a narrowing beginning mid-line cuts the first record"
-                    (csvdt--narrowing-cuts-record-p
-                     (list (cons (point-min) (point-max))) ?\" ?,)
+  (test-csvdt-check "a narrowing beginning mid-line cuts the first line"
+                    (csvdt--narrowing-cut (list (cons (point-min) (point-max))))
                     'start)
   (test-csvdt-check "and a run over it says so in its summary"
                     (and (string-match-p
-                          ", first record cut short by the narrowing"
+                          ", first line cut short by the narrowing"
                           (or (current-message-of
                                (csvdt--run (list (cons (point-min) (point-max)))
                                            '("-H" "-p")))
@@ -2457,27 +2356,15 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     t))
 
 (with-temp-buffer
-  ;; Beginning at a line boundary that is inside a quoted field: whole
-  ;; lines are reachable, so nothing looks amiss, and the record they
-  ;; belong to is severed all the same.
-  (insert "h,when\n\"x\ny\",1\n3,4\n")
-  (narrow-to-region (+ (point-min) 10) (point-max))
-  (test-csvdt-check "a narrowing beginning inside a quoted field cuts it too"
-                    (csvdt--narrowing-cuts-record-p
-                     (list (cons (point-min) (point-max))) ?\" ?,)
-                    'start))
-
-(with-temp-buffer
   (insert "a,b\n1,2\n3,4\n")
   ;; Cut at both ends at once, which is one narrowing and two half records.
   (narrow-to-region (+ (point-min) 5) (- (point-max) 2))
   (test-csvdt-check "a narrowing can cut at both ends"
-                    (csvdt--narrowing-cuts-record-p
-                     (list (cons (point-min) (point-max))) ?\" ?,)
+                    (csvdt--narrowing-cut (list (cons (point-min) (point-max))))
                     'both)
   (test-csvdt-check "and the summary names both"
                     (and (string-match-p
-                          ", first and last records cut short by the narrowing"
+                          ", first and last lines cut short by the narrowing"
                           (or (current-message-of
                                (csvdt--run (list (cons (point-min) (point-max)))
                                            '("-H" "-p")))
@@ -2491,8 +2378,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   ;; that as a cut would put the note on every narrowed-to-lines buffer.
   (narrow-to-region (+ (point-min) 4) (point-max))
   (test-csvdt-check "a narrowing beginning at a line boundary cuts nothing"
-                    (csvdt--narrowing-cuts-record-p
-                     (list (cons (point-min) (point-max))) ?\" ?,)
+                    (csvdt--narrowing-cut (list (cons (point-min) (point-max))))
                     nil))
 
 ;; And `csvdt-describe-run' says it too.
@@ -2505,9 +2391,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (with-temp-buffer
   (insert "a,b\n1,2\n3,4\n")
   (narrow-to-region (point-min) (- (point-max) 2))
-  (test-csvdt-check "describe-run says the narrowing cut the last record"
+  (test-csvdt-check "describe-run says the narrowing cut the last line"
                     (and (string-match-p
-                          "Last record cut short by the narrowing"
+                          "Last line cut short by the narrowing"
                           (or (current-message-of (csvdt-describe-run)) ""))
                          t)
                     t))
@@ -2515,9 +2401,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 (with-temp-buffer
   (insert "a,b\n1,2\n3,4\n")
   (narrow-to-region (+ (point-min) 5) (point-max))
-  (test-csvdt-check "describe-run says it of the first record as well"
+  (test-csvdt-check "describe-run says it of the first line as well"
                     (and (string-match-p
-                          "First record cut short by the narrowing"
+                          "First line cut short by the narrowing"
                           (or (current-message-of (csvdt-describe-run)) ""))
                          t)
                     t))
@@ -2541,7 +2427,7 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   (narrow-to-region (+ (point-min) 8) (point-max))
   (test-csvdt-check "a failed run names the cut as well"
                     (and (string-match-p
-                          "note the first record cut short by the narrowing"
+                          "note the first line cut short by the narrowing"
                           (condition-case err
                               (progn (csvdt--run
                                       (list (cons (point-min) (point-max)))
@@ -2552,39 +2438,12 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
                     t))
 
 (with-temp-buffer
-  ;; The cut that looks tidy: a narrowing ending exactly at a line boundary
-  ;; which is nonetheless inside a quoted field. Whole lines are reachable, so
-  ;; a mid-line test sees nothing, while the record they belong to is severed
-  ;; all the same, and asked to accept ragged records, csvdt would take the
-  ;; truncated one rather than refusing it, so the field comes back short of
-  ;; its second half at exit 0.
-  (insert "h,when\n\"x\ny\",2026-07-25T12:00:00+02:00\nrow2,2026-07-26T12:00:00+02:00\n")
-  (narrow-to-region (point-min)
-                    (progn (goto-char (point-min)) (forward-line 2) (point)))
-  (test-csvdt-check "a narrowing ending inside a quoted field cuts the record"
-                    (and (csvdt--narrowing-cuts-record-p
-                          (list (cons (point-min) (point-max))) ?\" ?,)
-                         t)
-                    t)
-  (test-csvdt-check "and the run says so rather than passing it off as a row"
-                    (and (string-match-p
-                          ", last record cut short by the narrowing"
-                          (or (current-message-of
-                               (csvdt--run (list (cons (point-min) (point-max)))
-                                           '("-f")))
-                              ""))
-                         t)
-                    t))
-
-(with-temp-buffer
-  ;; And a quoted field that closes inside the accessible portion is not a
-  ;; cut, so the note stays off a buffer merely holding such a field.
-  (insert "h,when\n\"x\ny\",2026-07-25T12:00:00+02:00\nrow2,2026-07-26T12:00:00+02:00\n")
-  (narrow-to-region (point-min)
-                    (progn (goto-char (point-min)) (forward-line 3) (point)))
-  (test-csvdt-check "a narrowing past the closing quote cuts nothing"
-                    (csvdt--narrowing-cuts-record-p
-                     (list (cons (point-min) (point-max))) ?\" ?,)
+  ;; A run that stops short of a narrowing's cut end never reads it, so it
+  ;; is not mentioned.
+  (insert "a,b\n1,2\n3,4\n")
+  (narrow-to-region (point-min) (- (point-max) 2))
+  (test-csvdt-check "a cut end the selection does not reach is not mentioned"
+                    (csvdt--narrowing-cut (list (cons (point-min) (+ (point-min) 4))))
                     nil))
 
 ;;; An indirect buffer holds the same text
@@ -2836,10 +2695,9 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
 ;;; A comment line is csvdt's to recognise
 ;;
 ;; A comment line may hold a quote, which opened a quoted field as far as
-;; this package could tell: a region below it was widened to rows nobody
-;; selected and reported as cut.  Where records begin is csvdt's to decide
-;; once a comment character is set, so a run on part of the buffer is refused
-;; and one on all of it is csvdt's alone.
+;; this package's own scanner could tell, and a run on part of the buffer
+;; under a comment character was refused for that.  csvdt reads the buffer
+;; now, comment lines and all, so a region runs as the whole buffer would.
 
 (defconst test-csvdt-commented
   "# exported,\"by\nname,v\nx,1\ny,2\n"
@@ -2852,98 +2710,75 @@ on printing ALL PASS and exiting 0, with nothing anywhere saying that
   (test-csvdt-check "a whole buffer with a comment line runs as csvdt reads it"
                     (test-csvdt-output) "name,v\nx,1\ny,2\n"))
 
-(with-temp-buffer
-  (insert test-csvdt-commented)
-  (goto-char (point-max))
-  (forward-line -1)
-  (let ((output (test-csvdt-output)))
-    (test-csvdt-check "a region of it is refused, saying why"
-                      (condition-case err
-                          (progn (csvdt--run (list (cons (point) (point-max)))
-                                             '("--comment" "#" "-H" "-p"))
-                                 "no error")
-                        (user-error
-                         (and (string-match-p "part of the buffer"
-                                              (cadr err))
-                              t)))
-                      t)
-    (test-csvdt-check "and the output is left as it was"
-                      (test-csvdt-output) output)))
+(dolist (comment '(("--comment" "#") ("--comment=#")))
+  (with-temp-buffer
+    (insert test-csvdt-commented)
+    (goto-char (point-max))
+    (forward-line -1)
+    (test-csvdt-check (format "a region of it runs under %s" (car comment))
+                      (list (current-message-of
+                             (csvdt--run (list (cons (point) (point-max)))
+                                         (append comment '("-H" "-p"))))
+                            (test-csvdt-output))
+                      (list (format "csvdt --lines 4 %s -H -p: 2 lines"
+                                    (string-join comment " "))
+                            "name,v\ny,2\n"))))
 
+;; A region holding only the comment line takes no record, and csvdt's word
+;; for that reaches the summary.
 (with-temp-buffer
   (insert test-csvdt-commented)
-  (goto-char (point-max))
-  (forward-line -1)
-  (test-csvdt-check "the attached spelling is refused the same way"
-                    (condition-case nil
-                        (progn (csvdt--run (list (cons (point) (point-max)))
-                                           '("--comment=#" "-H" "-p"))
-                               "no error")
-                      (user-error 'refused))
-                    'refused))
+  (goto-char (point-min))
+  (test-csvdt-check "a region of only a comment line says it took nothing"
+                    (and (string-match-p
+                          "took no record"
+                          (current-message-of
+                           (csvdt--run (list (cons (point) (line-beginning-position 2)))
+                                       '("--comment" "#" "-H" "-p"))))
+                         t)
+                    t))
 
 ;;; Many ranges cost one pass over the buffer
 ;;
-;; Working out where records begin used to read the buffer from its start
-;; for each end of each range, so the cost grew with the square of the
-;; number of banked lines.  Counting searches is exact where timing is not.
+;; The lines of each range are counted from the end of the one before, so
+;; the buffer is read once however many ranges there are.  Counting the
+;; characters `count-lines' is asked to cross is exact where timing is not.
 
 (with-temp-buffer
   (dotimes (i 300) (insert (format "\"q%d\",%d\n" i i)))
   (let ((ranges '())
-        (searches 0))
+        (crossed 0))
     (dotimes (i 100)
       (goto-char (point-min))
       (forward-line (* i 3))
       (push (cons (point) (line-beginning-position 2)) ranges))
     (setq ranges (nreverse ranges))
-    (cl-letf* ((original (symbol-function 'search-forward))
-               ((symbol-function 'search-forward)
-                (lambda (&rest args)
-                  (setq searches (1+ searches))
-                  (apply original args))))
-      (csvdt--plan ranges '("-H" "-p")))
-    (test-csvdt-check "100 banked lines read the buffer once, not 100 times"
-                      (< searches 1500) t)))
+    (cl-letf* ((original (symbol-function 'count-lines))
+               ((symbol-function 'count-lines)
+                (lambda (beg end &rest args)
+                  (setq crossed (+ crossed (abs (- end beg))))
+                  (apply original beg end args))))
+      (test-csvdt-check "100 banked lines name their lines to csvdt"
+                        (plist-get (csvdt--plan ranges) :lines)
+                        (string-join (mapcar (lambda (i) (number-to-string (1+ (* i 3))))
+                                             (number-sequence 0 99))
+                                     ",")))
+    (test-csvdt-check "and read the buffer once, not 100 times"
+                      (<= crossed (- (point-max) (point-min)))
+                      t)))
 
-;; Dropping what an earlier range covers compared every range with every
-;; earlier one.  Ranges in buffer order are done in one pass now.  Checked
-;; as sets of positions: no position is sent twice, and every position that
-;; was asked for is still sent.
-
-(defun test-csvdt-positions (ranges)
-  "Return the positions RANGES cover, as a sorted list with repeats kept."
-  (let ((positions '()))
-    (dolist (range ranges)
-      (let ((position (car range)))
-        (while (< position (cdr range))
-          (push position positions)
-          (setq position (1+ position)))))
-    (sort positions #'<)))
-
-(let ((state 7)
-      (wrong 0))
-  (dotimes (_ 300)
-    (let ((start 0)
-          (ranges '()))
-      (dotimes (_ 12)
-        (setq state (mod (+ (* state 1103515245) 12345) 2147483648))
-        (setq start (+ start (mod (/ state 65536) 6)))
-        (push (cons start (+ start (mod (/ state 4096) 9))) ranges))
-      (setq ranges (nreverse ranges))
-      (unless (equal (test-csvdt-positions (csvdt--drop-covered ranges))
-                     (delete-dups (test-csvdt-positions ranges)))
-        (setq wrong (1+ wrong)))))
-  (test-csvdt-check "ranges in buffer order lose repeats and nothing else"
-                    wrong 0))
-
-(let ((ranges (let ((list '()))
-                (dotimes (i 6000) (push (cons (* i 10) (+ (* i 10) 10)) list))
-                (nreverse list)))
-      (start (float-time)))
-  (csvdt--drop-covered ranges)
-  (test-csvdt-check "6000 ranges are trimmed in well under a second"
-                    (< (- (float-time) start) 0.5) t))
+(with-temp-buffer
+  ;; Counted from the start of the accessible portion, which is where the
+  ;; input csvdt is given starts.
+  (insert "a\nb\nc\nd\ne\n")
+  (narrow-to-region (progn (goto-char (point-min)) (forward-line 1) (point))
+                    (point-max))
+  (test-csvdt-check "lines are counted from the start of the narrowing"
+                    (csvdt--line-ranges (list (cons (progn (goto-char (point-min))
+                                                           (forward-line 2)
+                                                           (point))
+                                                    (point-max))))
+                    "3-4"))
 
 ;;; The run and the description settle ranges in one place
 

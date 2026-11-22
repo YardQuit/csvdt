@@ -20,6 +20,28 @@ do not stop the run, and reading stops after the last record taken. A
 malformed value is refused with status 100; `--lines` cannot be used with
 `--peek`.
 
+### Emacs
+
+A run on a region, a rectangle or banked lines gives csvdt the whole
+accessible buffer and `--lines` with the lines selected, and csvdt widens
+them to whole records. The package's own reading of the buffer for quoted
+fields, the header and the dialect is gone, and so is the refusal of a run
+on part of the buffer under `--comment`. The summary shows csvdt's note of
+the lines it took, as `, widened to whole records: lines 2-3`.
+
+Because csvdt reads the buffer from the top, `-d` with one column measures
+the first selected row from the row before it, banked or not, where it used
+to measure across the selection alone, and the output comes in buffer order
+whatever order the ranges arrived in.
+
+`csvdt-header-options`, `csvdt-single-quote-options`,
+`csvdt-read-delimiter-options`, `csvdt-comment-options` and
+`csvdt-region-carries-header` are obsolete and read by nothing; they go in
+2.0. Under `-H` the buffer's first record is always the header, which is
+what `csvdt-region-carries-header` gave when on. A narrowing that cuts a
+line in two is still reported; one on a line boundary inside a quoted field
+is csvdt's to find, and is no longer reported here.
+
 ## 1.1.0
 
 The releases now carry `THIRD-PARTY-LICENSES.txt`, the licence texts of the

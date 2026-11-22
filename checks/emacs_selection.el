@@ -11,6 +11,11 @@
 ;; it alone converts cleanly into data nobody wrote.  Banked lines are
 ;; several stretches, and the question is the opposite one: two of them
 ;; inside the same record must not send it twice.
+;;
+;; The package gives csvdt the whole buffer and the lines selected, and
+;; csvdt does the widening, so this holds the two together: what comes back
+;; must be what csvdt writes for the touched records alone, given here as a
+;; file of their own, with the header in front under -H.
 
 (require 'csvdt)
 
@@ -90,8 +95,7 @@
                             (lambda (span)
                               (substring text (1- (car span)) (1- (cdr span))))
                             touched ""))
-                     (expected (if (and csvdt-region-carries-header below
-                                        (csvdt--header-requested-p args))
+                     (expected (if (and below (member "-H" args))
                                    (concat (substring text (1- (car header))
                                                       (1- (cdr header)))
                                            body)
@@ -114,17 +118,15 @@
 (random "csvdt-selection-checks")
 
 ;; One stretch, anywhere at all.
-(dolist (args '(nil ("-u2") ("-H" "-p") ("-H" "-p" "-u2") ("-s2") ("-f=widest")))
-  (dolist (carries '(t nil))
-    (dotimes (_ 60)
-      (let ((csvdt-region-carries-header carries))
-        (checks-selection
-         args
-         (lambda ()
-           (let* ((beg (+ 1 (random (max 1 (- (point-max) 1)))))
-                  (end (+ beg (random (max 1 (- (point-max) beg))))))
-             (list (cons beg end))))
-         "region")))))
+(dolist (args '(nil ("-u2") ("-H" "-p") ("-H" "-p" "-u2") ("-H" "-u2") ("-s2") ("-f=widest")))
+  (dotimes (_ 120)
+    (checks-selection
+     args
+     (lambda ()
+       (let* ((beg (+ 1 (random (max 1 (- (point-max) 1)))))
+              (end (+ beg (random (max 1 (- (point-max) beg))))))
+         (list (cons beg end))))
+     "region")))
 
 ;; Several stretches, which is what a banking package reports.
 (dolist (args '(nil ("-u2") ("-f=widest")))

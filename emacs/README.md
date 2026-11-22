@@ -15,18 +15,14 @@ to know them:
   by itself, without spawning csvdt again to ask.
 
 Result: the package depends on no csvdt option name beyond the three it calls
-to ask (`--list-options`, `--help`, `--version`) and the ones four defcustoms
-hold: `csvdt-header-options`, which the package must recognise to know when a
-region needs the buffer's header in front of it, `csvdt-single-quote-options`
-and `csvdt-read-delimiter-options`, which say where one record ends and the
-next begins, and `csvdt-comment-options`, which says when it cannot tell. A
-test asserts each of them is
-still an option csvdt reports, and another that no other long option name
-appears in `csvdt.el`. Short options are not covered by that test: the `-H -p`
-in `csvdt-default-arguments` is a default you can change, which the package
-does not depend on. Add an option to csvdt and it is completable in Emacs
-immediately, with no change here, checked literally, by diffing the discovered
-set against the binary.
+to ask (`--list-options`, `--help`, `--version`) and `--lines`, which is how a
+run on part of the buffer tells csvdt which lines were selected. No setting
+names an option. A test asserts `--lines` is still an option csvdt reports, and
+another that no other long option name appears in `csvdt.el`. Short options are
+not covered by that test: the `-H -p` in `csvdt-default-arguments` is a default
+you can change, which the package does not depend on. Add an option to csvdt
+and it is completable in Emacs immediately, with no change here, checked
+literally, by diffing the discovered set against the binary.
 
 `--list-options` also says how each value must be attached, which the help
 layout doesn't make machine-readable. `--flexible` is the one option whose value
@@ -260,17 +256,17 @@ dropping either would run over less than you picked out. They are merged, so a
 selection that abuts or overlaps a banked stretch does not send a line twice.
 With neither, the whole buffer.
 
-Merged twice, in fact: once when the list is assembled, and again after the
-widening below, because widening brings stretches together that were apart.
-Two banked lines inside one record that spans several lines do not touch, so
-nothing joins them at the first pass; each then widens to that same record,
-and it would go out once per stretch. A duplicate row, valid CSV, identical
-to its neighbour and nothing in a count to question it.
+csvdt is given the whole buffer, or the part it is narrowed to, and the lines
+selected with `--lines`. It reads the buffer as it reads any file and writes
+what a run over all of it writes for the records on those lines, each once, in
+buffer order. So two banked lines inside one record that spans several lines
+send it once, and the output for a selection is the output the whole buffer
+would give for the same rows.
 
 A run says what it covered when it was more than one stretch:
 
 ```
-csvdt -H -p -d0: 12 lines from 4 stretches
+csvdt --lines 3-5,9,20-22,40-44 -H -p -d0: 13 lines from 4 stretches
 ```
 
 Anything csvdt says on stderr about a run that still succeeded (how much did
@@ -297,7 +293,8 @@ sent     : "AAAA-07-25T12:00:00+02:00,a
 "
 ```
 
-The run reports it, `csvdt -u0: 2 lines, selection widened to whole lines`,
+The run reports it, `csvdt --lines 2-3 -u0: 2 lines, selection widened to whole
+lines`,
 so a selection that was not what it looked like says so.
 
 A record is not always a line, though. A quoted field may hold newlines (an
@@ -305,61 +302,51 @@ address, a notes column, an embedded document) and then one record covers
 several lines, which is ordinary CSV and which csvdt reads and writes
 faithfully. Widening to whole lines is not enough there: a selection that
 begins inside such a field looks like a row and is the back half of one, and
-sending it alone produced a clean conversion of a field nobody wrote:
+sending it alone would convert cleanly a field nobody wrote:
 
 ```
 buffer   : h,when
            "x
            y",2026-07-25T12:00:00+02:00
 
-selected : y",2026-07-25T12:00:00+02:00
+selected : y",2026-07-25T12:00:00+02:00     (line 3)
 
-was sent : y",2026-07-25T12:00:00+02:00     -> first column "y"", exit 0
-now sent : "x
+taken    : "x
            y",2026-07-25T12:00:00+02:00     -> first column "x\ny"
 ```
 
-So the selection is pushed out to the record boundaries as well, and the run
-says `, widened to whole records: a quoted field spans lines`. The header is
-carried whole for the same reason: taking only its first line handed csvdt a
-fragment that opened a quote and never closed it. A file whose fields hold no
-newlines is unaffected: every range in it already sits on record boundaries.
+csvdt takes the whole record, since it reads the buffer from the top as a
+full run does, and says which lines it took; the run's summary passes that
+on: `, widened to whole records: lines 2-3`. Comment lines, blank lines, the
+header under `-H`, `--single-quote` and `--read-delimiter` are all read by
+csvdt in the one place, so nothing in this package reads the buffer as CSV.
 
-Which character quotes a field, and which separates them, decide where a
-record begins, so `--single-quote` and `--read-delimiter` are read from the
-arguments before the boundaries are worked out. They and the header options
-are the only csvdt options this package names, each in a defcustom, and a test
-asserts every one of them is an option csvdt still reports.
-
-Finding a record boundary means reading from the start of the buffer, since
-nothing nearer can say which side of a quote a position is on. The scan
-crosses the text before the selection once and steps over each quote character
-in it, so the cost follows how many quotes there are rather than how large the
-file is: measured at 0.17 s for a 14 MB file with twelve thousand quotes, and
-1.9 s for an 18 MB one where every field is quoted, nearly two million. A
-whole-buffer run pays nothing, having nothing before it to read.
+Because csvdt reads the buffer from its start, what one row hands to the next
+is handed on as in a full run: `-d` with one column measures the first
+selected row from the row before it, selected or not, and `--flexible`
+measures against the record a full run would. csvdt stops reading after the
+last record the selection takes, so a selection near the top of a large
+buffer is quick; the buffer is still written out whole for it first.
 
 Narrowing is the one case widening cannot rescue: a buffer narrowed to begin
 or end mid-line has no whole line to reach, and sending the lines beyond the
-restriction would cover rows nobody chose. The run passes on the short record
-and says `, first record cut short by the narrowing` or `, last record …`,
-rather than leaving a truncated row to be discovered by counting columns.
-Both ends are asked about (only the end was, at first), so a narrowing that
-began mid-record was the same cut going unreported.
+restriction would cover rows nobody chose. The run passes on the short line
+and says `, first line cut short by the narrowing` or `, last line …`, rather
+than leaving a truncated row to be discovered by counting columns. The end is
+mentioned only when the selection reaches it, since csvdt stops reading
+before.
 
-A record can be cut where the line is not, for the same reason as above: a
-narrowing ending at a line boundary that falls inside a quoted field leaves
-whole lines reachable and the record they belong to severed. That one could
-pass quietly: asked to accept ragged records, which is the obvious thing to
-reach for when a count looks off, csvdt took the truncated record rather than
-refusing it, so the field came back without the half that was out of reach, at
-exit 0. Both kinds are reported, at both ends.
+A record can be cut where the line is not: a narrowing on a line boundary
+that falls inside a quoted field. Seeing that means reading the buffer as CSV,
+which is csvdt's job and not this package's, and csvdt is only given the
+narrowed part. It reports the short record or the unclosed quote it then
+finds; under `--flexible`, which accepts ragged records, it can pass
+unnoticed, so narrow to whole records.
 
-A run that fails names the cut too. That is the case the check exists for:
-csvdt sees a short record, refuses it, and says so about a line, which
-sends you looking at data that is not the matter, since the half of it out
-of reach is. The message ends `-- note the first record cut short by the
-narrowing`.
+A run that fails names a cut too. csvdt sees a short record, refuses it, and
+says so about a line, which sends you looking at data that is not the matter,
+since the half of it out of reach is. The message ends `-- note the first line
+cut short by the narrowing`.
 
 ## Banked lines
 
@@ -396,10 +383,9 @@ this package **reads** a bank and never keeps one.
 
 **Nothing is banked until you say where they come from**, so until you do, a
 run covers the region or the whole buffer as it always did. What this package
-does with a bank once it has one is the CSV-shaped part: whole lines, buffer
-order, touching stretches merged, and the lot sent as a single file so a
-duration is measured across what was banked rather than across what was
-skipped.
+does with a bank once it has one is the line-shaped part: whole lines, buffer
+order, touching stretches merged, and the lot given to csvdt as one run with
+`--lines`, which widens them to whole records.
 
 If the package has a function for it, use that.
 
@@ -408,8 +394,9 @@ If the package has a function for it, use that.
 ```
 
 It is called in the buffer being processed and returns either `(BEG . END)`
-conses or overlays. Ranges are put in buffer order, widened to whole records and
-merged where they touch, so an implementation need not do any of that. Nor need
+conses or overlays. Ranges are put in buffer order, widened to whole lines and
+merged where they touch, and csvdt widens them to whole records, so an
+implementation need not do any of that. Nor need
 it be tidy: a pair may be either way round, a dead overlay is dropped, `nil`
 entries are ignored, a pair naming nothing is discarded rather than counted as
 a stretch, and an overlay or marker belonging to an unrelated buffer is refused
@@ -534,7 +521,7 @@ csvdt would run over 3 lines in 2 stretches.
 
 csvdt would run over the whole buffer, 3 lines.
   Banked: nothing, `csvdt-banked-lines-function' is unset.  Region: none.
-  First record cut short by the narrowing.
+  First line cut short by the narrowing.
 ```
 
 The first two read differently on purpose: not knowing where banked lines come
@@ -542,23 +529,19 @@ from is a different problem from lines that only look banked, highlighted by
 something else, or not actually banked by the package that highlights them.
 
 The last is the one a run would surprise you with. A narrowing that begins or
-ends mid-record leaves half a record reachable and nothing whole to widen back
-to, so the run reports it, and this reports it first, in the same words,
-which is the point of asking before rather than after.
+ends mid-line leaves half a line reachable and nothing whole to widen back to,
+so the run reports it, and this reports it first, in the same words, which is
+the point of asking before rather than after.
 
-It counts the way a run counts, which means whole records: two banked lines
-inside one record that spans several are described as the one stretch the run
-will make of them, not as the two lines you banked. That matters because this
-is the command you reach for *when a run covered something unexpected*: being
-wrong exactly where the run is surprising is the one thing it cannot afford.
-Which character quotes a field decides where a record ends, so the dialect is
-read from `csvdt-default-arguments`; a run whose own arguments name a different
-one may cover a little more than described.
+It counts the lines that go to csvdt. Where a quoted field carries a record
+over several lines csvdt widens to the whole record when it runs, and the
+run's summary names the lines it took, so two banked lines inside one record
+are described here as two stretches and the run then takes the record once.
 
-The banked lines are sent as **one file**, in buffer order, so a duration
-measured across them is measured across what was banked rather than across what
-was skipped. `csvdt-run-banked` runs the banked lines only; `csvdt-run-dwim`
-takes them together with the region.
+The banked lines go to csvdt as **one run**, in buffer order, and it writes
+for each what a run over the whole buffer writes, so a duration is measured
+from the row before it in the buffer, banked or not. `csvdt-run-banked` runs the
+banked lines only; `csvdt-run-dwim` takes them together with the region.
 
 Until this is set, nothing is banked as far as csvdt.el is concerned, and a run
 covers the region or the buffer as it always did.
@@ -600,56 +583,36 @@ region rather than replacing it.
 
 ## Regions keep the header
 
-A region selected below the header has no header of its own, so csvdt would
-take its first row for one, and quietly, because a header is exempt from
-whatever conversion is being applied. Depending on the insert position, that row
-either goes through unconverted or is replaced by the generated header name and
-lost.
-
-So when the arguments ask for a header and the region starts below it, the
-buffer's real header line is put in front of the region. The whole selection is
-then data, and the output is named after the columns it actually came from:
+A region selected below the header has no header of its own. csvdt is given
+the whole buffer, so under `-H` the buffer's first record is the header
+whatever was selected, and `-p` writes it once at the top of the output. The
+whole selection is data, and the output is named after the columns it
+actually came from:
 
 ```
 ts,x                            <- not selected
 2026-07-25T12:00:00+02:00,a     <- region
 2026-07-26T12:00:00+02:00,b     <- region
 
-to_utc,x                        <- with this on
+to_utc,x                        <- csvdt -H -p -u0 -i 0,replace
 2026-07-25T10:00:00+00:00,a
-2026-07-26T10:00:00+00:00,b
-
-to_utc,a                        <- without it: the first row is gone
 2026-07-26T10:00:00+00:00,b
 ```
 
-Set `csvdt-region-carries-header` to nil for the old behaviour. A whole-buffer
-run already starts at the header, so nothing is prepended; nor is anything when
-the arguments do not ask for a header, since that would add a row the selection
-does not have.
-
-`csvdt-header-options` is where the package learns which option means
-"header", which it cannot know otherwise, since `--list-options` does not say.
-Both forms are listed, and a clustered
-`-Hp` counts too, worked out from what csvdt reports about which short options
-take a value. A test asserts every configured form is an option csvdt actually
-reports, so a rename fails the build rather than silently disabling the feature.
+`csvdt-region-carries-header` used to turn this off, which handed csvdt the
+first selected row as the header and lost that row. It is obsolete since
+1.2.0, read by nothing, and goes in 2.0. So are `csvdt-header-options`,
+`csvdt-single-quote-options`, `csvdt-read-delimiter-options` and
+`csvdt-comment-options`, which fed the package's own reading of the buffer.
 
 ## Comment lines
 
-Which lines are comments is csvdt's to say, with `--comment`, and this package
-does not copy that. Working out where a record begins means reading the buffer
-for quoted fields, and a comment line that happens to hold a quote would be
-read as opening one, widening a selection to rows nobody picked. So when the
-arguments name a comment option (`csvdt-comment-options`, both `--comment x` and
-`--comment=x`), the package does not read the buffer for records at all:
-
-- a run over the whole buffer, or over the part it is narrowed to, goes as it
-  is, and csvdt skips the comments;
-- a run over part of the buffer is refused with a message saying so. Narrow to
-  whole records first (`C-x n n`) to run on part of a file with comments;
-- a buffer narrowed in the middle of a record that spans lines is not noticed,
-  since the check for it needs the same reading.
+Which lines are comments is csvdt's to say, with `--comment`, and since csvdt
+reads the buffer itself a run on part of the buffer under `--comment` works as
+any other: a comment line is skipped, a selection holding only comment lines
+takes no record and csvdt says so, and a comment line holding a quote opens
+nothing. Before 1.2.0 such a run was refused, because the package's own
+reading of the buffer could not tell a comment from a record.
 
 ## Output
 
@@ -776,14 +739,16 @@ What it checks:
 - a non-contiguous region reaches csvdt as its pieces, gaps excluded, with
   nothing configured, driven by a buffer-local `region-extract-function`
 - banked lines are ordered, de-duplicated, merged where they touch, accepted as
-  overlays or conses, and sent as one file with the header in front
+  overlays or conses, and given to csvdt as one run with `--lines`
 - a run covers the banked lines and the region together, without sending a line
   twice when they overlap, and each alone still behaves as it did
-- a region below the header carries it, a whole-buffer run does not change, and
-  nothing is prepended when the arguments do not ask for a header
-- the header option is recognised on its own, as a long form, and clustered,
-  and not when an H happens to fall inside another option's value
-- every configured header option is one csvdt actually reports
+- a region below the header is read with it, a whole-buffer run does not
+  change, no header is written when the arguments do not ask for one, and the
+  obsolete `csvdt-region-carries-header` changes nothing
+- a selection inside a record that spans lines takes the whole record once,
+  and the summary names the lines csvdt took
+- `--lines` is an option csvdt actually reports, and the five settings that
+  fed the old reading of the buffer are obsolete since 1.2.0
 - a result fed back through csvdt does not lose the input
 - an overlay another package left on a previous result does not colour the next
   one, and no text properties reach the output whatever the source carried
@@ -801,10 +766,10 @@ What it checks:
   whole, a buffer edited while it is written stops the run, and a run started
   over another replaces it
 - a run leaves no scratch buffer behind, whether it succeeded or failed
-- a comment option makes a run on part of the buffer refused, and a run on all
-  of it is csvdt's alone
-- where records begin is found in one pass however many ranges there are,
-  counted in searches rather than timed
+- a run on part of the buffer under a comment option runs, and one holding only
+  a comment line says it took nothing
+- the lines of any number of ranges are counted in one pass over the buffer,
+  counted in characters crossed rather than timed
 - a missing binary says which variable to set
 - **no csvdt option name appears in `csvdt.el`**: the property the whole design
   rests on, so it is asserted rather than assumed
