@@ -4516,17 +4516,17 @@ fn flexible_fix_output_is_rectangular() {
 /// asking stderr, because the file is what an analyst is given and the
 /// header line is part of what they are given.
 fn fill_log_of(arguments: &[&str], input: &str, path: &std::path::Path) -> String {
-    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path);
     csvdt()
         .args(arguments)
         .arg("--fill-log")
-        .arg(&path)
+        .arg(path)
         .write_stdin(input.to_string())
         .assert()
         // A run may end on a row too wide to pad, and the log is still
         // written up to it; a usage error or a crash writes none.
         .code(predicate::in_iter([0, 1]));
-    std::fs::read_to_string(&path).expect("the fill log should have been written")
+    std::fs::read_to_string(path).expect("the fill log should have been written")
 }
 
 #[test]
