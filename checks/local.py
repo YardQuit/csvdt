@@ -36,6 +36,19 @@ Held where the two databases agree, which is modern dates:
   dates are still exercised: by the two properties above, which no database
   can disagree with.
 
+Held unless the two releases differ:
+
+  a clock reading that differs only because the host's tzdata and the copy
+  inside csvdt are different releases.  A zone's rules change between
+  releases, including rules for dates still to come (this host's 2026f
+  disagrees with the bundled 2025b about America/Inuvik in 2031), and no
+  amount of care in csvdt can make it agree with a newer or older database.
+  Where the two releases are known and differ, an offset the host disagrees
+  with is reported as a difference between releases, naming both, and does
+  not fail the check.  Where they are the same release, or either is not
+  known, it is a divergence.  The other two properties, and the minutes of a
+  clock reading given the offset, are never excused this way.
+
 Reported rather than held:
 
   which copy of the data answered.  The help promises the rules come "from the
@@ -46,15 +59,16 @@ Reported rather than held:
   files.  Europe/Amsterdam in 1900 can tell them apart on this host, and the
   summary says which answered.  It can confirm the binary's own data and never
   quite the opposite: where both copies would refuse the instant, or both give
-  the same offset, the answer fits either story.  So it is printed, and a run
+  the same offset at that one instant, the answer fits either story, whatever
+  the two releases say elsewhere.  So it is printed, and a run
   that stops saying "the binary's" is the thing to look at.
 
 The zones are the ones both sides know, since csvdt refuses a zone its own
 data lacks and Python cannot referee one it lacks either.
 """
-import os, random, sys
+import os, random, re, sys
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, available_timezones
+from zoneinfo import TZPATH, ZoneInfo, available_timezones
 
 import harness
 
@@ -64,6 +78,9 @@ import harness
 # town's longitude and the databases record different guesses at it.
 FIRST_COMPARABLE_YEAR = 1970
 
+# How many differences between releases are listed in full.
+RELEASE_DIFFERENCES_SHOWN = 5
+
 # Zones worth naming rather than drawing: a southern-hemisphere DST, the
 # half-hour and three-quarter-hour offsets, one that abolished DST recently,
 # one that never had it, and the two the help names for their sub-minute
@@ -71,6 +88,45 @@ FIRST_COMPARABLE_YEAR = 1970
 NAMED = ["Europe/Oslo", "America/New_York", "Australia/Sydney", "Asia/Kolkata",
          "Pacific/Chatham", "Asia/Tokyo", "Europe/Moscow", "America/Sao_Paulo",
          "Africa/Monrovia", "Europe/Amsterdam", "Pacific/Kiritimati", "UTC"]
+
+
+def host_tzdata_release():
+    """The release of the tzdata this Python reads, such as "2026f", or None.
+
+    Taken from the `tzdata.zi` file (or `+VERSION`) in the first directory of
+    `zoneinfo.TZPATH` that has one, else from the `tzdata` package.  None
+    where the host does not say, which the caller treats as unknown.
+    """
+    for directory in TZPATH:
+        try:
+            with open(os.path.join(directory, "tzdata.zi")) as handle:
+                found = re.match(r"# version (\S+)", handle.readline())
+            if found:
+                return found.group(1)
+        except OSError:
+            pass
+        try:
+            with open(os.path.join(directory, "+VERSION")) as handle:
+                return handle.read().strip() or None
+        except OSError:
+            pass
+    try:
+        import tzdata
+        return tzdata.IANA_VERSION
+    except (ImportError, AttributeError):
+        return None
+
+
+def bundled_tzdata_release():
+    """The release of the tzdata inside the binary, from its `--version`."""
+    found = re.search(r"IANA tzdata (\S+?)\)",
+                      harness.text(harness.run(["--version"]).stdout))
+    return found.group(1) if found else None
+
+
+def releases_differ(host, bundled):
+    """Whether the two tzdata releases are both known and not the same."""
+    return bool(host and bundled and host != bundled)
 
 
 def zones_both_sides_know():
@@ -161,14 +217,15 @@ def which_database(bad):
     A csvdt that replaced the named zone with `chrono::Local' (which honours
     TZ and the host's files) would pass it.
 
-    Where they disagree, the disagreement is the instrument.  This host's
-    tzdata has Europe/Amsterdam on +00:19:32 in 1900; chrono-tz 2025b has it
+    Where they disagree, the disagreement is the instrument.  An older host's
+    tzdata had Europe/Amsterdam on +00:19:32 in 1900; chrono-tz 2025b has it
     on +00:00.  So csvdt writing the host's answer there is csvdt reading the
     host's database.
 
     Nothing to be done on a host whose tzdata happens to agree with the
-    bundled copy: there is no difference to see, and saying so is better than
-    a check that quietly tests nothing.
+    bundled copy at this instant: there is no difference to see, and saying
+    so is better than a check that quietly tests nothing.  That says nothing
+    about other zones or dates, where the releases can still differ.
     """
     zone, when = "Europe/Amsterdam", datetime(1900, 6, 15, 12, tzinfo=timezone.utc)
     host = when.astimezone(ZoneInfo(zone)).utcoffset()
@@ -196,8 +253,8 @@ def which_database(bad):
         return "the binary's"
     if back.utcoffset() != host:
         return "the binary's"
-    return ("not distinguishable here (this host's tzdata gives the same "
-            "answer as the bundled copy)")
+    return ("not distinguishable here (at the one instant tried, this host's "
+            "tzdata gives the same answer as the bundled copy)")
 
 
 def main():
@@ -209,7 +266,9 @@ def main():
     zones = NAMED + drawn[:28]
     zones = [zone for zone in zones if zone in available_timezones()]
 
-    bad = []
+    host_release, bundled_release = host_tzdata_release(), bundled_tzdata_release()
+    excused = releases_differ(host_release, bundled_release)
+    bad, releases = [], []
     compared = moved = old = refused = 0
 
     for zone in zones:
@@ -259,9 +318,10 @@ def main():
             # And in the window, the clock reading itself.
             want = when.astimezone(here)
             if back.utcoffset() != want.utcoffset():
-                bad.append((zone, when.isoformat(), wrote,
-                            f"offset {back.utcoffset()} where this host's "
-                            f"tzdata says {want.utcoffset()}"))
+                found = (zone, when.isoformat(), wrote,
+                         f"offset {back.utcoffset()} where this host's "
+                         f"tzdata says {want.utcoffset()}")
+                (releases if excused else bad).append(found)
                 continue
             if back.replace(tzinfo=None) != want.replace(tzinfo=None):
                 bad.append((zone, when.isoformat(), wrote,
@@ -276,6 +336,12 @@ def main():
           f"({old} of them before {FIRST_COMPARABLE_YEAR}), {compared} clock "
           f"readings against Python, {refused} refused for a sub-minute "
           f"offset, {len(bad)} divergences; rules read from {source}")
+    if releases:
+        print(f"local: {len(releases)} offsets differ because the releases do, "
+              f"not because of csvdt: this host has tzdata {host_release}, "
+              f"csvdt bundles {bundled_release}")
+        for zone, source, wrote, why in releases[:RELEASE_DIFFERENCES_SHOWN]:
+            print(f"   {zone} {source} -> {wrote}: {why}")
     for zone, source, wrote, why in bad[:20]:
         print(f"   {zone} {source} -> {wrote}: {why}")
     return 1 if bad else 0
