@@ -116,6 +116,12 @@ MESSAGE_EXAMPLES = [
      "csvdt reads ...",
      ["-H", "-p", "-u1"],
      b"ts,msg\n2024-01-01T00:00:00Z,ok\nJan  1 00:00:00,syslog\n", None),
+    ("README.md",
+     "csvdt: '--lines' widened to whole records, taking lines 3-4",
+     ["-H", "-p", "-u1", "--lines", "4"],
+     b"id,when,note\n7,2026-01-01T09:00:00+01:00,ok\n"
+     b"8,2026-01-01T09:10:00+01:00,\"two\nlines\"\n"
+     b"9,2026-01-01T10:30:00+01:00,ok\n", None),
     # The Emacs front end strips csvdt's own prefix and says which status it
     # exited with, so what it shows is csvdt's message either way.
     ("emacs/README.md",
@@ -179,6 +185,12 @@ HELP_EXAMPLE_FILES = {
     "ragged.csv": "id,when,level\n"
                   "7,2023-11-14T22:13:20+01:00,info,restarted\n"
                   "8,2023-11-15T09:00:00+01:00\n",
+    # A note over two lines, so the '--lines' example takes a record whose
+    # lines it did not all name.
+    "notes.csv": "id,when,note\n"
+                 "7,2023-11-14T22:13:20+01:00,ok\n"
+                 "8,2023-11-15T09:00:00+01:00,\"two\nlines\"\n"
+                 "9,2023-11-15T10:00:00+01:00,ok\n",
 }
 
 

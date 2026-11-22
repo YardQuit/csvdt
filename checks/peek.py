@@ -206,7 +206,7 @@ def main():
               "--remove": "0", "--arrange": "1,0", "--trim": "all",
               "--read-delimiter": ";", "--comment": "#",
               "--print-delimiter": ";", "--quote": "always",
-              "--fill-log": "-"}
+              "--fill-log": "-", "--lines": "2"}
 
     listed = harness.run(["--list-options"], timeout=20).stdout.decode()
     refusals = 0

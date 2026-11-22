@@ -69,6 +69,25 @@ impl Lines {
         starts.first_line + index as u64
     }
 
+    /// The line holding the byte at offset AT, which must not lie before the
+    /// line starts already let go of.
+    pub(crate) fn line_holding(&self, at: u64) -> u64 {
+        let starts = self.0.borrow();
+        let after = starts.starts.partition_point(|&(offset, _)| offset <= at);
+        starts.first_line + after.saturating_sub(1) as u64
+    }
+
+    /// The lines a record runs over, first and last: the line it starts on,
+    /// as [`Lines::line_of`] gives it from POSITION, where it was read from,
+    /// and the line holding its last byte, the one before END, where the
+    /// reader stopped. The record's terminator is on its last line, a CRLF's
+    /// '\r' included.
+    pub(crate) fn span_of(&self, position: Option<&csv::Position>, end: &csv::Position, comment: Option<char>)
+        -> (u64, u64) {
+        let first = self.line_of(position, comment);
+        (first, self.line_holding(end.byte().saturating_sub(1)).max(first))
+    }
+
     /// Lets go of the line starts before the line holding POSITION, which
     /// no record still to come can start on. Done in batches, once enough
     /// have gathered, so a row costs a comparison rather than a removal.

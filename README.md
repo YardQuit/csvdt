@@ -302,6 +302,39 @@ d,b,a,c,e
 3,1,0,2,4
 ```
 
+## Part of a file
+
+`--lines` converts the records on the lines you name, counted from 1 as an
+editor counts them: `--lines 12-40`, or `--lines 3-5,9,20-22`. The output is
+what a run over the whole file writes for those records, header included under
+`-p`, so you can try a command on a few rows before the whole file and get the
+rows the whole run would give:
+
+```bash
+$ printf 'id,when,note\n7,2026-01-01T09:00:00+01:00,ok\n8,2026-01-01T09:10:00+01:00,"two\nlines"\n9,2026-01-01T10:30:00+01:00,ok\n' \
+    | csvdt -H -p -u1 --lines 4
+id,when,<to_utc,note
+8,2026-01-01T09:10:00+01:00,2026-01-01T08:10:00+00:00,"two
+lines"
+```
+
+A quoted field may hold a newline, and then a record runs over more than one
+line. Naming any of them takes the whole record, and csvdt says on stderr which
+lines it took, in the form `--lines` reads, so a program can pass it back:
+
+```
+csvdt: '--lines' widened to whole records, taking lines 3-4
+```
+
+The file is read as a full run reads it, so comment lines, blank lines and
+quoted newlines fall where they would, and what one row hands to the next is
+still handed on: `-d` with one column measures the first selected row from the
+row before it, and `--flexible` measures against the same record a full run
+would. Rows outside the selection are read and nothing more, so a ragged or
+broken one there does not stop the run, and reading stops after the last record
+selected: the first hundred lines of a large file cost what reading a hundred
+lines costs.
+
 ## Uneven rows
 
 `-f/--flexible` lets records with differing field counts through instead of

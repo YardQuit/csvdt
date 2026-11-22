@@ -28,6 +28,7 @@ VALUES = {
     # Needs a filling mode to be allowed at all, and writes
     # its account to stderr rather than a file left behind.
     "--fill-log": "-",
+    "--lines": "1-2",
 }
 # -i has nothing to place without an action.
 EXTRA = {"--insert": ["-u0"], "--fill-log": ["-f=fix"]}

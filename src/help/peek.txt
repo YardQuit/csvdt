@@ -50,9 +50,10 @@ rows shown.
 The options that write are refused with it -- an action,
 '--round-seconds', '--remove', '-a/--arrange', '-i/--insert',
 '--flexible', '--fill-log', '--quote' and '--print-delimiter' --
-since this writes no CSV for them to act on. Everything not in
-that list applies: the four above that decide what a record is,
-and '-H' and '-p'.
+since this writes no CSV for them to act on, and so is
+'--lines', since this shows the top of the input rather than a
+run over part of it. Everything not in that list applies: the
+four above that decide what a record is, and '-H' and '-p'.
 
 An input holding no records has nothing to number: that is said
 on stderr, and the run still ends 0, since an empty file is not

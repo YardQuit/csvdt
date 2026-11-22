@@ -109,6 +109,8 @@ pub(crate) struct ArgumentFlags {
     pub(crate) input_file: Option<std::path::PathBuf>,
     /// -H/--has-header: the first record is a header, not data.
     pub(crate) has_headers: bool,
+    /// --lines: the physical lines whose records are converted. None converts every record.
+    pub(crate) lines: Option<crate::selection::LineSelection>,
     /// --peek: show the top of the input as a numbered table instead of a run.
     pub(crate) peek: bool,
     /// -p/--print-header: write the header to the output.
@@ -577,6 +579,8 @@ const HAS_HEADER: &str = include_str!("./help/has_header.txt");
 const PRINT_HEADER: &str = include_str!("./help/print_header.txt");
 /// The help for --flexible.
 const FLEXIBLE: &str = include_str!("./help/flexible.txt");
+/// The help for --lines.
+const LINES: &str = include_str!("./help/lines.txt");
 /// The help for -i/--insert.
 const POSITION: &str = include_str!("./help/position.txt");
 /// The help for --trim.
@@ -785,6 +789,14 @@ fn input_args() -> Vec<clap::Arg> {
             .default_missing_value("keep")
             .ignore_case(true)
             .value_parser(abbreviated_values(&FLEXIBLE_MODES))
+            .required(false),
+        clap::Arg::new("lines")
+            .action(clap::ArgAction::Set)
+            .value_name("ranges")
+            .help(help_summary(LINES))
+            .long_help(LINES)
+            .long("lines")
+            .num_args(1)
             .required(false),
     ]
 }
@@ -1038,6 +1050,7 @@ fn question_args() -> Vec<clap::Arg> {
                 "fill_log",
                 "quotes",
                 "print_delimiter",
+                "lines",
             ]),
         clap::Arg::new("list_options")
             .action(clap::ArgAction::SetTrue)
@@ -1192,6 +1205,10 @@ fn flags_from(matches: &clap::ArgMatches) -> Result<ArgumentFlags, Box<dyn Error
 
     if let Some(value) = matches.get_one::<std::path::PathBuf>("fill_log") {
         args.fill_log = Some(value.clone());
+    }
+
+    if let Some(value) = matches.get_one::<String>("lines") {
+        args.lines = Some(crate::selection::LineSelection::parse(value)?);
     }
 
     if let Some(value) = matches.get_one::<String>("action_split") {

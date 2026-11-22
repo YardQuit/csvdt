@@ -77,6 +77,16 @@ gains is empty rather than invented:
 done about it: under plain '--flexible' the same rows are logged
 as 'short' and nothing is padded at all.
 
+Part of a file is converted with '--lines', which takes the
+records on the lines named, whole. A record whose quoted field
+holds a newline runs over two lines, and naming either takes
+both; stderr then names the lines taken:
+
+|    $ csvdt -H -p -u1 --lines 4 notes.csv
+|    id,when,<to_utc,note
+|    8,2023-11-15T09:00:00+01:00,2023-11-15T08:00:00+00:00,"two
+|    lines"
+
 There is no in-place mode, and a redirection onto the input is
 refused rather than obeyed: the shell empties the file before
 csvdt starts. Write another and move it:

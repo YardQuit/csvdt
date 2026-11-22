@@ -4,7 +4,7 @@ use clap::builder::PossibleValue;
 use jiff::SignedDuration;
 use jiff::civil::DateTime;
 use jiff::tz::Offset;
-use crate::{cli::*, edit::*, input::*, report::*, timestamp::*, zone::*};
+use crate::{cli::*, edit::*, input::*, report::*, selection::*, timestamp::*, zone::*};
 
 /// VALUE read as a timestamp, which it must be.
 fn stamp(value: &str) -> Stamp {
@@ -1777,6 +1777,23 @@ fn one_more_row_costs_a_fixed_few_allocations() {
         assert!(per_row <= 2, "{style:?}: {per_row} allocations per row of twelve fields");
     }
 }
+
+/// A row '--lines' passes over costs no more than one it writes, at either
+/// size: the selection is asked a comparison or two per record, and nothing
+/// of the record is kept. The selection here lies past the end of the input,
+/// so every row is passed over and the whole input is still read.
+#[test]
+fn one_more_row_passed_over_costs_a_fixed_few_allocations() {
+    for action in [Action::Passthrough, Action::Duration { second: None }] {
+        let args = ArgumentFlags {
+            lines: Some(LineSelection::parse("1000000").unwrap()),
+            action: action.clone(),
+            ..default_args()
+        };
+        let per_row = (allocations_over(4000, &args) - allocations_over(2000, &args)) / 2000;
+        assert!(per_row <= 2, "{action:?}: {per_row} allocations per row passed over");
+    }
+}
 // ---- reading and writing as the input arrives ----------------------------
 
 /// A reader that hands over CHUNK once and then fails the test if it is
@@ -1843,4 +1860,79 @@ fn find_newline_finds_the_first_newline_anywhere() {
             bytes[at] = b'x';
         }
     }
+}
+
+// ---- --lines -------------------------------------------------------------------
+
+/// The ranges a '--lines' value comes to, written back the way it reads them.
+fn selected(value: &str) -> String {
+    let selection = LineSelection::parse(value).expect("a valid selection");
+    let mut walk = SelectionWalk::new(&selection);
+    let mut lines = Vec::new();
+    for line in 1..=selection.last_line() {
+        if walk.takes(line, line) {
+            lines.push((line, line));
+        }
+    }
+    render_ranges(&lines.iter().fold(Vec::new(), |mut joined: Vec<(u64, u64)>, &(first, last)| {
+        match joined.last_mut() {
+            Some(previous) if previous.1 + 1 == first => previous.1 = last,
+            _ => joined.push((first, last)),
+        }
+        joined
+    }))
+}
+
+/// Parts in any order, overlapping or meeting, come to the same lines.
+#[test]
+fn a_selection_is_the_lines_its_parts_name_whatever_their_order() {
+    assert_eq!(selected("12-40"), "12-40");
+    assert_eq!(selected("20-22,3-5,9"), "3-5,9,20-22");
+    assert_eq!(selected("3-5,4-8,9,9"), "3-9");
+    assert_eq!(selected("7,7-7"), "7");
+    assert_eq!(selected("1"), "1");
+}
+
+/// Every refusal names '--lines' and quotes the whole value given.
+#[test]
+fn a_selection_that_is_not_one_is_refused_naming_what_was_given() {
+    for (value, says) in [
+        ("", "empty"), ("3,", "empty"), ("3-", "empty"), ("-3", "empty"), ("3,,5", "empty"),
+        ("0", "no line 0"), ("2-0", "no line 0"), ("5-3", "runs backwards"),
+        ("3, 4", "contains a space"), ("x", "not a list of lines"), ("+3", "not a list of lines"),
+        ("1-2-3", "not a list of lines"), ("3.5", "not a list of lines"),
+        ("99999999999999999999", "too large"),
+    ] {
+        let error = LineSelection::parse(value).expect_err(value).to_string();
+        assert!(error.starts_with(&format!("'--lines' was given \"{value}\"")), "{value}: {error}");
+        assert!(error.contains(says), "{value}: {error}");
+    }
+}
+
+/// A record is taken when any of its lines is selected, and the walk says
+/// whether a record taken brought in a line nobody named.
+#[test]
+fn a_record_is_taken_by_any_of_its_lines() {
+    let selection = LineSelection::parse("4,9-10").unwrap();
+    let mut walk = SelectionWalk::new(&selection);
+    assert!(!walk.takes(1, 3));
+    assert!(walk.takes(3, 4), "the record's last line is selected");
+    assert!(!walk.takes(5, 8));
+    assert!(walk.takes(9, 9));
+    assert!(!walk.is_done_after(9));
+    assert!(walk.takes(10, 12), "the record's first line is selected");
+    assert!(walk.is_done_after(12));
+    assert!(!walk.takes(13, 13));
+    assert_eq!(walk.summary().as_deref(), Some("'--lines' widened to whole records, taking lines 3-4,9-12"));
+}
+
+/// Nothing is said of a selection taken as named, and a selection that
+/// took nothing says so.
+#[test]
+fn a_selection_is_reported_only_when_it_is_not_what_was_named() {
+    let selection = LineSelection::parse("2-3").unwrap();
+    let mut walk = SelectionWalk::new(&selection);
+    assert!(walk.summary().unwrap().contains("took no record"));
+    assert!(walk.takes(2, 2) && walk.takes(3, 3));
+    assert_eq!(walk.summary(), None);
 }

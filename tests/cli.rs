@@ -5692,14 +5692,14 @@ fn every_option_is_either_welcome_with_peek_or_refused_by_it() {
     ];
     /// A value that any of them will accept, so a refusal is the conflict with
     /// --peek rather than a value the option would have rejected anyway.
-    const VALUES: [(&str, &str); 16] = [
+    const VALUES: [(&str, &str); 17] = [
         ("--flexible", "widest"), ("--insert", "0,replace"),
         ("--rfc3339", "0"), ("--utc", "0"), ("--local", "0"),
         ("--offset", "0,+02:00"), ("--split", "0"), ("--duration", "0,1"),
         ("--remove", "0"), ("--arrange", "1,0"), ("--trim", "all"),
         ("--read-delimiter", ";"), ("--comment", "#"),
         ("--print-delimiter", ";"), ("--quote", "always"),
-        ("--fill-log", "-"),
+        ("--fill-log", "-"), ("--lines", "2"),
     ];
 
     let mut welcome = 0;
@@ -5782,7 +5782,7 @@ fn every_option_is_either_welcome_with_peek_or_refused_by_it() {
 
     assert_eq!(welcome, WELCOME.len(), "not every welcome option was reached");
     assert_eq!(
-        refused, 14,
+        refused, 15,
         "--peek's conflict list has changed; peek.txt names the options it \
          refuses and needs to say the same",
     );
@@ -9363,4 +9363,291 @@ fn the_limits_say_the_input_file_cannot_also_be_the_output() {
         .success()
         .stdout(predicate::str::contains("THE INPUT FILE CANNOT ALSO BE THE OUTPUT"))
         .stdout(predicate::str::contains("mv out.csv in.csv"));
+}
+
+// ---- --lines ---------------------------------------------------------------
+
+/// What csvdt writes to standard output for ARGS over INPUT, held to its
+/// exit status.
+fn run_lines(args: &[&str], input: &str, status: i32) -> (String, String) {
+    let output = csvdt().args(args).write_stdin(input.to_string()).output().unwrap();
+    assert_eq!(output.status.code(), Some(status), "{args:?}: {output:?}");
+    (String::from_utf8(output.stdout).unwrap(), String::from_utf8(output.stderr).unwrap())
+}
+
+/// A file with a header, a quoted field over two lines, a comment line and
+/// a blank one: the shapes that make a line and a record differ.
+const LINES_INPUT: &str = "id,ts\n\
+                           1,2024-01-01T00:00:00Z\n\
+                           2,\"two\nlines\"\n\
+                           # a comment\n\
+                           3,2024-01-01T00:00:05Z\n\
+                           \n\
+                           4,2024-01-01T00:00:09Z\n";
+
+#[test]
+fn lines_converts_the_records_on_the_lines_named() {
+    let args = ["-H", "-p", "--comment", "#", "--lines"];
+    let (out, err) = run_lines(&[&args[..], &["6"]].concat(), LINES_INPUT, 0);
+    assert_eq!(out, "id,ts\n3,2024-01-01T00:00:05Z\n");
+    assert_eq!(err, "");
+    let (out, _) = run_lines(&[&args[..], &["2,6-8"]].concat(), LINES_INPUT, 0);
+    assert_eq!(out, "id,ts\n1,2024-01-01T00:00:00Z\n3,2024-01-01T00:00:05Z\n4,2024-01-01T00:00:09Z\n");
+}
+
+/// Parts out of order or overlapping take each record once, in input order.
+#[test]
+fn lines_takes_each_record_once_in_input_order() {
+    let args = ["-H", "-p", "--comment", "#", "--lines"];
+    let (sorted, _) = run_lines(&[&args[..], &["2,6"]].concat(), LINES_INPUT, 0);
+    let (shuffled, _) = run_lines(&[&args[..], &["6,2,2-2,1-2,6"]].concat(), LINES_INPUT, 0);
+    assert_eq!(shuffled, sorted);
+    assert_eq!(sorted, "id,ts\n1,2024-01-01T00:00:00Z\n3,2024-01-01T00:00:05Z\n");
+}
+
+/// The header is the input's first record and is written once at the top
+/// under -p, selected or not; without -p it is not written, as in a full run.
+#[test]
+fn lines_writes_the_header_once_whether_or_not_it_is_selected() {
+    let (out, _) = run_lines(&["-H", "-p", "--comment", "#", "--lines", "1-2"], LINES_INPUT, 0);
+    assert_eq!(out, "id,ts\n1,2024-01-01T00:00:00Z\n");
+    let (out, _) = run_lines(&["-H", "-p", "--lines", "1"], LINES_INPUT, 0);
+    assert_eq!(out, "id,ts\n");
+    let (out, _) = run_lines(&["-H", "--lines", "2"], LINES_INPUT, 0);
+    assert_eq!(out, "1,2024-01-01T00:00:00Z\n");
+    // Without -H the first line is data like any other.
+    let (out, _) = run_lines(&["--lines", "1"], LINES_INPUT, 0);
+    assert_eq!(out, "id,ts\n");
+}
+
+/// Selecting any line of a record that runs over several takes all of it,
+/// and says so once, in a form a program reads back as a '--lines' value.
+#[test]
+fn lines_widened_to_whole_records_says_which_lines_it_took() {
+    let (out, err) = run_lines(&["-H", "-p", "--comment", "#", "--lines", "4,6"], LINES_INPUT, 0);
+    assert_eq!(out, "id,ts\n2,\"two\nlines\"\n3,2024-01-01T00:00:05Z\n");
+    assert_eq!(err, "csvdt: '--lines' widened to whole records, taking lines 3-4,6\n");
+    let taken = err.trim_end().rsplit("taking lines ").next().unwrap();
+    let (again, err) = run_lines(&["-H", "-p", "--comment", "#", "--lines", taken], LINES_INPUT, 0);
+    assert_eq!(again, out);
+    assert_eq!(err, "", "the lines taken are whole records already");
+}
+
+/// Comment and blank lines are read as a full run reads them: selecting
+/// only those takes nothing, which is said, and the run still ends 0.
+#[test]
+fn lines_selecting_only_comment_and_blank_lines_takes_no_record() {
+    for lines in ["5", "7", "5,7", "100"] {
+        let (out, err) = run_lines(&["-H", "-p", "--comment", "#", "--lines", lines], LINES_INPUT, 0);
+        assert_eq!(out, "id,ts\n", "--lines {lines}");
+        assert_eq!(err, "csvdt: '--lines' took no record: the lines selected hold only comment or \
+                         blank lines, or lie past the end of the input\n");
+    }
+    // Without --comment the line is a record, of the wrong width.
+    let (_, err) = run_lines(&["-H", "-p", "--lines", "5"], LINES_INPUT, 1);
+    assert!(err.contains("found record with 1 fields"), "{err}");
+}
+
+/// A quoted field whose lines look like comments or blanks is still data,
+/// and selecting one of those lines takes the record.
+#[test]
+fn lines_inside_a_quoted_field_belong_to_its_record() {
+    let input = "a,b\n\"q\n\n# not\n\",1\n# c\n5,6\n";
+    let (out, err) = run_lines(&["-H", "--comment", "#", "--lines", "4"], input, 0);
+    assert_eq!(out, "\"q\n\n# not\n\",1\n");
+    assert_eq!(err, "csvdt: '--lines' widened to whole records, taking lines 2-5\n");
+}
+
+/// CRLF lines count as LF ones do.
+#[test]
+fn lines_counts_crlf_lines_as_lf_ones() {
+    let input = "a,b\r\n\r\n1,2\r\n\"x\r\ny\",3\r\n4,5\r\n";
+    let (out, err) = run_lines(&["-H", "--lines", "3,6"], input, 0);
+    assert_eq!(out, "1,2\n4,5\n");
+    assert_eq!(err, "");
+    let (out, err) = run_lines(&["-H", "--lines", "5"], input, 0);
+    assert_eq!(out, "\"x\r\ny\",3\n");
+    assert_eq!(err, "csvdt: '--lines' widened to whole records, taking lines 4-5\n");
+}
+
+/// Each malformed value is refused before the input is read, with status
+/// 100, naming the option and quoting what was given.
+#[test]
+fn lines_refuses_a_value_that_is_not_a_selection() {
+    for (value, says) in [
+        ("", "which leaves a line number empty"),
+        ("3,", "which leaves a line number empty"),
+        ("3-", "which leaves a line number empty"),
+        ("0", "Lines are counted from 1, as an editor counts them, so there is no line 0."),
+        ("5-3", "where 5-3 runs backwards. Write a range first line first, as 3-5."),
+        ("3, 4", "which contains a space"),
+        ("x", "which is not a list of lines. A part is a line number or a range of them"),
+        ("99999999999999999999", "which holds a number too large to be a line number"),
+    ] {
+        let output = csvdt().args(["--lines", value]).arg("no-such-file.csv").output().unwrap();
+        assert_eq!(output.status.code(), Some(100), "{value:?}");
+        let err = String::from_utf8(output.stderr).unwrap();
+        assert!(err.starts_with(&format!("csvdt: '--lines' was given \"{value}\"")), "{value:?}: {err}");
+        assert!(err.contains(says), "{value:?}: {err}");
+    }
+}
+
+/// --peek shows the top of the input, not a run over part of it.
+#[test]
+fn lines_conflicts_with_peek() {
+    csvdt()
+        .args(["--peek", "--lines", "2"])
+        .write_stdin("a\n1\n")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+/// '-d' with one column measures the first row taken from the row before
+/// it, taken or not, as a full run does.
+#[test]
+fn lines_duration_measures_from_the_row_before_the_selection() {
+    let (out, _) = run_lines(&["-H", "-p", "-d1", "--comment", "#", "--lines", "8"], LINES_INPUT, 0);
+    assert_eq!(out, "id,ts,<duration\n4,2024-01-01T00:00:09Z,PT4S\n");
+    // Across a row that would not parse, back to the last one that did.
+    let (out, _) = run_lines(&["-H", "-p", "-d1", "--comment", "#", "--lines", "6"], LINES_INPUT, 0);
+    assert_eq!(out, "id,ts,<duration\n3,2024-01-01T00:00:05Z,PT5S\n");
+}
+
+/// The exit status is the records taken's: a selection where nothing
+/// converted ends 1, and one where something did ends 0 whatever the rows
+/// outside it hold.
+#[test]
+fn lines_exit_status_is_decided_by_the_records_taken() {
+    let (out, err) = run_lines(&["-H", "-u1", "--comment", "#", "--lines", "3"], LINES_INPUT, 1);
+    assert_eq!(out, "2,\"two\nlines\",parse_err\n");
+    assert!(err.contains("nothing converted: all 1 values"), "{err}");
+    let (_, err) = run_lines(&["-H", "-u1", "--comment", "#", "--lines", "6"], LINES_INPUT, 0);
+    assert_eq!(err, "");
+}
+
+/// A record not taken is passed over whole: one of the wrong width or one
+/// that is not UTF-8 does not stop the run. Taken, it does.
+#[test]
+fn lines_passes_over_a_bad_record_outside_the_selection() {
+    let ragged = "a,b\n1,2\n3\n4,5\n";
+    let (out, _) = run_lines(&["--lines", "2,4"], ragged, 0);
+    assert_eq!(out, "1,2\n4,5\n");
+    let (_, err) = run_lines(&["--lines", "3"], ragged, 1);
+    assert!(err.contains("found record with 1 fields"), "{err}");
+
+    let bytes = b"a,b\n1,2\n\xff,x\n4,5\n".to_vec();
+    let output = csvdt().args(["--lines", "4"]).write_stdin(bytes.clone()).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"4,5\n");
+    let output = csvdt().args(["--lines", "3"]).write_stdin(bytes).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("UTF-8"), "{output:?}");
+}
+
+/// '--flexible=fix' measures against the input's first record and widest
+/// against its widest, selected or not; the fill log names the records
+/// taken by their lines in the whole input, and only those.
+#[test]
+fn lines_fills_against_the_whole_input_and_logs_only_what_it_took() {
+    let input = "a,b\n1\n# c\n2,3,4\n5\n6,7\n";
+    let (out, err) = run_lines(&["-H", "-p", "--comment", "#", "-f=fix", "--fill-log", "-", "--lines", "5-6"],
+                               input, 0);
+    assert_eq!(out, "a,b\n5,\n6,7\n");
+    assert!(err.starts_with("line,record,fields,width,delta,status\n5,3,1,2,-1,padded\ncsvdt: 1 row(s)"), "{err}");
+    let (out, err) = run_lines(&["-H", "-p", "--comment", "#", "-f=widest", "--fill-log", "-", "--lines", "5"],
+                               input, 0);
+    assert_eq!(out, "a,b,\n5,,\n");
+    // The header is written, so its padding is logged with the row's.
+    assert!(err.starts_with("line,record,fields,width,delta,status\n1,0,2,3,-1,padded\n5,3,1,3,-2,padded\n\
+                             csvdt: 2 row(s)"), "{err}");
+    // From standard input, which widest copies whole before it counts.
+    let (piped, _) = run_lines(&["-H", "-p", "--comment", "#", "-f=widest", "--lines", "5", "-"], input, 0);
+    assert_eq!(piped, "a,b,\n5,,\n");
+}
+
+/// Every action, -i, --remove and -a give the records taken exactly what a
+/// full run gives them.
+#[test]
+fn lines_gives_every_action_what_a_full_run_gives_the_same_records() {
+    let input = "id,ts,end\n\
+                 1,2024-01-01T00:00:00+02:00,2024-01-01T01:00:00Z\n\
+                 \"2\nb\",\"2024-01-02T00:00:00Z\",2024-01-02T01:00:00Z\n\
+                 3,1700000000,2024-01-03T00:00:00Z\n\
+                 4,2024-01-04T12:00:00-05:00,2024-01-04T18:00:00Z\n";
+    let actions: [&[&str]; 11] = [
+        &[], &["-s1"], &["-r1"], &["-u1"], &["-o", "1,-06:00"], &["-d1"], &["-d1,2"], &["-u1", "-i0,before"],
+        &["-r1", "-i2,replace"], &["--remove", "1,2"], &["-a", "2,0"],
+    ];
+    for action in actions {
+        let mut full = vec!["-H", "-p"];
+        full.extend_from_slice(action);
+        let (whole, _) = run_lines(&full, input, 0);
+        let lines: Vec<&str> = whole.split_inclusive('\n').collect();
+        // The header, the record on line 2 and the one on line 5. The record
+        // on lines 3-4 keeps its newline under every action here, and so is
+        // two lines of output.
+        let expected = [lines[0], lines[1], lines[4]].concat();
+        full.extend_from_slice(&["--lines", "2,5"]);
+        let (selected, _) = run_lines(&full, input, 0);
+        assert_eq!(selected, expected, "{action:?}");
+    }
+}
+
+/// FILE, '-' and standard input left implicit are read alike.
+#[test]
+fn lines_reads_a_file_a_dash_and_standard_input_alike() {
+    let dir = scratch_dir("lines_reads_a_file_a_dash_and_standard_input_alike");
+    let file = dir.join("in.csv");
+    std::fs::write(&file, LINES_INPUT).unwrap();
+    let args = ["-H", "-p", "--comment", "#", "--lines", "3-6"];
+    let (piped, _) = run_lines(&args, LINES_INPUT, 0);
+    let (dashed, _) = run_lines(&[&args[..], &["-"]].concat(), LINES_INPUT, 0);
+    let named = csvdt().args(args).arg(&file).output().unwrap();
+    assert!(named.status.success());
+    assert_eq!(piped, dashed);
+    assert_eq!(piped, String::from_utf8(named.stdout).unwrap());
+    assert_eq!(piped, "id,ts\n2,\"two\nlines\"\n3,2024-01-01T00:00:05Z\n");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Reading stops after the last record the selection takes: a pipe left
+/// open past it is not waited on.
+#[test]
+fn lines_stops_reading_after_the_last_record_it_takes() {
+    use std::io::Write;
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("csvdt"))
+        .args(["--lines", "2"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"a\n\"b\nc\"\nd\n").unwrap();
+    stdin.flush().unwrap();
+    // The pipe stays open until the run has ended or the deadline passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if std::time::Instant::now() > deadline {
+            break None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(status.is_some_and(|status| status.success()), "the run waited on the open pipe");
+    assert_eq!(output.stdout, b"\"b\nc\"\n");
+}
+
+/// The option is in the list a front end learns the options from.
+#[test]
+fn lines_is_in_the_option_list() {
+    csvdt()
+        .arg("--list-options")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\t--lines\trequired\teither\tranges\n"));
 }

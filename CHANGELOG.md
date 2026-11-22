@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+`--lines RANGES` converts only the records on the lines named, for example
+`--lines 12-40` or `--lines 3-5,9,20-22`, counting physical lines from 1 as
+an editor does. The output is what a full run writes for the records that
+have a line selected, each once and in input order, with the header written
+once under `-p`. A record running over several lines is taken whole, and
+csvdt then says on stderr which lines it took:
+
+    csvdt: '--lines' widened to whole records, taking lines 3-4
+
+The input is read as a full run reads it, so comment lines, blank lines and
+quoted newlines fall where they would. `-d` with one column measures the
+first selected row from the row before it, `--flexible=fix` and `widest`
+measure against the whole input, and the fill log numbers lines as in the
+whole input but logs only the records taken. Records outside the selection
+do not stop the run, and reading stops after the last record taken. A
+malformed value is refused with status 100; `--lines` cannot be used with
+`--peek`.
+
 ## 1.1.0
 
 The releases now carry `THIRD-PARTY-LICENSES.txt`, the licence texts of the

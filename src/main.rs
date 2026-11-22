@@ -10,6 +10,7 @@ mod man;
 mod peek;
 mod platform;
 mod report;
+mod selection;
 mod spool;
 mod timestamp;
 mod zone;
@@ -24,6 +25,7 @@ use peek::*;
 use fill_log::*;
 use edit::*;
 use report::*;
+use selection::SelectionWalk;
 use timestamp::Stamp;
 
 /// Writes one line to stderr, accepting that it may not arrive. Everything
@@ -334,6 +336,12 @@ pub(crate) fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
 
 /// Reads every record, pads and edits it as asked, and writes it, logging
 /// what a filling mode did. Returns the tally the run reports at its end.
+///
+/// Under '--lines' only the records the selection takes are edited, written,
+/// logged and counted, and reading stops after the last of them. The others
+/// are still read, so that a record is read exactly as a full run reads it,
+/// and what one record hands on to the next is still handed on: the width
+/// '--flexible=fix' measures against, and the timestamp '-d' measures from.
 pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
     mut reader: csv::Reader<R>,
     lines: &Lines,
@@ -355,12 +363,24 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
     // the first record sets it: the header when there is one, otherwise the
     // first data row. Widest mode brings its width in from the counting pass.
     let mut fill_width: Option<usize> = scanned_width;
+    let mut walk = args.lines.as_ref().map(SelectionWalk::new);
+    // Whether the selection has been read past, so nothing is left to take.
+    let mut done = false;
 
     if args.has_headers {
         // Asked before anything pads or edits the record: empty input, or input
         // that is nothing but blank lines, which the CSV reader skips,
         // arrives here as a header of no fields.
         let mut headers = reader.headers()?.clone();
+        // Written whether or not the selection takes it, as a full run
+        // writes it, and asked about only for what the run reports.
+        if let Some(walk) = walk.as_mut() {
+            let (first, last) = lines.span_of(headers.position(), reader.position(), args.read_as_comment);
+            if !headers.is_empty() {
+                walk.takes(first, last);
+            }
+            done = walk.is_done_after(last);
+        }
 
         // Nothing follows a header that was not there, so there is nothing to
         // process and the run ends having written nothing. That is already what
@@ -412,28 +432,112 @@ pub(crate) fn process_stream<R: std::io::Read, W: std::io::Write>(
     // output StringRecord here instead would mean allocating and copying
     // every field of every row, which measured ~35% slower on a 2M-row file.
     let mut record = csv::StringRecord::new();
-    while reader.read_record(&mut record).map_err(explain_unequal_lengths)? {
-        // Padded before the action runs, so a column index refers to the
-        // rectangular row: an action pointed at a field this row was missing
-        // sees an empty value rather than an out-of-bound error.
-        fit_to_width(&mut record, &mut fill_width, args.fill_mode, fill_log.as_deref_mut(), &at)?;
-        let (edit, next_stamp) = plan_row_edit(&record, args, previous_stamp)
-            .map_err(|error| locate_out_of_bound(error, &record, Some(at(record.position()))))?;
-        lines.forget_before(record.position());
-        tally.record(&edit);
-        // Must be built per row: it borrows `record`, which the next
-        // read_record() overwrites, so it cannot be hoisted out of the loop.
-        let mut fields: Vec<&str> = Vec::with_capacity(record.len() + 2);
-        apply_row_edit(&record, args, &edit, &mut fields);
-        tally.record_written(&fields, args, false);
-        writer.write_record(&fields)?;
-        if args.flush_each_record {
-            writer.flush()?;
+    // Two loops rather than one asking about the selection on every row, so
+    // a run without one costs per row what it did before there was one.
+    let Some(walk) = walk.as_mut() else {
+        while reader.read_record(&mut record).map_err(explain_unequal_lengths)? {
+            convert_row(&mut record, args, lines, writer, &mut fill_width, fill_log.as_deref_mut(),
+                        &mut previous_stamp, &mut tally)?;
         }
-        previous_stamp = next_stamp;
+        return Ok(tally);
+    };
+    while !done {
+        let read = reader.read_record(&mut record);
+        if matches!(read, Ok(false)) {
+            break;
+        }
+        let position = match &read {
+            Ok(_) => record.position(),
+            Err(error) => error.position(),
+        }.cloned();
+        let (first, last) = lines.span_of(position.as_ref(), reader.position(), args.read_as_comment);
+        done = walk.is_done_after(last);
+        if walk.takes(first, last) {
+            read.map_err(explain_unequal_lengths)?;
+            convert_row(&mut record, args, lines, writer, &mut fill_width, fill_log.as_deref_mut(),
+                        &mut previous_stamp, &mut tally)?;
+        } else {
+            previous_stamp = pass_over(read, &record, &mut fill_width, args, previous_stamp)?;
+            lines.forget_before(position.as_ref());
+        }
     }
 
+    if let Some(summary) = walk.summary() {
+        note(&format!("csvdt: {summary}"));
+    }
     Ok(tally)
+}
+
+/// Pads RECORD to the filling mode's WIDTH, edits it as the action asks,
+/// counts it into TALLY and writes it, logging what the filling mode did.
+/// PREVIOUS is the timestamp '-d' measures from, and is moved on to this
+/// record's.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn convert_row<W: std::io::Write>(
+    record: &mut csv::StringRecord,
+    args: &ArgumentFlags,
+    lines: &Lines,
+    writer: &mut csv::Writer<W>,
+    width: &mut Option<usize>,
+    fill_log: Option<&mut FillLog>,
+    previous: &mut Option<Stamp>,
+    tally: &mut Tally,
+) -> Result<(), Box<dyn Error>> {
+    let at = |position: Option<&csv::Position>| {
+        (lines.line_of(position, args.read_as_comment), position.map_or(0, csv::Position::record))
+    };
+    // Padded before the action runs, so a column index refers to the
+    // rectangular row: an action pointed at a field this row was missing
+    // sees an empty value rather than an out-of-bound error.
+    fit_to_width(record, width, args.fill_mode, fill_log, &at)?;
+    let (edit, next_stamp) = plan_row_edit(record, args, *previous)
+        .map_err(|error| locate_out_of_bound(error, record, Some(at(record.position()))))?;
+    lines.forget_before(record.position());
+    tally.record(&edit);
+    // Must be built per row: it borrows `record`, which the next
+    // read_record() overwrites, so it cannot be hoisted out of the loop.
+    let mut fields: Vec<&str> = Vec::with_capacity(record.len() + 2);
+    apply_row_edit(record, args, &edit, &mut fields);
+    tally.record_written(&fields, args, false);
+    writer.write_record(&fields)?;
+    if args.flush_each_record {
+        writer.flush()?;
+    }
+    *previous = next_stamp;
+    Ok(())
+}
+
+/// Reads past a record '--lines' does not take, keeping what it hands on to
+/// the records after it: under a filling mode the width, which the first
+/// record sets, and under '-d' with one column the timestamp the next
+/// duration is measured from. Returns that timestamp, PREVIOUS where the
+/// record does not change it.
+///
+/// Nothing in an untaken record stops the run, since nothing of it is
+/// written: a record of the wrong width, or one that is not UTF-8, is passed
+/// over as any other is. READ is what reading RECORD returned, and only an
+/// error from the input itself, which leaves nothing further to read, is
+/// handed back.
+#[inline(never)]
+fn pass_over(
+    read: csv::Result<bool>,
+    record: &csv::StringRecord,
+    width: &mut Option<usize>,
+    args: &ArgumentFlags,
+    previous: Option<Stamp>,
+) -> Result<Option<Stamp>, Box<dyn Error>> {
+    if let Err(error) = read {
+        return match error.kind() {
+            csv::ErrorKind::UnequalLengths { .. } | csv::ErrorKind::Utf8 { .. } => Ok(previous),
+            _ => Err(error.into()),
+        };
+    }
+    width.get_or_insert(record.len());
+    if !matches!(args.action, Action::Duration { second: None }) {
+        return Ok(previous);
+    }
+    Ok(plan_row_edit(record, args, previous).map_or(previous, |(_, stamp)| stamp))
 }
 
 /// Measures RECORD against the width a filling mode works to, pads it out to

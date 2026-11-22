@@ -1,0 +1,47 @@
+Converts only the records on the lines named (e.g. --lines 12-40
+or --lines 3-5,9,20-22). Lines are the physical lines of the
+input, counted from 1, as an editor and the fill log count them.
+A part is one line or a range of them, first line first; parts
+may overlap and come in any order. Anything else is refused
+before the input is read.
+
+The output is what a run over the whole input writes for the
+records that have at least one line selected, each once and in
+input order. A record whose quoted field holds a newline runs
+over several lines, and selecting any of them takes all of it.
+When that takes a line the selection did not name, it is said
+once on stderr, naming every line taken in the form this option
+reads, so a program can pass it back as it stands:
+
+|    csvdt: '--lines' widened to whole records, taking lines 3-7
+
+A selection that takes no record at all, only comment or blank
+lines, or lines past the end, writes nothing and says so.
+
+The input is read as a full run reads it, so comment lines,
+blank lines and quoted newlines are taken the same way. What one
+record hands to the next is handed on too: '-d' with one column
+measures the first selected row from the row before it, selected
+or not, '--flexible=fix' measures against the first record of
+the input, and '--flexible=widest' against the widest. The fill
+log logs only the records taken, by their lines in the input.
+The header under -H/--has-header is always the input's first
+record, and -p/--print-header writes it once at the top, whether
+or not it was selected.
+
+A record not taken is read and nothing more: it is not written,
+logged or counted, and nothing in it stops the run, not a row of
+the wrong width nor one that is not UTF-8. The exit status is
+decided by the records taken, so a selection where nothing
+converted ends 1, as a whole file would.
+
+Reading stops after the last record the selection takes, so a
+selection near the top of a large file costs what reading that
+far costs. '--flexible=widest' still reads the whole input once
+first, to count. FILE or standard input, '-' included, are read
+alike.
+
+Every action, -i/--insert, --remove and -a/--arrange work on the
+records taken just as they do on a whole file. This option is
+refused with --peek, which shows the top of the input rather
+than a run over part of it.
