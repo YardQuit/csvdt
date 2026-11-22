@@ -1,1 +1,2 @@
-Input CSV file to parse. Without it, standard input is read.
+Input CSV file to parse. Without it, or given as '-', standard
+input is read. A file whose name is '-' is reached as ./-.

@@ -700,6 +700,9 @@ to them by the same two tests, lives with Tuatara's own packages, in
 
 ## Piping
 
+Without a file argument, or with `-` in its place, csvdt reads standard
+input; a file that is really named `-` is reached as `./-`.
+
 `csvdt file | head` closes the pipe as soon as it has what it wants, and that
 is not an error: csvdt stops and exits 0, saying nothing. Any other write
 failure is still reported and still exits non-zero.

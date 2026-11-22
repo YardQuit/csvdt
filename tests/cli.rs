@@ -302,6 +302,50 @@ fn peek_shows_control_and_bidi_characters_by_code_point() {
         .stdout("0                    1           2\n\\u{1b}]0;title\\u{7}  a\\u{202e}b  c\\u{7f}\n");
 }
 
+/// '-' as FILE is standard input, exactly as leaving FILE out is: the
+/// conversion, the spool -f=widest makes of a pipe, and the refusal of a
+/// fill log that is the input. A file named '-' is still reached as ./-.
+#[test]
+fn a_dash_as_the_file_reads_standard_input() {
+    csvdt()
+        .args(["-H", "-p", "-u0", "-"])
+        .write_stdin("ts\n2024-01-01T01:00:00+01:00\n")
+        .assert()
+        .success()
+        .stdout("ts,<to_utc\n2024-01-01T01:00:00+01:00,2024-01-01T00:00:00+00:00\n");
+
+    csvdt()
+        .args(["-f=widest", "-"])
+        .write_stdin("a\n1,2\n")
+        .assert()
+        .success()
+        .stdout("a,\n1,2\n");
+
+    let dir = tempfile_dir().join("dash-file");
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("in.csv");
+    std::fs::write(&input, "a,b\n1\n").unwrap();
+    // Redirected rather than piped, so standard input is the file itself.
+    let refused = std::process::Command::new(assert_cmd::cargo::cargo_bin("csvdt"))
+        .args(["-f=fix", "--fill-log"])
+        .arg(&input)
+        .arg("-")
+        .stdin(std::fs::File::open(&input).unwrap())
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("is both the input and where"));
+
+    std::fs::write(dir.join("-"), "x,y\n").unwrap();
+    csvdt()
+        .current_dir(&dir)
+        .arg("./-")
+        .assert()
+        .success()
+        .stdout("x,y\n");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // ---- column actions: split / rfc3339 / utc / local / duration / remove ---
 // Every action takes its column number as its own argument (e.g. -s1),
 // glued or space-separated. -i is independent: "-i <col> <mode>".
@@ -6176,16 +6220,15 @@ fn an_input_that_cannot_be_read_is_named_in_the_error() {
         .stderr(predicate::str::contains(format!(
             "cannot read '{}'", missing.display())));
 
-    // csvdt does not take '-' for standard input (it reads standard input
-    // when no file is named) so this is a file that is not there, and the
-    // message says which one rather than leaving it to be guessed.
+    // '-' alone is standard input, so a file of that name is spelt ./-, and
+    // when it is not there the message names it the way it was given.
     csvdt()
-        .args(["-H", "-p", "-"])
-        .write_stdin("a,b\n1,2\n")
+        .current_dir(&dir)
+        .args(["-H", "-p", "./-"])
         .assert()
         .failure()
         .code(1)
-        .stderr(predicate::str::contains("cannot read '-'"));
+        .stderr(predicate::str::contains("cannot read './-'"));
 
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1183,7 +1183,13 @@ fn flags_from(matches: &clap::ArgMatches) -> Result<ArgumentFlags, Box<dyn Error
                  variable. Give the file you meant, or leave the argument out \
                  to read standard input".to_string())));
         }
-        args.input_file = Some(value.clone());
+        // '-' is standard input, as it is to other Unix tools, and is made
+        // the same as leaving FILE out here, so everything after this point
+        // treats the two alike: the spool, the same-file guards, the
+        // probe for a closed descriptor. A file named '-' is reached as ./-.
+        if value.as_os_str() != "-" {
+            args.input_file = Some(value.clone());
+        }
     }
 
     // Unrecognised is not reachable through clap, which accepts only the
