@@ -291,7 +291,7 @@ pub(crate) fn plan_row_edit(
             Err(_) => parse_err(),
         }),
         Action::ToLocal(zone) => single(match timestamp() {
-            Ok(stamp) => to_rfc3339_in_range(stamp.on_offset(zone_offset(zone, stamp.instant_for_rules()))),
+            Ok(stamp) => to_rfc3339_in_range(stamp.in_zone(zone)),
             Err(_) => parse_err(),
         }),
         Action::ToOffset(offset) => single(match timestamp() {
@@ -323,18 +323,6 @@ pub(crate) fn plan_row_edit(
         },
     };
     Ok((edit, dt_cache))
-}
-
-/// The offset ZONE has at INSTANT, from the bundled database, or where ZONE
-/// is None from chrono's reading of TZ, which is how POSIX rules are read.
-pub(crate) fn zone_offset(zone: &Option<chrono_tz::Tz>, instant: jiff::Timestamp) -> jiff::tz::Offset {
-    use chrono::{Offset, TimeZone};
-    let utc = chrono::DateTime::from_timestamp(instant.as_second(), 0).unwrap_or_default().naive_utc();
-    let seconds = match zone {
-        Some(zone) => zone.offset_from_utc_datetime(&utc).fix().local_minus_utc(),
-        None => chrono::Local.offset_from_utc_datetime(&utc).fix().local_minus_utc(),
-    };
-    jiff::tz::Offset::from_seconds(seconds).unwrap_or(jiff::tz::Offset::UTC)
 }
 
 /// Fills `fields` with the row's final contents: the record's own fields,

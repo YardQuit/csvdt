@@ -1,7 +1,7 @@
 //! The command line: the options, their help, and the flags a run is given.
 
 use std::error::Error;
-use jiff::tz::Offset;
+use jiff::tz::{Offset, TimeZone};
 use clap::builder::PossibleValue;
 use clap::crate_version;
 use crate::man::without_marks;
@@ -65,9 +65,9 @@ pub(crate) enum Action {
     ToRfc3339,
     /// -u/--utc.
     ToUtc,
-    /// -l/--local, in the zone resolved at startup; None leaves the zone to
-    /// chrono, which reads a POSIX rule in TZ itself.
-    ToLocal(Option<chrono_tz::Tz>),
+    /// -l/--local, in the zone resolved at startup: one from the bundled
+    /// database, POSIX rules from TZ, or a zone file TZ names.
+    ToLocal(TimeZone),
     /// -o/--offset, to the offset given.
     ToOffset(Offset),
     /// -d/--duration: from the previous row's timestamp, or, with a second
@@ -679,7 +679,7 @@ fn build_command() -> clap::Command {
                 Some(metadata) => format!("+{}", metadata),
                 None => String::new(),
             },
-            chrono_tz::IANA_TZDB_VERSION
+            jiff_tzdb::VERSION
         )
         .into_boxed_str(),
     );

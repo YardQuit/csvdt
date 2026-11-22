@@ -2355,10 +2355,10 @@ fn local_still_converts_every_sub_hour_zone_that_is_whole_minutes() {
 
 #[test]
 fn local_is_correct_for_morocco() {
-    // -l uses the bundled IANA database rather than chrono's own tzdata
-    // reader, which does not apply Morocco's daylight-saving rule and reports
-    // +00:00 year-round. Morocco is permanently +01:00 since 2018, dropping
-    // to +00:00 only for Ramadan, as GNU date and Python zoneinfo agree.
+    // -l uses the bundled IANA database, and Morocco's rules are the ones a
+    // reader gets wrong: from 2018 it kept +01:00 all year, dropping to
+    // +00:00 only for Ramadan, as GNU date and Python zoneinfo agree. tzdata
+    // 2026f has it return to +00:00 for good on 2026-09-20.
     csvdt()
         .args(["-H", "-p", "-l0", "-i", "0,replace"])
         .env("TZ", "Africa/Casablanca")
@@ -2377,6 +2377,23 @@ fn version_reports_the_bundled_iana_database_release() {
         .assert()
         .success()
         .stdout(predicate::str::contains("IANA tzdata"));
+}
+
+#[test]
+fn the_bundled_zone_database_is_the_release_the_changelog_names() {
+    // Moving jiff-tzdb moves every -l answer the new release changed, so it
+    // must not arrive unnoticed in a dependency update: this fails until the
+    // release named here, and the changelog's account of what moved, follow.
+    // The monthly build and the package build move it on purpose, and set
+    // CSVDT_TZDATA_MOVED to say so.
+    if std::env::var_os("CSVDT_TZDATA_MOVED").is_some() {
+        return;
+    }
+    csvdt()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(IANA tzdata 2026f)"));
 }
 
 #[test]
@@ -2400,12 +2417,12 @@ fn local_handles_the_tz_variables_edge_cases() {
 }
 
 #[test]
-#[ignore = "known gap in the bundled IANA database (chrono-tz 0.10 / tzdata \
-            2025b): the deprecated EET and WET aliases resolve an hour late \
+#[ignore = "known gap in the bundled IANA database (tzdata 2025b, and \
+            2026f too): the deprecated EET and WET aliases resolve an hour late \
             for historical dates -- EET in 1975-1976, WET before 1997. The \
             geographic zones they stand in for (Europe/Athens, \
-            Europe/Lisbon, ...) are correct, as are CET, MET and EST5EDT. \
-            Un-ignore if a later chrono-tz corrects these aliases."]
+            Europe/Lisbon, ...) are correct, as are CET and MET. \
+            Un-ignore if a later jiff-tzdb corrects these aliases."]
 fn local_is_correct_for_the_deprecated_eet_wet_aliases() {
     csvdt()
         .args(["-H", "-p", "-l0", "-i", "0,replace"])
@@ -7341,7 +7358,6 @@ fn the_deprecated_zone_names_carry_their_geographic_zone_s_history() {
         ("WET", "Europe/Lisbon", "1950-07-15T13:00:00+01:00"),
         ("CET", "Europe/Brussels", "1950-07-15T13:00:00+01:00"),
         ("MET", "Europe/Brussels", "1950-07-15T13:00:00+01:00"),
-        ("EST5EDT", "America/New_York", "1950-07-15T08:00:00-04:00"),
     ] {
         for zone in [deprecated, geographic] {
             csvdt()
@@ -7352,6 +7368,25 @@ fn the_deprecated_zone_names_carry_their_geographic_zone_s_history() {
                 .success()
                 .stdout(format!("x,1950-07-15T12:00:00Z,{expected}\n"));
         }
+    }
+
+    // The North American ones are not links. tzdata 2026f defines EST5EDT,
+    // CST6CDT, MST7MDT and PST8PDT as zones holding the US rules and no
+    // history of their own, so before 1967 they part from the cities: New
+    // York kept daylight saving in the summer of 1950, and EST5EDT did not.
+    for (zone, expected) in [
+        ("EST5EDT", "1950-07-15T07:00:00-05:00"),
+        ("America/New_York", "1950-07-15T08:00:00-04:00"),
+        ("EST5EDT", "1975-07-15T08:00:00-04:00"),
+    ] {
+        let input = &expected[..10];
+        csvdt()
+            .arg("-l1")
+            .env("TZ", zone)
+            .write_stdin(format!("x,{input}T12:00:00Z\n"))
+            .assert()
+            .success()
+            .stdout(format!("x,{input}T12:00:00Z,{expected}\n"));
     }
 }
 
@@ -7409,7 +7444,7 @@ fn no_conversion_but_local_reads_the_zone() {
     /// offset, the same shape of quiet mistake as a misspelt zone under -l.
     ///
     /// Eight settings, because they do not take one path: a name csvdt looks
-    /// up in the bundled database, a POSIX rule string chrono parses, and no
+    /// up in the bundled database, a POSIX rule string, and no
     /// value at all. Half-hour and quarter-hour zones among them, so a
     /// conversion reading the zone is off by something a whole-hour zone
     /// could hide against the offsets in the fixtures.
@@ -7498,16 +7533,11 @@ fn no_conversion_but_local_reads_the_zone() {
 }
 
 #[test]
-#[cfg(unix)]
 fn local_still_accepts_posix_rules_rather_than_refusing_them() {
     // A TZ holding POSIX rules rather than a zone name can't be looked up in
-    // the IANA database, so -l defers to chrono's own parsing, and refusing an
+    // the IANA database, so -l reads the rules themselves, and refusing an
     // unknown name must not refuse rules: they are just as much "not a zone
-    // name" as a misspelling is.
-    //
-    // Unix only: chrono reads TZ on Unix but not on Windows, where the system
-    // zone wins instead. Zone *names* are resolved by csvdt itself and so
-    // behave identically everywhere, which is what the test below covers.
+    // name" as a misspelling is. Read by csvdt itself, so on every platform.
     for (tz, expected) in [
         ("EST5EDT,M3.2.0,M11.1.0", "2026-07-25T08:00:00-04:00"),
         ("GMT0BST,M3.5.0/1,M10.5.0", "2026-07-25T13:00:00+01:00"),
@@ -7552,13 +7582,30 @@ fn local_accepts_a_zone_name_that_happens_to_carry_digits() {
 fn local_leaves_the_path_form_of_tz_alone() {
     // TZ=:/usr/share/zoneinfo/... is glibc's other implementation-defined
     // form. It is not a zone name, so it must not be refused as a misspelt
-    // one; whatever chrono makes of it is chrono's business.
+    // one; the zone is read from the file.
     csvdt()
         .args(["-H", "-p", "-l0", "-i", "0,replace"])
         .env("TZ", "/etc/localtime")
         .write_stdin("ts\n2026-07-25T12:00:00Z\n")
         .assert()
         .success();
+}
+
+#[test]
+#[cfg(unix)]
+fn local_refuses_a_tz_path_to_a_file_that_holds_no_zone() {
+    // A file that is not a zone file was passed over in silence, and the
+    // system's own zone used as though it were the one asked for.
+    let path = tempfile_dir().join("not-a-zone");
+    std::fs::write(&path, "not a zone\n").unwrap();
+    csvdt()
+        .args(["-H", "-l0"])
+        .env("TZ", &path)
+        .write_stdin("ts\n2026-07-25T12:00:00Z\n")
+        .assert()
+        .failure()
+        .code(100)
+        .stderr(predicate::str::contains("which is not a zone file"));
 }
 
 #[test]
@@ -8318,32 +8365,67 @@ fn known_limits_name_the_cr_only_comment_trap() {
 
 // ---- TZ forms that are not zone names ------------------------------------
 
-/// TZ carries no weight on Windows, which takes its zone from the system,
-/// so the rule form is a Unix question and so are its refusals.
-#[cfg(unix)]
 #[test]
-fn posix_tz_rules_this_build_cannot_read_are_refused() {
-    // chrono reads the POSIX rule form itself, and falls back to UTC
-    // without a word where it cannot: a transition time past 24:00 is
-    // enough, and real zones publish those: this is Asia/Jerusalem's own
-    // tzdata footer. '-l' answered +00:00 for a zone three hours away,
-    // exit 0, which is the mistake the unknown-name refusal exists to stop.
-    csvdt()
-        .args(["-H", "-l0"])
-        .env("TZ", "IST-2IDT,M3.4.4/26,M10.5.0")
-        .write_stdin("ts\n2024-06-15T12:00:00Z\n")
-        .assert()
-        .failure()
-        .code(100)
-        .stderr(predicate::str::contains("POSIX rules"))
-        .stderr(predicate::str::contains("Name the zone instead"));
+fn posix_tz_rules_that_will_not_parse_are_refused() {
+    // A rule that cannot be read is refused rather than replaced by UTC,
+    // which would answer +00:00 for a zone hours away, exit 0: the mistake
+    // the unknown-name refusal exists to stop. A thirteenth month, and a
+    // daylight-saving name with no rule saying when it applies.
+    for tz in ["AAA5BBB,M13.2.0,M11.1.0", "XXX5YYY"] {
+        csvdt()
+            .args(["-H", "-l0"])
+            .env("TZ", tz)
+            .write_stdin("ts\n2024-06-15T12:00:00Z\n")
+            .assert()
+            .failure()
+            .code(100)
+            .stderr(predicate::str::contains(format!("POSIX rules '{tz}'")))
+            .stderr(predicate::str::contains("name the zone instead"));
+    }
 }
 
-#[cfg(unix)]
 #[test]
-fn posix_tz_rules_this_build_can_read_still_work() {
-    // The same rules with a transition time chrono accepts: the refusal is
-    // about what this build can read, not about the form itself.
+fn posix_tz_rules_with_transitions_past_24_00_are_read() {
+    // Real zones publish those, and they were refused while the reader could
+    // not follow them: Asia/Jerusalem's own tzdata footer, a zone of -03:00
+    // whose changes fall before midnight, and the rule that keeps daylight
+    // saving all year by ending it at 25:00 on the last day.
+    for (tz, input, expected) in [
+        ("IST-2IDT,M3.4.4/26,M10.5.0", "2024-06-15T12:00:00Z", "2024-06-15T15:00:00+03:00"),
+        ("IST-2IDT,M3.4.4/26,M10.5.0", "2024-01-15T12:00:00Z", "2024-01-15T14:00:00+02:00"),
+        ("<-03>3<-02>,M3.5.0/-2,M10.5.0/-1", "2024-01-15T12:00:00Z", "2024-01-15T09:00:00-03:00"),
+        ("<-03>3<-02>,M3.5.0/-2,M10.5.0/-1", "2024-07-15T12:00:00Z", "2024-07-15T10:00:00-02:00"),
+        ("EST5EDT,0/0,J365/25", "2024-01-15T12:00:00Z", "2024-01-15T08:00:00-04:00"),
+    ] {
+        csvdt()
+            .args(["-H", "-l0"])
+            .env("TZ", tz)
+            .write_stdin(format!("ts\n{input}\n"))
+            .assert()
+            .success()
+            .stdout(format!("{input},{expected}\n"));
+    }
+}
+
+#[test]
+fn a_posix_rule_whose_offset_rfc3339_cannot_write_gives_parse_err() {
+    // POSIX allows offsets with seconds and offsets of a whole day, and
+    // RFC3339 can write neither, so each value is marked as a zone's local
+    // mean time is.
+    for tz in ["UTC+3:30:15", "AAA-24"] {
+        csvdt()
+            .args(["-H", "-l0"])
+            .env("TZ", tz)
+            .write_stdin("ts\n2024-06-15T12:00:00Z\n")
+            .assert()
+            .failure()
+            .stdout("2024-06-15T12:00:00Z,parse_err\n");
+    }
+}
+
+#[test]
+fn posix_tz_rules_with_ordinary_transitions_work() {
+    // The same rules with a transition time inside the day.
     csvdt()
         .args(["-H", "-l0"])
         .env("TZ", "IST-2IDT,M3.4.4/24,M10.5.0")
@@ -8353,8 +8435,7 @@ fn posix_tz_rules_this_build_can_read_still_work() {
         .stdout("2024-06-15T12:00:00Z,2024-06-15T15:00:00+03:00\n");
 
     // And a southern-hemisphere rule, where January rather than July is the
-    // daylight-saving half: the check probes both, so neither can hide a
-    // rule that was silently dropped.
+    // daylight-saving half.
     csvdt()
         .args(["-H", "-l0"])
         .env("TZ", "AEST-10AEDT,M10.1.0,M4.1.0/3")
@@ -8603,9 +8684,6 @@ fn a_bare_field_that_begins_with_a_single_quote_is_counted_as_a_misread() {
         .stderr(predicate::str::contains("1 row(s) hold a field"));
 }
 
-/// TZ carries no weight on Windows, which takes its zone from the system, so
-/// the rule form is a Unix question and so are its refusals.
-#[cfg(unix)]
 #[test]
 fn a_tz_abbreviation_too_short_for_posix_is_not_read_as_a_rule() {
     // POSIX writes an abbreviation of three or more letters before the

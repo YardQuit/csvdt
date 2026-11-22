@@ -280,7 +280,7 @@ jobs:
           #
           # Cargo.lock is the committed one, so the package is built from the
           # dependencies the version was released with. A run that publishes
-          # first moves chrono-tz to the newest release, which is the tzdata
+          # first moves jiff-tzdb to the newest release, which is the tzdata
           # the monthly rebuild exists to pick up, and stops if that moves
           # anything else; a pull request check packages the lock as
           # proposed. The lock in the tarball is the one vendored from, so

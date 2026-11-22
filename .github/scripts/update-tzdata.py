@@ -4,19 +4,22 @@
     update-tzdata.py [--dry-run-lock OLD NEW]
 
 Run in a checkout whose Cargo.lock is the committed one.  It runs
-`cargo update -p chrono-tz`, which takes the newest chrono-tz release the
-requirement in Cargo.toml allows, and then compares the lock before and after.
-Only chrono-tz, and packages that are reachable from csvdt solely through
-chrono-tz, may differ.  Anything else that changed (another crate bumped,
+`cargo update -p jiff-tzdb`, which takes the newest jiff-tzdb release the
+requirements in Cargo.toml allow, and then compares the lock before and after.
+A lock from a version released before the move to jiff holds chrono-tz
+instead, and that is the crate moved there.
+Only jiff-tzdb, and packages that are reachable from csvdt solely through
+jiff-tzdb, may differ.  Anything else that changed (another crate bumped,
 added or removed) means the lock moved for a reason this job was not asked to
 act on: the script lists those packages and exits 1, and the caller does not
 publish.  The change is made in the working tree only; nothing is committed.
 
-chrono-tz carries the IANA database itself (its own `tz` directory, compiled
-in by its build script) and no separate crate does, so in practice the set is
-chrono-tz alone.  The closure rule exists so that a chrono-tz release that
-needs a newer phf is not refused for it, while a bump of a crate csvdt also
-uses is.
+jiff-tzdb carries the IANA database itself, compiled in as one file, and jiff
+reads it from there; jiff itself holds no zone data, so moving jiff-tzdb alone
+moves the data.  csvdt depends on it directly as well as through jiff, so its
+version is the one named in `--version`.  jiff-tzdb has no dependencies of its
+own today; the closure rule exists so that a release that gained one is not
+refused for it, while a bump of a crate csvdt also uses is.
 
 With --dry-run-lock the two lock files named are compared and cargo is not run,
 which is how the rule is tested.
@@ -25,7 +28,17 @@ import subprocess
 import sys
 import tomllib
 
-TZDATA_CRATE = "chrono-tz"
+# The crates that carry the database, the current one first.  The monthly
+# build takes this script from the default branch and runs it on the newest
+# version tag, and a version released before csvdt moved to jiff locks
+# chrono-tz instead, so either is moved, whichever the lock holds.
+TZDATA_CRATES = ("jiff-tzdb", "chrono-tz")
+
+
+def tzdata_crate(entries):
+    """The crate in the lock ENTRIES that carries the database, or None."""
+    names = {name for (name, _) in entries}
+    return next((crate for crate in TZDATA_CRATES if crate in names), None)
 
 
 def packages(path):
@@ -35,12 +48,13 @@ def packages(path):
     return {(entry["name"], entry["version"]): entry for entry in entries}
 
 
-def reachable(entries, roots):
+def reachable(entries, roots, avoid=()):
     """Names of the packages reachable from the package names in ROOTS.
 
     ENTRIES is `packages` output.  Dependencies in a lock file are written
     "name" or "name version" (or with a source after that); only the name is
-    used, which is enough since the sets are compared by name.
+    used, which is enough since the sets are compared by name.  The names in
+    AVOID are neither entered nor walked through.
     """
     by_name = {}
     for (name, _), entry in entries.items():
@@ -48,7 +62,7 @@ def reachable(entries, roots):
     seen, todo = set(), list(roots)
     while todo:
         name = todo.pop()
-        if name in seen:
+        if name in seen or name in avoid:
             continue
         seen.add(name)
         for entry in by_name.get(name, []):
@@ -56,16 +70,19 @@ def reachable(entries, roots):
     return seen
 
 
-def tzdata_only(entries, root):
-    """The names that may change with the tzdata crate in the lock ENTRIES.
+def tzdata_only(entries, root, crate):
+    """The names that may change with the tzdata crate CRATE in the lock ENTRIES.
 
-    chrono-tz, and the packages reachable from the root package only through
-    it.  ROOT is the name of the package that owns the lock (csvdt).
+    jiff-tzdb, and the packages reachable from the root package only through
+    it.  ROOT is the name of the package that owns the lock (csvdt).  jiff
+    depends on jiff-tzdb as csvdt does, so the other roads are walked without
+    passing through jiff-tzdb: what lies beyond it is reached only through it,
+    whichever package leads there.
     """
     by_name = {name: entry for (name, _), entry in entries.items()}
     direct = [dep.split(" ")[0] for dep in by_name[root].get("dependencies", [])]
-    others = reachable(entries, [d for d in direct if d != TZDATA_CRATE])
-    return (reachable(entries, [TZDATA_CRATE]) - others) | {TZDATA_CRATE}
+    others = reachable(entries, [d for d in direct if d != crate], avoid={crate})
+    return (reachable(entries, [crate]) - others) | {crate}
 
 
 def unexpected_changes(old, new, root="csvdt"):
@@ -75,7 +92,7 @@ def unexpected_changes(old, new, root="csvdt"):
     describing each package added, removed or moved to another version or
     checksum, leaving out the names `tzdata_only` allows.
     """
-    allowed = tzdata_only(old, root)
+    allowed = tzdata_only(old, root, tzdata_crate(old))
     problems = []
     for key in sorted(set(old) | set(new)):
         name = key[0]
@@ -107,14 +124,20 @@ def main(argv):
                   "the lock was committed cannot be rebuilt by this job.",
                   file=sys.stderr)
             return 1
-        subprocess.run(["cargo", "update", "-p", TZDATA_CRATE], check=True)
+        crate = tzdata_crate(old)
+        if crate is None:
+            print("Cargo.lock holds none of " + ", ".join(TZDATA_CRATES) + ", "
+                  "so there is no time zone crate to update.", file=sys.stderr)
+            return 1
+        subprocess.run(["cargo", "update", "-p", crate], check=True)
         new = packages("Cargo.lock")
     else:
         print(__doc__, file=sys.stderr)
         return 2
 
-    before = sorted(v for (n, v) in old if n == TZDATA_CRATE)
-    after = sorted(v for (n, v) in new if n == TZDATA_CRATE)
+    crate = tzdata_crate(old)
+    before = sorted(v for (n, v) in old if n == crate)
+    after = sorted(v for (n, v) in new if n == crate)
     problems = unexpected_changes(old, new)
     if problems:
         print("Packages other than the time zone crate changed in Cargo.lock; "
@@ -122,7 +145,7 @@ def main(argv):
         for line in problems:
             print(f"  {line}", file=sys.stderr)
         return 1
-    print(f"{TZDATA_CRATE}: {', '.join(before)} -> {', '.join(after)}")
+    print(f"{crate}: {', '.join(before)} -> {', '.join(after)}")
     return 0
 
 

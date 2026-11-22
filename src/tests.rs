@@ -230,9 +230,9 @@ fn to_utc(args: &mut ArgumentFlags) {
     args.action = Action::ToUtc;
 }
 
-/// Asks for -l, in the zone chrono reads from TZ.
+/// Asks for -l, in UTC.
 fn local(args: &mut ArgumentFlags) {
-    args.action = Action::ToLocal(None);
+    args.action = Action::ToLocal(jiff::tz::TimeZone::UTC);
 }
 
 /// Asks for the row-over-row -d.
@@ -778,7 +778,7 @@ fn parse_position_word_rejects_garbage() {
 #[test]
 fn record_to_local_produces_the_same_instant_as_utc() {
     let mut args = default_args();
-    args.action = Action::ToLocal(None);
+    args.action = Action::ToLocal(bundled_zone("Asia/Kolkata").unwrap());
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
     let cache: Option<Stamp> = None;
@@ -797,7 +797,7 @@ fn record_to_local_produces_the_same_instant_as_utc() {
 #[test]
 fn record_to_local_accepts_offset_missing_a_colon() {
     let mut args = default_args();
-    args.action = Action::ToLocal(None);
+    args.action = Action::ToLocal(bundled_zone("Asia/Kolkata").unwrap());
     args.selected_column = 1;
     args.insert_position = InsertPosition::Replace;
     let cache: Option<Stamp> = None;
@@ -1499,7 +1499,7 @@ fn arranged_always_returns_the_width_it_was_given() {
 #[test]
 fn posix_tz_rules_are_told_apart_from_zone_names() {
     // An abbreviation followed immediately by an offset is POSIX rules,
-    // which the bundled database cannot name and chrono handles itself.
+    // which the bundled database cannot name and jiff reads itself.
     for value in [
         "EST5EDT,M3.2.0,M11.1.0",
         "UTC+3",
@@ -1824,24 +1824,6 @@ fn rows_reach_a_terminal_one_at_a_time() {
         process_stream(reader, &Lines::default(), &mut writer, &args, None, None).unwrap();
         assert_eq!(writes.get(), expected, "flush_each_record={flush_each_record}");
     }
-}
-
-// ---- the POSIX rule check ------------------------------------------------
-
-/// chrono replaces a rule it cannot read with the machine's own zone, whose
-/// offsets can include the rule's standard one by chance: Stockholm's
-/// summer +02:00 is Jerusalem's standard offset. Only both of the rule's
-/// offsets showing means chrono read it.
-#[test]
-fn a_rule_is_read_only_when_both_its_offsets_show() {
-    let stockholm = [3600, 7200];
-    // IST-2IDT: +02:00 and +03:00. One of them matching is chance.
-    assert!(!offsets_follow_rule(&stockholm, 7200, Some(10800)));
-    // AEST-10AEDT, read, from the southern hemisphere's two probes.
-    assert!(offsets_follow_rule(&[39600, 36000], 36000, Some(39600)));
-    // A rule without daylight saving has the one offset to show.
-    assert!(offsets_follow_rule(&[7200, 7200], 7200, None));
-    assert!(!offsets_follow_rule(&stockholm, 10800, None));
 }
 
 // ---- counting lines ----------------------------------------------------------

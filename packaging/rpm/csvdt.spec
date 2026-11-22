@@ -151,6 +151,9 @@ cat > %{buildroot}%{_emacs_sitestartdir}/%{crate}-init.el <<'EOF'
 EOF
 
 %check
+# A package build may move the zone database on purpose, as the monthly one
+# does, so the test that pins the bundled release is told to stand aside.
+export CSVDT_TZDATA_MOVED=1
 %cargo_test -- --locked
 
 # Valid roff, not merely bytes. -z produces no output and only diagnostics,

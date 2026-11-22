@@ -1,7 +1,7 @@
 //! Reading and writing RFC3339 timestamps and ISO 8601 durations.
 
 use jiff::civil::{Date, DateTime};
-use jiff::tz::Offset;
+use jiff::tz::{Offset, TimeZone};
 use jiff::{SignedDuration, Timestamp};
 
 /// The marker every conversion writes in place of a result it could not
@@ -59,6 +59,12 @@ impl Stamp {
         is_rfc3339_year(clock).then_some(Stamp::new(clock, offset, self.leap))
     }
 
+    /// The same moment on ZONE's clock, with the offset ZONE's rules give for
+    /// it, or None where that clock reads outside the years RFC3339 can write.
+    pub(crate) fn in_zone(&self, zone: &TimeZone) -> Option<Stamp> {
+        self.on_offset(zone.to_offset(self.instant_for_rules()))
+    }
+
     /// The instant to ask a zone's rules about. The moment itself wherever a
     /// Timestamp can hold it, which is everywhere but the last 26 hours of
     /// 9999 in UTC and the first of 0001; there, the nearest instant a
@@ -67,7 +73,7 @@ impl Stamp {
     /// four digits, so the rules found at the edge are the ones in force.
     /// A leap second is asked about as its :59, which is the second it
     /// extends.
-    pub(crate) fn instant_for_rules(&self) -> Timestamp {
+    fn instant_for_rules(&self) -> Timestamp {
         match self.offset.to_timestamp(self.clock) {
             Ok(instant) => instant,
             Err(_) if self.clock.year() > 0 => Timestamp::MAX,

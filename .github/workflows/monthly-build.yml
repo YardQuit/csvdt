@@ -10,7 +10,8 @@
 # database: -l resolves zones against the copy compiled into the binary, so
 # a build only knows the rules that existed when it was made. Cargo.lock is
 # committed, so a tag builds the dependencies it was released with, and the
-# one thing this workflow moves is chrono-tz (which carries the tzdata): once,
+# one thing this workflow moves is jiff-tzdb (which carries the tzdata; in a
+# version released before the move to jiff, chrono-tz): once,
 # in the meta job, in its own working tree and with nothing committed back,
 # with every leg built --locked against that result. It refuses to publish if
 # the update moved any other package. A release cut in April therefore stops
@@ -164,7 +165,7 @@ jobs:
       # it, and the legs build --locked against the result, so a leg cannot
       # quietly resolve anything of its own.
       #
-      # Only chrono-tz moves, which is the tzdata. The script compares the
+      # Only jiff-tzdb moves, which is the tzdata. The script compares the
       # committed lock with the updated one and stops the run, listing them,
       # if any other package differs. The working tree is changed and nothing
       # is committed or pushed.
@@ -297,9 +298,13 @@ jobs:
         with:
           name: dependency-set
 
-      # Only meaningful where the built binary can actually execute.
+      # Only meaningful where the built binary can actually execute. The
+      # test that pins the bundled tzdata release is there to catch an update
+      # nobody meant; this one is meant, so it is told so.
       - name: Test
         if: matrix.native
+        env:
+          CSVDT_TZDATA_MOVED: 1
         run: cargo test --release --locked --target ${{ matrix.target }}
 
       # CSVDT_BUILD_METADATA comes from the job env above, and becomes semver
@@ -459,16 +464,19 @@ jobs:
           # hashes BUILD-INFO alone.
           printf '%s\n' "$out" > release/VERSION
 
-      # A new tzdata normally arrives as a chrono-tz release inside the range
+      # A new tzdata normally arrives as a jiff-tzdb release inside the range
       # Cargo.toml allows, and `cargo update` takes it automatically. A bump to
-      # a new series (0.10 -> 0.11) falls outside that range and would be
+      # a new series (1.x -> 2.0) falls outside that range and would be
       # ignored silently, pinning this build to stale rules forever. Say so
-      # loudly rather than let it rot.
-      - name: Check chrono-tz is not stuck behind a new series
+      # loudly rather than let it rot. A version released before the move to
+      # jiff locks chrono-tz, which is asked about instead.
+      - name: Check the tzdata crate is not stuck behind a new series
         id: freshness
         continue-on-error: true
         run: |
-          used=$(grep -A1 '^name = "chrono-tz"' release/Cargo.lock | grep '^version' | cut -d'"' -f2)
+          crate=jiff-tzdb
+          grep -q '^name = "jiff-tzdb"' release/Cargo.lock || crate=chrono-tz
+          used=$(grep -A1 "^name = \"$crate\"" release/Cargo.lock | grep '^version' | cut -d'"' -f2)
           # The sparse index is one JSON line per version in publication
           # order, so the last line is the most recently published and not
           # the highest: libc's ends at 1.0.0-alpha.4 while its real latest
@@ -477,19 +485,20 @@ jobs:
           # which is silence in exactly the case this step exists for, a
           # new series published and left behind. So take the highest
           # released version instead, skipping yanks and prereleases.
-          latest=$(curl -s https://index.crates.io/ch/ro/chrono-tz \
+          latest=$(curl -s "https://index.crates.io/${crate:0:2}/${crate:2:2}/$crate" \
             | python3 -c "import json, sys; entries = [json.loads(line) for line in sys.stdin if line.strip()]; versions = [e['vers'] for e in entries if not e.get('yanked') and '-' not in e['vers']]; print(max(versions, key=lambda v: tuple(int(p) for p in v.split('+')[0].split('.'))) if versions else '')")
+          echo "crate=$crate" >> "$GITHUB_OUTPUT"
           echo "used=$used"  >> "$GITHUB_OUTPUT"
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
           # An unreachable index leaves this empty, which would compare unequal
-          # and warn that "chrono-tz is published": a sentence with the version
+          # and warn that "jiff-tzdb is published": a sentence with the version
           # missing out of it, about a lookup that never happened.
           if [ -z "$latest" ]; then
             echo "stale=unknown" >> "$GITHUB_OUTPUT"
-            echo "::warning::Could not read the crates.io index, so whether chrono-tz has moved on from the resolved $used is unknown. The build itself is unaffected."
+            echo "::warning::Could not read the crates.io index, so whether $crate has moved on from the resolved $used is unknown. The build itself is unaffected."
           elif [ "$used" != "$latest" ]; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::chrono-tz $latest is published but this build resolved $used. If the series changed (e.g. 0.10 -> 0.11), bump the requirement in Cargo.toml or the bundled tzdata will stop updating."
+            echo "::warning::$crate $latest is published but this build resolved $used. If the series changed (e.g. 1.x -> 2.0), bump the requirement in Cargo.toml or the bundled tzdata will stop updating."
           else
             echo "stale=false" >> "$GITHUB_OUTPUT"
           fi
@@ -630,7 +639,7 @@ jobs:
           chmod +x ~/.local/bin/csvdt
           \`\`\`
 
-          \`Cargo.lock\` records the exact dependency versions this build resolved, including the chrono-tz release that supplied the time zone database (the committed lock of that version with only chrono-tz updated). \`BUILD-INFO\` records the commit, compiler and dependency fingerprint it was produced from, and \`VERSION\` holds the exact string this build's \`--version\` prints. Between them they are enough to stand the build environment up again and compile the same source with the same dependencies. To cite the build behind a particular result, keep the output of \`csvdt --version\` alongside it.
+          \`Cargo.lock\` records the exact dependency versions this build resolved, including the jiff-tzdb release that supplied the time zone database (the committed lock of that version with only jiff-tzdb updated; chrono-tz for a version released before the move to jiff). \`BUILD-INFO\` records the commit, compiler and dependency fingerprint it was produced from, and \`VERSION\` holds the exact string this build's \`--version\` prints. Between them they are enough to stand the build environment up again and compile the same source with the same dependencies. To cite the build behind a particular result, keep the output of \`csvdt --version\` alongside it.
 
           A build only gets published when the source, the dependencies or the compiler actually changed, so months in which nothing moved have no release of their own; the preceding one still describes the binary in use.
           EOF
@@ -803,7 +812,7 @@ jobs:
       # archive entry is one build among many. Somebody reproducing an old
       # result needs the answer, because the binary carries the time zone
       # database it was compiled with and rebuilding the tag does not: the
-      # tag's committed Cargo.lock names the chrono-tz it was released with,
+      # tag's committed Cargo.lock names the jiff-tzdb it was released with,
       # and today's build has moved it on to today's zone rules.
       #
       # Only on a tag push, which is the one moment the answer is being
@@ -974,6 +983,7 @@ jobs:
         env:
           CHANGED_CHANGED: ${{ steps.changed.outputs.changed }}
           FINGERPRINT_FP: ${{ steps.fingerprint.outputs.fp }}
+          FRESHNESS_CRATE: ${{ steps.freshness.outputs.crate }}
           FRESHNESS_LATEST: ${{ steps.freshness.outputs.latest }}
           FRESHNESS_STALE: ${{ steps.freshness.outputs.stale }}
           FRESHNESS_USED: ${{ steps.freshness.outputs.used }}
@@ -1002,10 +1012,10 @@ jobs:
             echo "- csvdt: \`${VERSION_CSVDT}\`"
             echo "- bundled tzdata: \`${VERSION_TZDATA}\`"
             echo "- build fingerprint: \`${FINGERPRINT_FP}\`"
-            echo "- chrono-tz resolved: \`${FRESHNESS_USED}\` (latest published: \`${FRESHNESS_LATEST}\`)"
+            echo "- ${FRESHNESS_CRATE} resolved: \`${FRESHNESS_USED}\` (latest published: \`${FRESHNESS_LATEST}\`)"
             if [ "${FRESHNESS_STALE}" = "true" ]; then
               echo ""
-              echo "> A newer chrono-tz exists than this build resolved. If the version series changed, update the requirement in \`Cargo.toml\`."
+              echo "> A newer ${FRESHNESS_CRATE} exists than this build resolved. If the version series changed, update the requirement in \`Cargo.toml\`."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
