@@ -703,8 +703,9 @@ else is discovered from the binary, so the front end needs no change when
 csvdt gains an option. A test holds each of the four to an option csvdt still
 reports, and another asserts no fifth name has crept in.
 
-The front end for the Tuatara editor, naming the first three of those options,
-lives with Tuatara's own packages, in
+The front end for the Tuatara editor, naming the same four options and
+refusing a region run under `--comment` in the same way, lives with Tuatara's
+own packages, in
 [Tuatara-Editor/tuatara-packages](https://github.com/Tuatara-Editor/tuatara-packages):
 
 ```lisp
