@@ -21,7 +21,9 @@ CSVDT=/path/to/csvdt ./run-checks.sh
 Every check is seeded, so a failure repeats: run it again with the same
 `SEED` and the same case comes back. Exits non-zero if anything is found.
 Needs `python3`; the Emacs checks are skipped with a note if no `emacs` is on
-the path. The whole set takes a minute and a half, most of it in the three that build large fixtures on disk: `memory.py`, `timing.py` and `canonical.py`.
+the path. The whole set takes a minute and a half, most of it in the three
+that build large fixtures on disk: `memory.py`, `timing.py` and
+`canonical.py`.
 
 csvdt is rebuilt on the way in, unless `CSVDT` names a binary. Building only
 when missing would let an edited source beside a stale binary be checked as
@@ -77,48 +79,40 @@ decodes text on the way through, and decides which records a selection covers.
 
 ## Whether they work
 
-A check that cannot fail is worse than no check, so these have been run
-against a csvdt broken on purpose. Dropping the last record of every run is
-caught by four of them. Reintroducing the two selection bugs this directory
-grew out of (a selection not reaching out to whole records, and two banked
-stretches sending the same record twice) is caught by `emacs_selection.el`,
-620 and 110 divergences respectively, out of 1170 runs.
+A check that cannot fail is worse than no check, so each has been run against
+a csvdt broken on purpose, with a defect aimed at what it claims, and the one
+that claims that ground has to see it. Examples: `--remove` dropping only its
+first column (`columns.py` alone), durations losing their fraction
+(`durations.py` alone), `--list-options` calling every separator `either`, RFC
+3339 output an hour late, an argument refusal exiting 3, a writer that quotes
+nothing (three checks see it, as a writer defect should be), a selection that
+does not reach out to whole records or sends two banked stretches' record
+twice (`emacs_selection.el`), and the package calling `string-search` or a
+29-only `pos-bol` (`emacs_compat.el`).
 
-`readme_examples.py` was written after four transcripts were found to have
-drifted: two showing a message without the `csvdt: ` prefix added to every
-message after the README was written, one showing a `--version` string no
-build has ever printed, and one carrying an `Error: ` prefix the message does
-not have. All four are caught by editing them back, and the reverse too: a
-message changed in `src/main.rs` and left alone in the README fails it.
+`local_selftest.py` keeps the part of this that needs no second
+implementation: a csvdt that crashes, or answers with nothing, fails the
+checks that would otherwise have had nothing to compare.
 
-Each has also been given a defect aimed at what it claims, one at a time:
-`--remove` dropping only its first column, `--list-options` calling every
-separator `either`, the writer quoting nothing, RFC 3339 output an hour late,
-durations losing their fraction, an argument refusal exiting 3, the package
-calling `string-search`, and each of the two paths csvdt.el sends text
-through losing a character. Every one was caught, and by the check that
-claims that ground: only `columns.py` saw the first, only `durations.py` the
-fifth. The writer defect was seen by three, which is what a defect in the
-writer should do.
+`readme_examples.py` exists because transcripts drift: a message that gained
+the `csvdt: ` prefix, a `--version` string no build printed, an `Error: `
+prefix the message lacks. It fails on each of them edited back in, and on a
+message changed in `src/main.rs` and left alone in the README.
 
-`emacs_compat.el` is the loosest of them and says so in its own comments.
-The version comes from the earliest NEWS mention of a name, which is wrong
-in both directions: `always` arrived in 28.1 and is dated 25.1, because the
-word appears in older prose, and `count-lines` is dated 28.1 because that
-release added an argument to a function older than any of this. The second
-kind is listed in the file with its reason and with the number of arguments
-that reason covers: the excuse for `count-lines` holds while the package
-passes two and lapses the moment it passes the third, which is the argument
-the NEWS entry is about. Written as a bare name it was a permanent silence
-about a symbol whose whole point was that the silence is conditional. A real
-answer would be
-byte-compiling under the oldest supported Emacs; this is the cheap version,
-and it catches what got through before: `string-search`, and a 29-only
-`pos-bol`, both flagged when put back in on purpose.
+`emacs_compat.el` is the loosest of them and says so in its own comments. The
+version comes from the earliest NEWS mention of a name, which is wrong in both
+directions: `always` arrived in 28.1 and is dated 25.1, because the word
+appears in older prose, and `count-lines` is dated 28.1 because that release
+added an argument to a function older than any of this. The second kind is
+listed in the file with its reason and the number of arguments that reason
+covers: the excuse for `count-lines` holds while the package passes two and
+lapses when it passes the third. A real answer would be byte-compiling under
+the oldest supported Emacs; this is the cheap version.
 
 Worth saying what they do not cover, since a green run is easy to over-read.
 They check behaviour against generated input and stated intent. They say
-nothing about performance, nothing about signals or temporary files, and
+nothing about speed beyond the shape `timing.py` and `memory.py` hold,
+nothing about signals or temporary files, and
 nothing about a claim no reference implementation shares: a leap second
 written back as `:60` is something Python simply refuses to read, so no
 comparison here can judge it. Those live in `tests/cli.rs`, where they are
