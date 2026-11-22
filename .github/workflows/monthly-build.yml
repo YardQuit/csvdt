@@ -362,9 +362,14 @@ jobs:
           name: csvdt-x86_64-unknown-linux-musl
           path: binary
 
-      # An artifact does not keep the executable bit.
+      # An artifact does not keep the executable bit. The binary is also
+      # given the name the README and the help call it by, because the
+      # checks come from the tag being built and a tag older than the
+      # harness's own link to it needs the name to be csvdt.
       - name: Make the binary runnable
-        run: chmod +x binary/csvdt-x86_64-unknown-linux-musl
+        run: |
+          mv binary/csvdt-x86_64-unknown-linux-musl binary/csvdt
+          chmod +x binary/csvdt
 
       - name: Install what the checks compare against
         run: sudo apt-get update && sudo apt-get install -y emacs-nox
@@ -374,7 +379,7 @@ jobs:
       # input. Two costs a minute and doubles what the release was shown.
       - name: Run the checks
         env:
-          CSVDT: ${{ github.workspace }}/binary/csvdt-x86_64-unknown-linux-musl
+          CSVDT: ${{ github.workspace }}/binary/csvdt
         run: |
           ./checks/run-checks.sh
           SEED=1 ./checks/run-checks.sh

@@ -142,5 +142,29 @@ class ReleaseRuleTest(unittest.TestCase):
         self.assertFalse(local.releases_differ("2026f", None))
 
 
+class NamedBinaryTest(unittest.TestCase):
+    """readme_examples finds a binary that is not called csvdt.
+
+    A release build's binary is csvdt-x86_64-unknown-linux-musl, and the
+    examples it runs say `csvdt ...`.  Every example came back empty in the
+    release build when only the binary's directory was put on PATH.
+    """
+
+    def test_examples_run_under_another_name(self):
+        real = harness.CSVDT
+        with tempfile.TemporaryDirectory() as directory:
+            renamed = os.path.join(directory, "csvdt-some-target")
+            os.symlink(real, renamed)
+            # A csvdt already on PATH (an installed one) would answer the
+            # examples in place of the binary under test and hide the fault,
+            # so one that always fails stands first on PATH.
+            decoys = os.path.join(directory, "decoys")
+            os.mkdir(decoys)
+            write_stub(decoys, "csvdt", "#!/bin/sh\nexit 99\n")
+            path = decoys + os.pathsep + os.environ.get("PATH", "")
+            done = run_check("readme_examples", renamed, PATH=path)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,29 @@ CSVDT = os.path.abspath(os.environ.get(
     "CSVDT", os.path.join(ROOT, "target", "release", "csvdt")))
 
 
+_named_csvdt = None
+
+
+def shell_env():
+    """The environment for a shell command that calls csvdt by name.
+
+    The README and the help show commands as `csvdt ...`, and a shell finds
+    that name on PATH.  The binary under test need not be called csvdt (a
+    release build's is csvdt-x86_64-unknown-linux-musl), so PATH starts with
+    a directory, made once per process, holding a link called csvdt to it.
+    """
+    global _named_csvdt
+    if _named_csvdt is None:
+        import atexit
+        import shutil
+        import tempfile
+        _named_csvdt = tempfile.mkdtemp(prefix="csvdt-name-")
+        atexit.register(shutil.rmtree, _named_csvdt, True)
+        os.symlink(CSVDT, os.path.join(_named_csvdt, "csvdt"))
+    return {**os.environ,
+            "PATH": _named_csvdt + os.pathsep + os.environ.get("PATH", "")}
+
+
 def crashed(done):
     """Whether a finished run died rather than answered.
 

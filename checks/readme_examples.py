@@ -230,9 +230,7 @@ def help_examples(temporary):
         ran += 1
         done = subprocess.run(["bash", "-c", command], cwd=temporary,
                               capture_output=True, text=True,
-                              env={**os.environ, "PATH":
-                                   os.path.dirname(harness.CSVDT)
-                                   + os.pathsep + os.environ["PATH"]})
+                              env=harness.shell_env())
         got = [line.strip() for line in done.stdout.split("\n")
                if line.strip()]
         if got != shown:
@@ -254,9 +252,7 @@ def main():
             ran += 1
             done = subprocess.run(["bash", "-c", command], cwd=harness.ROOT,
                                   capture_output=True, text=True,
-                                  env={**os.environ, "PATH":
-                                       os.path.dirname(harness.CSVDT)
-                                       + os.pathsep + os.environ["PATH"]})
+                                  env=harness.shell_env())
             # A block showing a message is showing what reached stderr; one
             # showing rows is showing what reached standard output. Both are
             # offered, and the example is right if it matches either.
