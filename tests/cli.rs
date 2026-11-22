@@ -214,13 +214,20 @@ fn with_temp_dir(
 /// directory. The input path, the --fill-log path and the spool's path are
 /// carried as the operating system gives them: the input and the log were
 /// refused by the argument parser, and the spool was reopened by a name made
-/// into text, which pointed at a file that does not exist.
+/// into text, which pointed at a file that does not exist. macOS file systems
+/// refuse such a name outright (EILSEQ, 92), so there is no path to give csvdt
+/// there and the test stands aside.
 #[cfg(unix)]
 #[test]
 fn paths_that_are_not_utf8_are_read_and_written() {
     use std::os::unix::ffi::OsStrExt;
     let dir = tempfile_dir().join(std::ffi::OsStr::from_bytes(b"not-utf8-\xff"));
-    std::fs::create_dir_all(&dir).unwrap();
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        if cfg!(target_os = "macos") && error.raw_os_error() == Some(92) {
+            return;
+        }
+        panic!("cannot make {}: {error}", dir.display());
+    }
     let input = dir.join(std::ffi::OsStr::from_bytes(b"data-\xfe.csv"));
     let log = dir.join(std::ffi::OsStr::from_bytes(b"log-\xfd.csv"));
     std::fs::write(&input, "a,b\n1\n").unwrap();
