@@ -8277,7 +8277,7 @@ fn the_column_exactly_past_the_last_field_is_out_of_bound_for_every_action() {
             .failure()
             .code(1)
             .stderr(predicate::str::contains(
-                "Specified column is out of bound"));
+                "Specified column is out of bound: the header has 2 field(s), counted from 0"));
 
         // And the row path, with no header for the check to happen in first.
         csvdt()
@@ -8287,7 +8287,7 @@ fn the_column_exactly_past_the_last_field_is_out_of_bound_for_every_action() {
             .failure()
             .code(1)
             .stderr(predicate::str::contains(
-                "Specified column is out of bound"));
+                "Specified column is out of bound: record 0 (line: 1) has 2 field(s), counted from 0"));
     }
 }
 

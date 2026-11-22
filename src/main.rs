@@ -1265,7 +1265,8 @@ fn process_stream<R: std::io::Read, W: std::io::Write>(
             // Not stored back into the reader: nothing reads its header state
             // after this point, the loop below only calls read_record, and
             // the writer is handed the record directly.
-            let new_headers = process_headers(headers, args)?;
+            let new_headers = process_headers(&headers, args)
+                .map_err(|error| locate_out_of_bound(error, &headers, true))?;
             if args.output_header {
                 // Asked of the header too, and only when one is actually
                 // written: a run without -p/--print-header puts no header in
@@ -1336,7 +1337,7 @@ fn process_stream<R: std::io::Read, W: std::io::Write>(
             }
         }
         let (edit, new_dt_cache) = plan_row_edit(&record, args, dt_cache)
-            .map_err(|error| locate_out_of_bound(error, &record))?;
+            .map_err(|error| locate_out_of_bound(error, &record, false))?;
         tally.record(&edit);
         // Must be built per row: it borrows `record`, which the next
         // read_record() overwrites, so it cannot be hoisted out of the loop.
@@ -1496,33 +1497,44 @@ fn repeated_column_error(option: &str, column: usize, because: &str) -> Box<dyn 
     ))
 }
 
-fn out_of_bound() -> Box<dyn Error> {
-    Box::new(std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        "Specified column is out of bound"))
+// A column an action names that the record it is measured against does not
+// have. A type of its own, so the caller that knows which record that was
+// can recognise it and say so; see locate_out_of_bound.
+#[derive(Debug)]
+struct OutOfBound;
+
+impl std::fmt::Display for OutOfBound {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("Specified column is out of bound")
+    }
 }
 
-// Attaches which row an out-of-bound column was measured against, in the
-// same terms the CSV reader's own errors use. The bare message names neither
-// the record nor its width, which matters most in a ragged file, where
-// finding the one short row is the task. Recognised by the exact message rather than a type, since
-// out_of_bound is its only source; the header checks keep the bare form, as
-// they are about the arguments rather than any row.
+impl Error for OutOfBound {}
+
+fn out_of_bound() -> Box<dyn Error> {
+    Box::new(OutOfBound)
+}
+
+// Attaches which record an out-of-bound column was measured against, in the
+// same terms the CSV reader's own errors use: "record 3 (line: 4)" for a data
+// row, "the header" for the header. The bare message names neither the
+// record nor its width, which matters most in a ragged file, where finding
+// the one short row is the task. Any other error is handed back as it was.
 fn locate_out_of_bound(
-    error: Box<dyn Error>, record: &csv::StringRecord,
+    error: Box<dyn Error>, record: &csv::StringRecord, header: bool,
 ) -> Box<dyn Error> {
-    if error.to_string() != "Specified column is out of bound" {
+    if !error.is::<OutOfBound>() {
         return error;
     }
-    let location = match record.position() {
-        Some(position) => format!(
+    let location = match (header, record.position()) {
+        (true, _) => "the header".to_string(),
+        (false, Some(position)) => format!(
             "record {} (line: {})", position.record(), position.line()),
-        None => "this record".to_string(),
+        (false, None) => "this record".to_string(),
     };
     Box::new(std::io::Error::new(
         std::io::ErrorKind::InvalidData,
-        format!("Specified column is out of bound: {} has {} field(s), \
-                 counted from 0", location, record.len())))
+        format!("{OutOfBound}: {} has {} field(s), counted from 0", location, record.len())))
 }
 
 // The marker every conversion writes in place of a result it could not
@@ -2123,7 +2135,7 @@ fn format_iso8601_duration(delta: chrono::TimeDelta, round_seconds: bool) -> Str
     result
 }
 
-fn process_headers(headers:csv::StringRecord, args:&ArgumentFlags) -> Result<csv::StringRecord, Box<dyn Error>> {
+fn process_headers(headers: &csv::StringRecord, args: &ArgumentFlags) -> Result<csv::StringRecord, Box<dyn Error>> {
     let mut vecbuff: Vec<&str> = headers.iter().collect();
     let len = vecbuff.len();
     let position = args.insert_position;
@@ -4230,7 +4242,7 @@ mod tests {
             ),
         ];
         for (label, args, input, expected) in cases {
-            let result = process_headers(headers(&input), &args);
+            let result = process_headers(&headers(&input), &args);
             match expected {
                 Some(expected) => {
                     let written = result.unwrap_or_else(|error| panic!("{label}: {error}"));
