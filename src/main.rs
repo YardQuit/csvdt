@@ -56,7 +56,7 @@ enum InsertPosition {
 
 #[derive(Default, Debug, Clone)]
 struct ArgumentFlags {
-    input_file: String,
+    input_file: Option<std::path::PathBuf>, // FILE; None reads standard input
     has_headers: bool,                    // -H
     peek: bool,                           // --peek
     output_header: bool,                  // -p --print-header
@@ -83,7 +83,7 @@ struct ArgumentFlags {
     input_delimiter: Option<char>,        // --read-delimiter
     input_quotes: bool,                   // --single-quotes
     read_as_comment: Option<char>,        // --comment
-    fill_log: Option<String>,             // --fill-log's destination; "-" is stderr
+    fill_log: Option<std::path::PathBuf>, // --fill-log's destination; "-" is stderr
     output_delimiter: Option<char>,       // --print-delimiter
     output_quotes: Quoting,               // --quote
 }
@@ -213,22 +213,21 @@ fn answered(written: std::io::Result<()>) {
 // A destination that does not exist yet cannot be either, and is the ordinary
 // case: nothing is opened and nothing is refused.
 fn refuse_fill_log_that_is_the_input_or_the_output(
-    destination: &str,
-    input_file: &str,
-    reading_stdin: bool,
+    destination: &std::path::Path,
+    input_file: Option<&std::path::Path>,
 ) -> Result<(), Box<dyn Error>> {
-    if destination == "-" {
+    if is_stderr(destination) {
         return Ok(());
     }
     let Ok(existing) = std::fs::File::open(destination) else { return Ok(()) };
     let Some(log) = platform::file_identity(&existing) else { return Ok(()) };
+    let destination = destination.display();
 
-    let input = if reading_stdin {
-        platform::stdin_identity()
-    } else {
-        std::fs::File::open(input_file)
+    let input = match input_file {
+        None => platform::stdin_identity(),
+        Some(path) => std::fs::File::open(path)
             .ok()
-            .and_then(|file| platform::file_identity(&file))
+            .and_then(|file| platform::file_identity(&file)),
     };
     if input == Some(log) {
         return Err(Box::new(std::io::Error::new(
@@ -801,7 +800,7 @@ fn spool(mut input: impl std::io::Read) -> Result<TempSpool, Box<dyn Error>> {
 // process substitution puts behind a filename. Reading one of those twice
 // drains it on the counting pass and leaves the real pass with nothing, or,
 // for a fifo with no further writer, waits for one that never comes.
-fn is_rereadable(path: &str) -> bool {
+fn is_rereadable(path: &std::path::Path) -> bool {
     // Follows symlinks deliberately: /dev/stdin naming a redirected regular
     // file is as re-readable as the file itself.
     std::fs::metadata(path)
@@ -814,16 +813,16 @@ fn is_rereadable(path: &str) -> bool {
 // script's paths that was. A directory is refused here too, rather than at
 // the first read, where it would surface as "Is a directory" from somewhere
 // inside the CSV reader, also without naming it.
-fn open_input(path: &str) -> Result<std::fs::File, Box<dyn Error>> {
+fn open_input(path: &std::path::Path) -> Result<std::fs::File, Box<dyn Error>> {
     let named = |error: std::io::Error| -> Box<dyn Error> {
         Box::new(std::io::Error::new(
-            error.kind(), format!("cannot read '{path}': {error}")))
+            error.kind(), format!("cannot read '{}': {error}", path.display())))
     };
 
     let a_directory = || -> Box<dyn Error> {
         Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("cannot read '{path}': it is a directory, not a file")))
+            format!("cannot read '{}': it is a directory, not a file", path.display())))
     };
 
     match std::fs::File::open(path) {
@@ -853,7 +852,7 @@ fn open_input(path: &str) -> Result<std::fs::File, Box<dyn Error>> {
 // Uses ByteRecord rather than StringRecord: counting fields needs no text, so
 // this pass does no UTF-8 validation and leaves reporting a bad encoding to the
 // real pass, which can point at it properly.
-fn scan_widest_record(args: &ArgumentFlags, path: &str) -> Result<usize, Box<dyn Error>> {
+fn scan_widest_record(args: &ArgumentFlags, path: &std::path::Path) -> Result<usize, Box<dyn Error>> {
     let mut builder = configure_reader(args);
     builder.has_headers(false).flexible(true);
     let mut reader = builder.from_reader(
@@ -910,7 +909,7 @@ fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
     // Standard output was asked about in main, before any of this was
     // parsed. Standard input is asked here, where it is known whether the run
     // is going to read from it at all.
-    if args.input_file.is_empty() {
+    if args.input_file.is_none() {
         platform::require_readable_stdin()?;
     }
     let mut writer = writer_builder.from_writer(std::io::stdout());
@@ -920,30 +919,21 @@ fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
     // again; standard input cannot be rewound, so it is copied to a temporary
     // file first. Either way the counting pass finishes before anything is
     // written, so stdout only ever sees fully padded rows.
-    // Held only so its Drop removes the temporary file at the end of the run;
-    // nothing reads it, hence the underscore.
-    let _spooled: Option<TempSpool>;
-    let source: Option<String> = if !args.input_file.is_empty() {
-        // A named input that cannot be read twice is spooled just as standard
-        // input is. Only Widest reads twice, so nothing else pays for this.
-        if args.fill_mode == FillMode::Widest && !is_rereadable(&args.input_file) {
-            let spool = spool(open_input(&args.input_file)?)?;
-            let path = spool.path.to_string_lossy().into_owned();
-            _spooled = Some(spool);
-            Some(path)
-        } else {
-            _spooled = None;
-            Some(args.input_file.clone())
-        }
-    } else if args.fill_mode == FillMode::Widest {
-        let spool = spool(std::io::stdin())?;
-        let path = spool.path.to_string_lossy().into_owned();
-        _spooled = Some(spool);
-        Some(path)
-    } else {
-        _spooled = None;
-        None
+    // A named input that cannot be read twice is spooled just as standard
+    // input is. Only Widest reads twice, so nothing else pays for this. Held
+    // until the end of the run, when its Drop removes the temporary file; the
+    // run reads the spool by its path, which is kept as the operating system
+    // gave it rather than made into text, so a temporary directory whose name
+    // is not UTF-8 works as well as any other.
+    let spooled = match (&args.input_file, args.fill_mode) {
+        (Some(path), FillMode::Widest) if !is_rereadable(path) => Some(spool(open_input(path)?)?),
+        (None, FillMode::Widest) => Some(spool(std::io::stdin())?),
+        _ => None,
     };
+    let source = spooled
+        .as_ref()
+        .map(|spool| spool.path.as_path())
+        .or(args.input_file.as_deref());
 
     let tally;
     // Opened before the counting pass, so a destination that cannot be
@@ -953,17 +943,17 @@ fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
     let mut fill_log = match &args.fill_log {
         Some(destination) => {
             refuse_fill_log_that_is_the_input_or_the_output(
-                destination, &args.input_file, args.input_file.is_empty())?;
+                destination, args.input_file.as_deref())?;
             Some(FillLog::open(destination)?)
         },
         None => None,
     };
-    let scanned_width = match (&source, args.fill_mode) {
+    let scanned_width = match (source, args.fill_mode) {
         (Some(path), FillMode::Widest) => Some(scan_widest_record(&args, path)?),
         _ => None,
     };
 
-    match &source {
+    match source {
         None => {
             let input = end_in_newline(reject_utf16(std::io::stdin())?, &args);
             let reader = reader_builder.from_reader(input);
@@ -981,14 +971,12 @@ fn reader_writer(args: ArgumentFlags) -> Result<(), Box<dyn Error>> {
                     // --flexible's mode has to be attached with '=', so writing
                     // "-f fix" leaves "fix" sitting where the file goes. Say
                     // that, rather than only reporting a file nobody named.
-                    let looks_like_a_mode = matches!(
-                        args.input_file.as_str(), "fix" | "keep" | "widest");
-                    if args.flexible_record && looks_like_a_mode {
+                    let mode = path.to_str().filter(|name| matches!(*name, "fix" | "keep" | "widest"));
+                    if let (true, Some(mode)) = (args.flexible_record, mode) {
                         return Err(Box::new(std::io::Error::new(
                             std::io::ErrorKind::InvalidInput,
-                            format!("no file named '{}'. If you meant the \
-                                     --flexible mode, attach it: -f={}",
-                                    args.input_file, args.input_file))));
+                            format!("no file named '{mode}'. If you meant the \
+                                     --flexible mode, attach it: -f={mode}"))));
                     }
                     return Err(err);
                 },
@@ -1103,6 +1091,11 @@ fn peek_stream<R: std::io::Read>(
     Ok(peek_table(&rows))
 }
 
+// Whether a --fill-log destination is '-', which means standard error.
+fn is_stderr(destination: &std::path::Path) -> bool {
+    destination.as_os_str() == "-"
+}
+
 // The record-by-record account --fill-log writes.
 //
 // A filling mode changes the input, and the WARNING under --flexible says so:
@@ -1124,17 +1117,18 @@ impl FillLog {
     // '-' means stderr, for looking at a run rather than keeping it. Anything
     // else is a path, created rather than appended to: a log that grew across
     // runs would describe rows from an input that has since changed.
-    fn open(destination: &str) -> Result<Self, Box<dyn Error>> {
-        let sink: Box<dyn std::io::Write> = if destination == "-" {
+    fn open(destination: &std::path::Path) -> Result<Self, Box<dyn Error>> {
+        let sink: Box<dyn std::io::Write> = if is_stderr(destination) {
             Box::new(std::io::stderr())
         } else {
             Box::new(std::fs::File::create(destination).map_err(|error| {
                 std::io::Error::new(
                     error.kind(),
                     format!(
-                        "could not open '{destination}' for '--fill-log': \
+                        "could not open '{}' for '--fill-log': \
                          {error}. Give a path csvdt can write, or '-' for \
-                         standard error"
+                         standard error",
+                        destination.display(),
                     ),
                 )
             })?)
@@ -2407,8 +2401,8 @@ impl Tally {
 // that failed to be written.
 fn report_fill_log(rows: u64, args: &ArgumentFlags) {
     let destination = match args.fill_log.as_deref() {
-        Some("-") => "standard error".to_string(),
-        Some(path) => format!("'{path}'"),
+        Some(path) if is_stderr(path) => "standard error".to_string(),
+        Some(path) => format!("'{}'", path.display()),
         None => return,
     };
     let reference = match args.fill_mode {
@@ -2745,6 +2739,13 @@ fn parse_position_word(word: &str) -> Result<InsertPosition, Box<dyn Error>> {
         })
 }
 
+// The parser for an option that names a file: the value as the operating
+// system gave it, empty or not, and whether or not it is UTF-8.
+fn path_value() -> impl clap::builder::TypedValueParser<Value = std::path::PathBuf> {
+    use clap::builder::TypedValueParser;
+    clap::builder::OsStringValueParser::new().map(std::path::PathBuf::from)
+}
+
 // The format version reported on --list-options' first line. Bump it only if
 // the meaning of a field changes; adding a comment line or an option does not,
 // since consumers are told to skip comments and read fields positionally.
@@ -3014,6 +3015,11 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         .arg(
             clap::Arg::new("input_file")
                 .action(clap::ArgAction::Set)
+                // A path rather than text: a file name need not be UTF-8.
+                // Not clap's own PathBuf parser, which refuses an empty
+                // value with a message of its own before the clearer one
+                // below can be given.
+                .value_parser(path_value())
                 .value_name("FILE")
                 .help(help_summary(FILE))
                 .long_help(FILE)
@@ -3321,6 +3327,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         .arg(
             clap::Arg::new("fill_log")
                 .action(clap::ArgAction::Set)
+                .value_parser(path_value())
                 .value_name("file")
                 .help(help_summary(FILL_LOG))
                 .long_help(FILL_LOG)
@@ -3509,20 +3516,20 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         std::process::exit(0);
     }
 
-    if let Some(value) = matches.get_one::<String>("input_file") {
+    if let Some(value) = matches.get_one::<std::path::PathBuf>("input_file") {
         // An empty file argument is an unset shell variable, "$file" that
         // expanded to nothing, far more often than a request for standard
         // input, which is what leaving it out already means. Read as "no
         // file given" it would silently consume the pipe, or wait on a
         // terminal, where every other unreadable path is named.
-        if value.is_empty() {
+        if value.as_os_str().is_empty() {
             return Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "the file argument is empty, which is usually an unset shell \
                  variable. Give the file you meant, or leave the argument out \
                  to read standard input".to_string())));
         }
-        args.input_file = value.to_string();
+        args.input_file = Some(value.clone());
     }
 
     // Unrecognised is not reachable through clap, which accepts only the
@@ -3539,7 +3546,7 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         args.read_as_comment = Some(parse_single_ascii_char("--comment", value)?);
     }
 
-    if let Some(value) = matches.get_one::<String>("fill_log") {
+    if let Some(value) = matches.get_one::<std::path::PathBuf>("fill_log") {
         args.fill_log = Some(value.clone());
     }
 
@@ -3898,7 +3905,7 @@ mod tests {
         // message says "directory", so the diagnosis is made on this side,
         // and this runs on both, which is the only way to know it holds.
         let directory = std::env::temp_dir();
-        let error = open_input(&directory.to_string_lossy())
+        let error = open_input(&directory)
             .expect_err("a directory is not a readable input")
             .to_string();
         assert!(

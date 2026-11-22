@@ -208,6 +208,40 @@ fn with_temp_dir(
     command
 }
 
+// A file name need not be UTF-8 on Unix, and nor need the temporary
+// directory. The input path, the --fill-log path and the spool's path are
+// carried as the operating system gives them: the input and the log were
+// refused by the argument parser, and the spool was reopened by a name made
+// into text, which pointed at a file that does not exist.
+#[cfg(unix)]
+#[test]
+fn paths_that_are_not_utf8_are_read_and_written() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = tempfile_dir().join(std::ffi::OsStr::from_bytes(b"not-utf8-\xff"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join(std::ffi::OsStr::from_bytes(b"data-\xfe.csv"));
+    let log = dir.join(std::ffi::OsStr::from_bytes(b"log-\xfd.csv"));
+    std::fs::write(&input, "a,b\n1\n").unwrap();
+
+    csvdt()
+        .arg("-f=fix")
+        .arg("--fill-log")
+        .arg(&log)
+        .arg(&input)
+        .assert()
+        .success()
+        .stdout("a,b\n1,\n");
+    assert!(std::fs::read_to_string(&log).unwrap().contains("padded"));
+
+    with_temp_dir(csvdt(), &dir)
+        .arg("-f=widest")
+        .write_stdin("a\n1,2\n")
+        .assert()
+        .success()
+        .stdout("a,\n1,2\n");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // ---- column actions: split / rfc3339 / utc / local / duration / remove ---
 // Every action takes its column number as its own argument (e.g. -s1),
 // glued or space-separated. -i is independent: "-i <col> <mode>".

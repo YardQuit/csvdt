@@ -195,7 +195,7 @@ pub(crate) fn stdout_identity() -> Option<(u64, u64)> {
 // nothing to lose, and a run cannot be both ends of a pipe.
 #[cfg(unix)]
 pub(crate) fn refuse_input_that_is_also_the_output(
-    path: &str,
+    path: &std::path::Path,
     input: &std::fs::File,
 ) -> Result<(), Box<dyn Error>> {
     use std::os::fd::AsFd;
@@ -214,6 +214,7 @@ pub(crate) fn refuse_input_that_is_also_the_output(
     if written_to.dev() != read_from.dev() || written_to.ino() != read_from.ino() {
         return Ok(());
     }
+    let path = path.display();
     Err(Box::new(std::io::Error::new(
         std::io::ErrorKind::InvalidInput,
         format!("'{path}' is both the input and where the output is going. \
@@ -240,7 +241,7 @@ pub(crate) fn refuse_input_that_is_also_the_output(
 // one the run is about to write to.
 #[cfg(windows)]
 pub(crate) fn refuse_input_that_is_also_the_output(
-    path: &str,
+    path: &std::path::Path,
     input: &std::fs::File,
 ) -> Result<(), Box<dyn Error>> {
     use std::os::windows::io::AsRawHandle;
@@ -283,6 +284,7 @@ pub(crate) fn refuse_input_that_is_also_the_output(
     if source != destination {
         return Ok(());
     }
+    let path = path.display();
     Err(Box::new(std::io::Error::new(
         std::io::ErrorKind::InvalidInput,
         format!("'{path}' is both the input and where the output is going. \
@@ -294,7 +296,7 @@ pub(crate) fn refuse_input_that_is_also_the_output(
 
 #[cfg(not(any(unix, windows)))]
 pub(crate) fn refuse_input_that_is_also_the_output(
-    _path: &str,
+    _path: &std::path::Path,
     _input: &std::fs::File,
 ) -> Result<(), Box<dyn Error>> {
     Ok(())
