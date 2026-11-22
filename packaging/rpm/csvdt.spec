@@ -40,10 +40,14 @@ Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Parse CSV files and convert the timestamps in them
 
-# csvdt itself is GPL-3.0-or-later. The crates built into it are permissive
-# and are listed, with their licences, in the LICENSE.dependencies file this
-# build generates and ships.
-License:        GPL-3.0-or-later
+# csvdt itself is GPL-3.0-or-later. The crates built into it are linked in
+# statically, so the tag has to cover their licences too, as the output of
+# %%cargo_license_summary (below, in %%build) listed on 2026-11-22, with the
+# duplicate terms joined. The crates move with every rebuild, so compare the
+# summary in the build log with this line whenever a version is packaged. The
+# per-crate breakdown is in the LICENSE.dependencies file this build
+# generates and ships.
+License:        GPL-3.0-or-later AND MIT AND (MIT OR Apache-2.0) AND (Apache-2.0 OR BSL-1.0) AND (Unlicense OR MIT) AND Unicode-3.0
 URL:            %{forgeurl}
 Source0:        %{forgeurl}/archive/%{version}/%{crate}-%{version}.tar.gz
 Source1:        %{crate}-%{version}-vendor.tar.gz
