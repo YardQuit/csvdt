@@ -806,6 +806,20 @@ fn offset_refuses_a_target_with_anything_around_it() {
     }
 }
 
+// A two-column -d that will not parse is quoted whole, not from the comma on.
+#[test]
+fn duration_quotes_the_whole_value_it_could_not_read() {
+    for value in ["1,0,", "1,x", "x,1", "1,"] {
+        csvdt()
+            .args(["-d", value])
+            .write_stdin("a,b\n")
+            .assert()
+            .failure()
+            .code(100)
+            .stderr(predicate::str::contains(format!("'--duration' was given \"{value}\",")));
+    }
+}
+
 #[test]
 fn duration_single_column_is_computed_row_over_row() {
     csvdt()

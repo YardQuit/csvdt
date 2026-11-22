@@ -1439,20 +1439,30 @@ fn parse_single_ascii_char(option: &str, value: &str) -> Result<char, Box<dyn Er
 // string") names neither the option nor the value, so `-a "1, 2"` would report
 // a problem with a digit without mentioning the space, the list, or --arrange.
 fn invalid_column(option: &str, value: &str, signed: bool) -> Box<dyn Error> {
-    let detail = if value.is_empty() {
+    invalid_column_of(option, value, value, signed)
+}
+
+// The same, for VALUE that failed as one part of WHOLE, which is what the
+// message quotes: -d's "1,0," reported as "0," would show a value nobody
+// typed. The explanation still comes from the part that failed.
+fn invalid_column_of(option: &str, value: &str, whole: &str, signed: bool) -> Box<dyn Error> {
+    let detail = if value.is_empty() && whole.is_empty() {
         "was given an empty column number. A stray comma leaves one empty, as \
          in \"1,\" or \"0,,2\", and so does an unset shell variable.".to_string()
+    } else if value.is_empty() {
+        format!("was given \"{whole}\", which leaves a column number empty. A \
+                 stray comma does that, and so does an unset shell variable.")
     } else if value.chars().any(char::is_whitespace) {
-        format!("was given \"{value}\", which contains a space. Write it \
+        format!("was given \"{whole}\", which contains a space. Write it \
                  without one, and a list of columns as 0,2 rather than 0, 2.")
     } else if !signed && value.starts_with('-') {
-        format!("was given \"{value}\". Columns are counted from 0 upwards, so \
+        format!("was given \"{whole}\". Columns are counted from 0 upwards, so \
                  there is no negative one -- the first column is 0.")
     } else if value.chars().all(|character| character.is_ascii_digit()) {
-        format!("was given \"{value}\", which is too large to be a column \
+        format!("was given \"{whole}\", which is too large to be a column \
                  number.")
     } else {
-        format!("was given \"{value}\", which is not a column number. Columns \
+        format!("was given \"{whole}\", which is not a column number. Columns \
                  are named by position, counted from 0.")
     };
 
@@ -3620,8 +3630,12 @@ fn arguments(mut args: ArgumentFlags) -> Result<ArgumentFlags, Box<dyn Error>> {
         args.action_duration = true;
         match value.split_once(',') {
             Some((first, second)) => {
-                args.selected_column = parse_column("--duration", first)?;
-                let second = parse_column("--duration", second)?;
+                let column = |part: &str| {
+                    part.parse::<usize>()
+                        .map_err(|_| invalid_column_of("--duration", part, value, false))
+                };
+                args.selected_column = column(first)?;
+                let second = column(second)?;
                 // Refused rather than answered. The span between a column and
                 // itself is PT0S on every row, which looks like a measurement
                 // and is not one, and unlike parse_err, nothing in the output
